@@ -1,0 +1,513 @@
+package com.vaultsurvival.plugin.districts;
+
+import com.vaultsurvival.plugin.VaultSurvivalPlugin;
+import com.vaultsurvival.plugin.core.AuditLogger;
+import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.currency.CurrencyService;
+import com.vaultsurvival.plugin.regions.RegionService;
+import com.vaultsurvival.plugin.regions.RegionData;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+
+import java.sql.*;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+/**
+ * Implementation of DistrictService.
+ */
+public class DistrictServiceImpl implements DistrictService {
+
+    private final VaultSurvivalPlugin plugin;
+    private final CurrencyService currency;
+    private final RegionService regions;
+    private final AuditLogger audit;
+    private final MessageFormatter fmt;
+    private final Logger logger;
+    private final Map<Integer, DistrictData.District> districts = new ConcurrentHashMap<>();
+
+    public DistrictServiceImpl(VaultSurvivalPlugin plugin) {
+        this.plugin = plugin;
+        this.currency = plugin.getServiceRegistry().get(CurrencyService.class);
+        this.regions = plugin.getServiceRegistry().get(RegionService.class);
+        this.audit = plugin.getAuditLogger();
+        this.fmt = plugin.getMessageFormatter();
+        this.logger = plugin.getLogger();
+    }
+
+    @Override
+    public DistrictData.District apply(Player founder, String name) {
+        // Check min distance from spawn (1500 blocks)
+        var spawnCity = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.spawncity.SpawnCityService.class);
+        Location spawn = spawnCity.getSpawnLocation();
+        if (spawn == null) spawn = founder.getWorld().getSpawnLocation();
+        String cityName = spawnCity.getCityName();
+        if (founder.getLocation().distance(spawn) < plugin.getConfigManager().getDistrictMinDistanceFromSpawn()) {
+            founder.sendMessage(fmt.error("You must be at least " +
+                plugin.getConfigManager().getDistrictMinDistanceFromSpawn() + " blocks from " + cityName + " to found a district."));
+            return null;
+        }
+
+        // Check distance from other districts
+        int minDist = plugin.getConfigManager().getDistrictMinDistanceBetween();
+        for (var d : districts.values()) {
+            if (d.getWorldName().equals(founder.getWorld().getName())) {
+                double dist = Math.sqrt(
+                    Math.pow(founder.getLocation().getBlockX() - d.getCenterX(), 2) +
+                    Math.pow(founder.getLocation().getBlockZ() - d.getCenterZ(), 2));
+                if (dist < minDist) {
+                    founder.sendMessage(fmt.error("Too close to district '" + d.getName() +
+                        "'. Minimum distance: " + minDist + " blocks."));
+                    return null;
+                }
+            }
+        }
+
+        String sql = "INSERT INTO districts (name, founder_uuid, world, center_x, center_z, status) " +
+                     "VALUES (?, ?, ?, ?, ?, 'APPLICATION')";
+        try (Connection conn = plugin.getDatabase().getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            ps.setString(1, name);
+            ps.setString(2, founder.getUniqueId().toString());
+            ps.setString(3, founder.getWorld().getName());
+            ps.setInt(4, founder.getLocation().getBlockX());
+            ps.setInt(5, founder.getLocation().getBlockZ());
+            ps.executeUpdate();
+
+            ResultSet keys = ps.getGeneratedKeys();
+            if (keys.next()) {
+                int id = keys.getInt(1);
+                DistrictData.District district = new DistrictData.District(id, name,
+                    founder.getUniqueId(), founder.getWorld().getName(),
+                    founder.getLocation().getBlockX(), founder.getLocation().getBlockZ());
+                district.addMember(founder.getUniqueId(), DistrictData.DistrictRole.MAYOR);
+                districts.put(id, district);
+
+                // Persist the founder as first member
+                plugin.getDatabase().executeUpdate(
+                    "INSERT INTO district_members (district_id, player_uuid, role) VALUES (?, ?, 'MAYOR')",
+                    id, founder.getUniqueId().toString());
+
+                audit.log(founder.getUniqueId(), founder.getName(), "DISTRICT_APPLY", "DISTRICT",
+                    String.valueOf(id), "name=" + name);
+
+                founder.sendMessage(fmt.success("District application submitted: &e" + name));
+                founder.sendMessage(fmt.info("An admin will review your application. Use &e/district info " + id));
+                return district;
+            }
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to create district application", e);
+        }
+        return null;
+    }
+
+    @Override
+    public boolean approve(int districtId, UUID adminUuid) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null || d.getStatus() != DistrictData.DistrictStatus.APPLICATION) return false;
+
+        d.setStatus(DistrictData.DistrictStatus.ACTIVE);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "UPDATE districts SET status = 'ACTIVE' WHERE id = ?", districtId);
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to approve district", e);
+        }
+
+        // Auto-create a DISTRICT region (250 block radius)
+        if (regions != null) {
+            var world = Bukkit.getWorld(d.getWorldName());
+            if (world != null) {
+                var region = regions.createRegion("district_" + d.getName(), RegionData.RegionType.DISTRICT,
+                    d.getWorldName(),
+                    d.getCenterX() - 250, world.getMinHeight(), d.getCenterZ() - 250,
+                    d.getCenterX() + 250, world.getMaxHeight(), d.getCenterZ() + 250,
+                    10); // priority 10
+                if (region == null) {
+                    logger.warning("Failed to auto-create region for district " + d.getName());
+                }
+            }
+        }
+
+        audit.log(adminUuid, "ADMIN", "DISTRICT_APPROVE", "DISTRICT",
+            String.valueOf(districtId), "name=" + d.getName());
+
+        var founder = Bukkit.getPlayer(d.getFounderUuid());
+        if (founder != null) {
+            founder.sendMessage(fmt.success("Your district &e" + d.getName() + " &ahas been approved!"));
+        }
+        return true;
+    }
+
+    @Override
+    public boolean reject(int districtId, UUID adminUuid, String reason) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null || d.getStatus() != DistrictData.DistrictStatus.APPLICATION) return false;
+
+        d.setStatus(DistrictData.DistrictStatus.DISBANDED);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "UPDATE districts SET status = 'DISBANDED' WHERE id = ?", districtId);
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to reject district", e);
+        }
+
+        audit.log(adminUuid, "ADMIN", "DISTRICT_REJECT", "DISTRICT",
+            String.valueOf(districtId), "reason=" + reason);
+
+        var founder = Bukkit.getPlayer(d.getFounderUuid());
+        if (founder != null) {
+            founder.sendMessage(fmt.error("Your district application for &e" + d.getName() +
+                " &cwas rejected: " + reason));
+        }
+        return true;
+    }
+
+    @Override
+    public boolean disband(int districtId, UUID actorUuid) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null || d.getStatus() != DistrictData.DistrictStatus.ACTIVE) return false;
+
+        // Only mayor or admin can disband
+        if (!d.isMayor(actorUuid)) {
+            var player = Bukkit.getPlayer(actorUuid);
+            if (player != null && !player.hasPermission("vs.district.admin")) return false;
+        }
+
+        d.setStatus(DistrictData.DistrictStatus.DISBANDED);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "UPDATE districts SET status = 'DISBANDED' WHERE id = ?", districtId);
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to disband district", e);
+        }
+
+        audit.log(actorUuid, Bukkit.getOfflinePlayer(actorUuid).getName(), "DISTRICT_DISBAND",
+            "DISTRICT", String.valueOf(districtId), "");
+        return true;
+    }
+
+    @Override
+    public boolean inviteMember(int districtId, UUID actorUuid, UUID targetUuid) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null || d.getStatus() != DistrictData.DistrictStatus.ACTIVE) return false;
+        if (!d.isCouncil(actorUuid)) return false;
+        if (d.isMember(targetUuid)) return false;
+
+        d.addMember(targetUuid, DistrictData.DistrictRole.CITIZEN);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "INSERT OR IGNORE INTO district_members (district_id, player_uuid, role) VALUES (?, ?, 'CITIZEN')",
+                districtId, targetUuid.toString());
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to invite member", e);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean kickMember(int districtId, UUID actorUuid, UUID targetUuid) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null) return false;
+        if (!d.isCouncil(actorUuid)) return false;
+        if (d.isMayor(targetUuid)) return false; // can't kick mayor
+        if (!d.isMember(targetUuid)) return false;
+
+        d.removeMember(targetUuid);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "DELETE FROM district_members WHERE district_id = ? AND player_uuid = ?",
+                districtId, targetUuid.toString());
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to kick member", e);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean setRole(int districtId, UUID actorUuid, UUID targetUuid, DistrictData.DistrictRole role) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null) return false;
+        if (!d.isMayor(actorUuid)) return false;
+        if (!d.isMember(targetUuid)) return false;
+
+        d.setRole(targetUuid, role);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "UPDATE district_members SET role = ? WHERE district_id = ? AND player_uuid = ?",
+                role.name(), districtId, targetUuid.toString());
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to set role", e);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean depositTreasury(Player player, int districtId, long amount) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null || !d.isMember(player.getUniqueId())) return false;
+
+        long playerCash = currency.getPlayerCashTotal(player.getUniqueId());
+        if (playerCash < amount) {
+            player.sendMessage(fmt.error("You don't have enough cash."));
+            return false;
+        }
+
+        // Directly transfer player's cash to treasury in one DB operation
+        // (avoids the withdrawCash SPENT → updateCashLocation override pattern)
+        try (Connection conn = plugin.getDatabase().getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                long remaining = amount;
+                String findSql = "SELECT cash_uuid, amount FROM cash_items " +
+                                 "WHERE state = 'ACTIVE' AND owner_uuid = ? ORDER BY amount ASC";
+                try (PreparedStatement ps = conn.prepareStatement(findSql)) {
+                    ps.setString(1, player.getUniqueId().toString());
+                    ResultSet rs = ps.executeQuery();
+                    while (rs.next() && remaining > 0) {
+                        UUID cashUuid = UUID.fromString(rs.getString("cash_uuid"));
+                        long cashAmount = rs.getLong("amount");
+                        if (cashAmount <= remaining) {
+                            try (PreparedStatement up = conn.prepareStatement(
+                                    "UPDATE cash_items SET state = 'IN_DISTRICT_TREASURY', location_type = 'TREASURY', " +
+                                    "location_id = ?, owner_uuid = NULL, last_seen_at = datetime('now') WHERE cash_uuid = ?")) {
+                                up.setString(1, String.valueOf(districtId));
+                                up.setString(2, cashUuid.toString());
+                                up.executeUpdate();
+                            }
+                            remaining -= cashAmount;
+                        } else {
+                            try (PreparedStatement up = conn.prepareStatement(
+                                    "UPDATE cash_items SET amount = ?, last_seen_at = datetime('now') WHERE cash_uuid = ?")) {
+                                up.setLong(1, cashAmount - remaining);
+                                up.setString(2, cashUuid.toString());
+                                up.executeUpdate();
+                            }
+                            remaining = 0;
+                        }
+                    }
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to deposit treasury", e);
+            player.sendMessage(fmt.error("Deposit failed. Your cash is safe."));
+            return false;
+        }
+
+        // Remove cash items from player inventory (DB already updated)
+        removeCashFromInventory(player, amount);
+
+        player.sendMessage(fmt.success("Deposited &6" + fmt.formatMoney(amount,
+            plugin.getConfigManager().getCurrencyName(),
+            plugin.getConfigManager().getCurrencyNamePlural()) + " &ainto the district treasury."));
+        return true;
+    }
+
+    private void removeCashFromInventory(Player player, long amount) {
+        long remaining = amount;
+        for (int i = 0; i < player.getInventory().getSize() && remaining > 0; i++) {
+            var item = player.getInventory().getItem(i);
+            if (item != null && currency.isCashItem(item)) {
+                long itemAmount = currency.getCashAmount(item);
+                if (itemAmount <= remaining) {
+                    remaining -= itemAmount;
+                    player.getInventory().setItem(i, null);
+                }
+            }
+        }
+    }
+
+    @Override
+    public boolean withdrawTreasury(Player player, int districtId, long amount) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null || !d.isTreasurer(player.getUniqueId())) {
+            player.sendMessage(fmt.error("Only the mayor or treasurer can withdraw from the treasury."));
+            return false;
+        }
+
+        long balance = getTreasuryBalance(districtId);
+        if (amount > balance) {
+            player.sendMessage(fmt.error("Treasury only has &6" + fmt.formatMoney(balance,
+                plugin.getConfigManager().getCurrencyName(),
+                plugin.getConfigManager().getCurrencyNamePlural())));
+            return false;
+        }
+
+        // Move cash from treasury to player (atomic transaction on single connection)
+        try (Connection conn = plugin.getDatabase().getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                long remaining = amount;
+                String findSql = "SELECT cash_uuid, amount FROM cash_items " +
+                                 "WHERE state = 'IN_DISTRICT_TREASURY' AND location_id = ? ORDER BY amount ASC";
+                try (PreparedStatement ps = conn.prepareStatement(findSql)) {
+                    ps.setString(1, String.valueOf(districtId));
+                    ResultSet rs = ps.executeQuery();
+                    while (rs.next() && remaining > 0) {
+                        UUID cashUuid = UUID.fromString(rs.getString("cash_uuid"));
+                        long cashAmount = rs.getLong("amount");
+                        if (cashAmount <= remaining) {
+                            try (PreparedStatement up = conn.prepareStatement(
+                                    "UPDATE cash_items SET state = 'SPENT' WHERE cash_uuid = ?")) {
+                                up.setString(1, cashUuid.toString());
+                                up.executeUpdate();
+                            }
+                            remaining -= cashAmount;
+                        } else {
+                            try (PreparedStatement up = conn.prepareStatement(
+                                    "UPDATE cash_items SET amount = ? WHERE cash_uuid = ?")) {
+                                up.setLong(1, cashAmount - remaining);
+                                up.setString(2, cashUuid.toString());
+                                up.executeUpdate();
+                            }
+                            remaining = 0;
+                        }
+                    }
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to withdraw treasury", e);
+            player.sendMessage(fmt.error("Withdrawal failed. Treasury is safe — nothing was moved."));
+            return false;
+        }
+
+        // Give minted cash to player
+        var cash = currency.mintCash(amount, player.getUniqueId(), player.getUniqueId());
+        if (player.getInventory().firstEmpty() != -1) {
+            player.getInventory().addItem(cash);
+        } else {
+            player.getWorld().dropItemNaturally(player.getLocation(), cash);
+        }
+
+        player.sendMessage(fmt.success("Withdrew &6" + fmt.formatMoney(amount,
+            plugin.getConfigManager().getCurrencyName(),
+            plugin.getConfigManager().getCurrencyNamePlural()) + " &afrom the district treasury."));
+        return true;
+    }
+
+    @Override
+    public boolean setLaw(int districtId, UUID actorUuid, String lawName, boolean enabled) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null || !d.isCouncil(actorUuid)) return false;
+
+        d.setLaw(lawName, enabled);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "INSERT OR REPLACE INTO district_laws (district_id, law_name, enabled) VALUES (?, ?, ?)",
+                districtId, lawName, enabled ? 1 : 0);
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to set law", e);
+        }
+        return true;
+    }
+
+    @Override
+    public DistrictData.District getDistrict(int districtId) {
+        return districts.get(districtId);
+    }
+
+    @Override
+    public DistrictData.District getPlayerDistrict(UUID playerUuid) {
+        return districts.values().stream()
+            .filter(d -> d.isMember(playerUuid) && d.getStatus() == DistrictData.DistrictStatus.ACTIVE)
+            .findFirst().orElse(null);
+    }
+
+    @Override
+    public List<DistrictData.District> getAllDistricts() {
+        return new ArrayList<>(districts.values());
+    }
+
+    @Override
+    public List<DistrictData.District> getApplications() {
+        return districts.values().stream()
+            .filter(d -> d.getStatus() == DistrictData.DistrictStatus.APPLICATION)
+            .toList();
+    }
+
+    private long getTreasuryBalance(int districtId) {
+        String sql = "SELECT IFNULL(SUM(amount), 0) FROM cash_items " +
+                     "WHERE state = 'IN_DISTRICT_TREASURY' AND location_id = ?";
+        try (Connection conn = plugin.getDatabase().getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, String.valueOf(districtId));
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) return rs.getLong(1);
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to get treasury balance", e);
+        }
+        return 0;
+    }
+
+    @Override
+    public void loadAll() {
+        districts.clear();
+        try (Connection conn = plugin.getDatabase().getConnection()) {
+            // Load districts
+            String sql = "SELECT * FROM districts WHERE status != 'DISBANDED'";
+            try (PreparedStatement ps = conn.prepareStatement(sql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int id = rs.getInt("id");
+                    DistrictData.District d = new DistrictData.District(id,
+                        rs.getString("name"),
+                        UUID.fromString(rs.getString("founder_uuid")),
+                        rs.getString("world"),
+                        rs.getInt("center_x"), rs.getInt("center_z"));
+                    d.setStatus(DistrictData.DistrictStatus.valueOf(rs.getString("status")));
+                    d.setCreatedAt(rs.getString("created_at"));
+                    d.setTreasuryBalance(getTreasuryBalance(id));
+                    districts.put(id, d);
+                }
+            }
+
+            // Load members
+            String memSql = "SELECT * FROM district_members";
+            try (PreparedStatement ps = conn.prepareStatement(memSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int districtId = rs.getInt("district_id");
+                    DistrictData.District d = districts.get(districtId);
+                    if (d != null) {
+                        UUID uuid = UUID.fromString(rs.getString("player_uuid"));
+                        DistrictData.DistrictRole role = DistrictData.DistrictRole.valueOf(rs.getString("role"));
+                        d.addMember(uuid, role);
+                    }
+                }
+            }
+
+            // Load laws
+            String lawSql = "SELECT * FROM district_laws";
+            try (PreparedStatement ps = conn.prepareStatement(lawSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int districtId = rs.getInt("district_id");
+                    DistrictData.District d = districts.get(districtId);
+                    if (d != null) {
+                        d.setLaw(rs.getString("law_name"), rs.getInt("enabled") == 1);
+                    }
+                }
+            }
+
+            logger.info("Loaded " + districts.size() + " districts from database");
+
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to load districts", e);
+        }
+    }
+}
