@@ -34,9 +34,13 @@ public class NpcListener implements Listener {
      */
     @EventHandler(priority = EventPriority.NORMAL)
     public void onPlayerInteractEntity(PlayerInteractEntityEvent event) {
-        if (!(event.getRightClicked() instanceof Interaction interaction)) return;
-
-        NpcData.Npc npc = npcService.getNpcByInteractionUuid(interaction.getUniqueId());
+        NpcData.Npc npc = null;
+        if (event.getRightClicked() instanceof Interaction interaction) {
+            npc = npcService.getNpcByInteractionUuid(interaction.getUniqueId());
+        }
+        if (npc == null) {
+            npc = npcService.getNpcByVisualUuid(event.getRightClicked().getUniqueId());
+        }
         if (npc == null) return;
 
         // Cancel the default interaction (prevent arm swing animation issues)

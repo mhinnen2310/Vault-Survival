@@ -50,18 +50,14 @@ public class FallbackDialogProvider implements DialogProvider {
             if (index >= slots.length) {
                 break;
             }
-            boolean allowed = item.isAllowed(player);
-            Material material = allowed ? item.material() : Material.GRAY_DYE;
+            boolean allowed = true;
+            Material material = item.material();
             guiItems.add(GUIFramework.GUIItem.button(slots[index++], material,
-                (allowed ? "&6" : "&8") + item.label(),
+                "&6" + item.label(),
                 item.lore(allowed),
                 (p, e) -> {
-                    if (item.isAllowed(p)) {
-                        p.closeInventory();
-                        dialogService.runItemCommand(p, item);
-                    } else {
-                        p.sendMessage(plugin.getMessageFormatter().permissionDenied());
-                    }
+                    p.closeInventory();
+                    dialogService.runItemCommand(p, item);
                 }));
         }
 
@@ -74,12 +70,20 @@ public class FallbackDialogProvider implements DialogProvider {
         player.sendMessage(fmt.header(menuType.title()));
         player.sendMessage(fmt.info(menuType.body()));
         for (DialogMenuItem item : items) {
-            if (!item.isAllowed(player)) {
-                continue;
-            }
             player.sendMessage(Component.text("- " + item.label())
                 .clickEvent(ClickEvent.runCommand("/" + item.command()))
                 .hoverEvent(Component.text(item.description())));
         }
+    }
+
+    @Override
+    public boolean openInput(Player player, DialogInputDefinition input) {
+        MessageFormatter fmt = plugin.getMessageFormatter();
+        player.sendMessage(fmt.header(input.title()));
+        player.sendMessage(fmt.info(input.description()));
+        player.sendMessage(Component.text("Type " + input.exampleCommand())
+            .clickEvent(ClickEvent.suggestCommand(input.exampleCommand().replace("<value>", "")))
+            .hoverEvent(Component.text("Click to put the command in chat.")));
+        return true;
     }
 }

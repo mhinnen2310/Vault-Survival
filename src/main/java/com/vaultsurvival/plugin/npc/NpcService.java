@@ -66,6 +66,11 @@ public interface NpcService {
     NpcData.Npc getNpcByInteractionUuid(UUID interactionUuid);
 
     /**
+     * Find an NPC by its visible Bukkit entity UUID.
+     */
+    NpcData.Npc getNpcByVisualUuid(UUID visualUuid);
+
+    /**
      * Get all NPCs.
      */
     List<NpcData.Npc> getAllNpcs();

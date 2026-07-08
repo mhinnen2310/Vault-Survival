@@ -199,3 +199,4 @@ dialogs:
   fallbackToInventoryGui: true
   quickActions:
     enabled: true
+    installDatapackToWorld: true

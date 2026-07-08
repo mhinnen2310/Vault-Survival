@@ -11,4 +11,8 @@ public interface DialogProvider {
     boolean isAvailable();
 
     boolean open(Player player, DialogMenuType menuType, List<DialogMenuItem> items);
+
+    default boolean openInput(Player player, DialogInputDefinition input) {
+        return false;
+    }
 }

@@ -203,6 +203,7 @@ public class ConfigManager {
     public boolean preferNativeDialogs() { return config.getBoolean("dialogs.preferNativeDialogs", true); }
     public boolean fallbackToInventoryGui() { return config.getBoolean("dialogs.fallbackToInventoryGui", true); }
     public boolean areQuickActionsEnabled() { return config.getBoolean("dialogs.quickActions.enabled", true); }
+    public boolean shouldInstallQuickActionsDatapack() { return config.getBoolean("dialogs.quickActions.installDatapackToWorld", true); }
 
     // VS-WorldEdit
     public int getVweMaxBlocks() { return config.getInt("vsworldedit.maxBlocksPerOperation", 50000); }

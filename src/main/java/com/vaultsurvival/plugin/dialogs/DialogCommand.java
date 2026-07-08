@@ -27,6 +27,13 @@ public class DialogCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        if (command.getName().equalsIgnoreCase("vsmenu")
+            && args.length >= 2
+            && args[0].equalsIgnoreCase("input")) {
+            dialogService.openInput(player, args[1]);
+            return true;
+        }
+
         DialogMenuType menuType = command.getName().equalsIgnoreCase("quickactions")
             ? DialogMenuType.MAIN
             : DialogMenuType.from(args.length > 0 ? args[0] : null);
@@ -37,9 +44,19 @@ public class DialogCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1 && command.getName().equalsIgnoreCase("vsmenu")) {
-            return Arrays.stream(DialogMenuType.values())
+            List<String> menuIds = Arrays.stream(DialogMenuType.values())
                 .map(DialogMenuType::id)
                 .filter(id -> id.startsWith(args[0].toLowerCase()))
+                .toList();
+            if ("input".startsWith(args[0].toLowerCase())) {
+                return java.util.stream.Stream.concat(menuIds.stream(), java.util.stream.Stream.of("input")).toList();
+            }
+            return menuIds;
+        }
+        if (args.length == 2 && command.getName().equalsIgnoreCase("vsmenu")
+            && args[0].equalsIgnoreCase("input")) {
+            return dialogService.inputIds().stream()
+                .filter(id -> id.startsWith(args[1].toLowerCase()))
                 .toList();
         }
         return List.of();

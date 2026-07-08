@@ -5,6 +5,7 @@ import io.papermc.paper.registry.data.dialog.ActionButton;
 import io.papermc.paper.registry.data.dialog.DialogBase;
 import io.papermc.paper.registry.data.dialog.action.DialogAction;
 import io.papermc.paper.registry.data.dialog.body.DialogBody;
+import io.papermc.paper.registry.data.dialog.input.DialogInput;
 import io.papermc.paper.registry.data.dialog.type.DialogType;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -40,9 +41,6 @@ public class NativePaperDialogProvider implements DialogProvider {
 
         List<ActionButton> buttons = new ArrayList<>();
         for (DialogMenuItem item : items) {
-            if (!item.isAllowed(player)) {
-                continue;
-            }
             buttons.add(ActionButton.builder(Component.text(item.label()))
                 .tooltip(Component.text(item.description()))
                 .width(200)
@@ -63,6 +61,35 @@ public class NativePaperDialogProvider implements DialogProvider {
                 .afterAction(DialogBase.DialogAfterAction.CLOSE)
                 .build())
             .type(DialogType.multiAction(buttons, exit, 2)));
+
+        player.showDialog(dialog);
+        return true;
+    }
+
+    @Override
+    public boolean openInput(Player player, DialogInputDefinition input) {
+        if (!available) {
+            return false;
+        }
+
+        ActionButton submit = ActionButton.builder(Component.text("Run"))
+            .tooltip(Component.text(input.exampleCommand()))
+            .width(200)
+            .action(DialogAction.commandTemplate(input.commandTemplate()))
+            .build();
+
+        Dialog dialog = Dialog.create(builder -> builder.empty()
+            .base(DialogBase.builder(Component.text(input.title()))
+                .body(List.of(DialogBody.plainMessage(Component.text(input.description()), 300)))
+                .inputs(List.of(DialogInput.text("value", Component.text(input.label()))
+                    .width(300)
+                    .maxLength(256)
+                    .build()))
+                .canCloseWithEscape(true)
+                .pause(false)
+                .afterAction(DialogBase.DialogAfterAction.CLOSE)
+                .build())
+            .type(DialogType.notice(submit)));
 
         player.showDialog(dialog);
         return true;

@@ -8,9 +8,11 @@ import com.vaultsurvival.plugin.core.MessageFormatter;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Interaction;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Villager;
 import org.bukkit.inventory.ItemStack;
 
 import java.io.InputStreamReader;
@@ -28,10 +30,12 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Implementation of NpcService using NMS packet manipulation for real player-model NPCs
- * and Bukkit Interaction entities for click detection.
+ * Implementation of NpcService using Bukkit entities for reliable visible NPCs
+ * and Interaction entities for click detection.
  *
- * Skin textures are fetched from the Mojang API.
+ * Older generated code attempted packet-only player NPCs. Current Paper builds can
+ * change those constructors, causing invisible bodies with only nametags. The Bukkit
+ * visual keeps existing NPC data/actions working without external plugins.
  * NPCs persist in the SQLite database and are respawned on server restart.
  */
 public class NpcServiceImpl implements NpcService {
@@ -128,14 +132,7 @@ public class NpcServiceImpl implements NpcService {
         NpcData.Npc npc = npcs.remove(npcId);
         if (npc == null) return false;
 
-        // Despawn from all players
         despawnNpcFromAll(npc);
-
-        // Remove interaction entity
-        if (npc.getInteractionUuid() != null) {
-            var entity = Bukkit.getEntity(npc.getInteractionUuid());
-            if (entity != null) entity.remove();
-        }
 
         // Remove from database
         try {
@@ -305,14 +302,19 @@ public class NpcServiceImpl implements NpcService {
                     sendPacket(connection, packet);
                 } catch (Exception ignored) {}
             }
-
-            // Remove interaction entity
-            if (npc.getInteractionUuid() != null) {
-                var entity = Bukkit.getEntity(npc.getInteractionUuid());
-                if (entity != null) entity.remove();
-            }
         } catch (Exception e) {
-            logger.log(Level.WARNING, "Failed to despawn NPC " + npc.getId(), e);
+            logger.log(Level.FINE, "Legacy packet despawn skipped for NPC " + npc.getId() + ": " + e.getMessage());
+        }
+
+        if (npc.getInteractionUuid() != null) {
+            var entity = Bukkit.getEntity(npc.getInteractionUuid());
+            if (entity != null) entity.remove();
+            npc.setInteractionUuid(null);
+        }
+        if (npc.getVisualUuid() != null) {
+            var entity = Bukkit.getEntity(npc.getVisualUuid());
+            if (entity != null) entity.remove();
+            npc.setVisualUuid(null);
         }
     }
 
@@ -320,28 +322,7 @@ public class NpcServiceImpl implements NpcService {
         World world = Bukkit.getWorld(npc.getWorldName());
         if (world == null || !world.equals(player.getWorld())) return;
 
-        // Only spawn NPCs that are in the same world as the player
-        // (nearby NPCs will auto-appear when player loads the chunk)
-
-        // Fetch skin texture asynchronously
-        CompletableFuture.runAsync(() -> {
-            SkinTexture skin = fetchSkin(npc.getSkinUsername());
-            if (skin == null) return;
-
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                try {
-                    sendSpawnPackets(npc, player, skin);
-                    playerNpcEntities.computeIfAbsent(player.getUniqueId(),
-                        k -> ConcurrentHashMap.newKeySet()).add(npc.getEntityId());
-                } catch (Exception e) {
-                    logger.log(Level.FINE, "Failed to spawn NPC for player " +
-                        player.getName() + ": " + e.getMessage());
-                }
-            });
-        });
-
-        // Spawn the Interaction entity synchronously
-        Bukkit.getScheduler().runTask(plugin, () -> spawnInteractionEntity(npc));
+        Bukkit.getScheduler().runTask(plugin, () -> spawnBukkitNpc(npc));
     }
 
     // ========================================================================
@@ -494,6 +475,42 @@ public class NpcServiceImpl implements NpcService {
         npc.setInteractionUuid(interaction.getUniqueId());
     }
 
+    private void spawnBukkitNpc(NpcData.Npc npc) {
+        World world = Bukkit.getWorld(npc.getWorldName());
+        if (world == null) return;
+
+        Entity existingVisual = npc.getVisualUuid() != null ? Bukkit.getEntity(npc.getVisualUuid()) : null;
+        Entity existingInteraction = npc.getInteractionUuid() != null ? Bukkit.getEntity(npc.getInteractionUuid()) : null;
+        if (existingVisual != null && existingVisual.isValid()
+            && existingInteraction != null && existingInteraction.isValid()) {
+            return;
+        }
+
+        Location loc = new Location(world, npc.getX(), npc.getY(), npc.getZ(), npc.getYaw(), npc.getPitch());
+
+        if (existingVisual != null) {
+            existingVisual.remove();
+        }
+
+        Villager villager = world.spawn(loc, Villager.class, spawned -> {
+            spawned.customName(MessageFormatter.deserializeLegacy(npc.getName()));
+            spawned.setCustomNameVisible(true);
+            spawned.setAI(false);
+            spawned.setInvulnerable(true);
+            spawned.setSilent(true);
+            spawned.setCollidable(false);
+            spawned.setRemoveWhenFarAway(false);
+            spawned.setPersistent(false);
+            spawned.setAdult();
+            spawned.setProfession(Villager.Profession.NONE);
+            spawned.setVillagerType(Villager.Type.PLAINS);
+            spawned.teleport(loc);
+        });
+        npc.setVisualUuid(villager.getUniqueId());
+
+        spawnInteractionEntity(npc);
+    }
+
     // ========================================================================
     // Handle Interaction
     // ========================================================================
@@ -633,6 +650,13 @@ public class NpcServiceImpl implements NpcService {
     }
 
     @Override
+    public NpcData.Npc getNpcByVisualUuid(UUID visualUuid) {
+        return npcs.values().stream()
+            .filter(n -> visualUuid.equals(n.getVisualUuid()))
+            .findFirst().orElse(null);
+    }
+
+    @Override
     public List<NpcData.Npc> getAllNpcs() {
         return new ArrayList<>(npcs.values());
     }
@@ -675,10 +699,7 @@ public class NpcServiceImpl implements NpcService {
                     " (" + skinUsername + ") at " + worldName);
             }
 
-            // Spawn all for online players
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                spawnAllToPlayer(player);
-            }
+            npcs.values().forEach(this::spawnBukkitNpc);
 
             logger.info("Loaded " + npcs.size() + " NPCs from database");
 
@@ -783,6 +804,7 @@ public class NpcServiceImpl implements NpcService {
         npc.getShopItems().addAll(old.getShopItems());
         npc.setEntityId(old.getEntityId());
         npc.setInteractionUuid(old.getInteractionUuid());
+        npc.setVisualUuid(old.getVisualUuid());
         return npc;
     }
 

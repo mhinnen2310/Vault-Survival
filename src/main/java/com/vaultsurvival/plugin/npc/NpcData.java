@@ -10,7 +10,7 @@ import java.util.UUID;
 /**
  * Data models for the NPC system.
  *
- * NPCs are fake player entities with real Mojang skins.
+ * NPCs use a visible Bukkit entity with an Interaction hitbox.
  * They support commands, custom shops, and integration with other modules
  * (Auction Hall, market desks, etc.).
  */
@@ -67,8 +67,9 @@ public class NpcData {
         private final boolean lookAtPlayers;
 
         // Runtime state (not persisted)
-        private int entityId = -1; // The NMS entity ID
+        private int entityId = -1; // Legacy packet entity ID, kept for old data compatibility
         private UUID interactionUuid; // The Bukkit Interaction entity UUID
+        private UUID visualUuid; // The visible Bukkit entity UUID
 
         public Npc(int id, String name, String skinUsername, String worldName,
                    double x, double y, double z, float yaw, float pitch,
@@ -107,6 +108,9 @@ public class NpcData {
 
         public UUID getInteractionUuid() { return interactionUuid; }
         public void setInteractionUuid(UUID uuid) { this.interactionUuid = uuid; }
+
+        public UUID getVisualUuid() { return visualUuid; }
+        public void setVisualUuid(UUID uuid) { this.visualUuid = uuid; }
 
         public Location getLocation() {
             var world = org.bukkit.Bukkit.getWorld(worldName);

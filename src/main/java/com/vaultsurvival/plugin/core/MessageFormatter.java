@@ -144,13 +144,13 @@ public class MessageFormatter {
      * Build a header line for GUI or chat.
      */
     public String header(String title) {
-        return "&8&m---&r &6&l" + title + " &8&m---";
+        return colorize("&8&m---&r &6&l" + title + " &8&m---");
     }
 
     /**
      * Format a list of items with index numbers.
      */
     public String listItem(int index, String item) {
-        return "&8" + index + ". &7" + item;
+        return colorize("&8" + index + ". &7" + item);
     }
 }
