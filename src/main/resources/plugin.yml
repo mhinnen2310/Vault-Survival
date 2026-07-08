@@ -1,0 +1,259 @@
+name: VaultSurvival
+version: 1.0.1
+main: com.vaultsurvival.plugin.VaultSurvivalPlugin
+api-version: '1.21'
+description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
+author: VaultSurvivalTeam
+website: https://github.com/mhinnen2310/Vault-Survival
+
+# Database is required - plugin will not function without PostgreSQL
+depend: []
+softdepend: []
+
+commands:
+  vs:
+    description: Vault Survival core commands
+    usage: /vs <version|reload|update>
+    aliases: []
+  spawncity:
+    description: Spawn City management
+    usage: /spawncity <info|setname|setspawn|teleport>
+  rank:
+    description: Manage player ranks and permissions
+    usage: /rank <player> <set|add|remove|info> [group]
+    permission: vs.admin.rank
+  cash:
+    description: Admin cash management tools
+    usage: /cash <inspect|trace|mint|invalidate|scan|stats>
+    permission: vs.cash.admin
+  vault:
+    description: Vault management commands
+    usage: /vault <place|remove|info|deposit|withdraw|access|repair|list>
+    permission: vs.vault.use
+  staffmode:
+    description: Toggle staff mode with inventory separation and abuse protection
+    usage: /staffmode [* [player]]
+  breach:
+    description: Vault breaching commands
+    usage: /breach <kit|start|cancel|log|logplayer|escapecooldown>
+    permission: vs.breach.use
+  vsgive:
+    description: Spawn custom plugin items for testing (staffmode bypass only)
+    usage: /vsgive <cash|breachkit|vault> [amount]
+  ah:
+    description: Physical Auction Hall commands
+    usage: /ah <sell|buy|listings|collect|cancel|inspect>
+    permission: vs.market.buy
+  npc:
+    description: NPC management commands
+    usage: /npc <create|remove|movehere|skin|command|shop|market|additem|clearitems|list|tphere>
+    permission: vs.npc.admin
+  region:
+    description: Region management commands
+    usage: /region <wand|create|delete|info|flag|list|here>
+    permission: vs.region.admin
+  district:
+    description: District foundation commands
+    usage: /district <apply|approve|reject|info|invite|kick|role|deposit|withdraw|law|list|disband|applications>
+  damage:
+    description: Temporary damage management commands
+    usage: /damage <info|list|restore>
+    permission: vs.damage.use
+  repair:
+    description: Repairmen system commands
+    usage: /repair <status|pay|emergency>
+  crime:
+    description: Crime and police commands
+    usage: /crime <wanted|record|bounty|arrest|fine>
+  displays:
+    description: Display Auction Hall management
+    usage: /displays <add|remove|list|refresh>
+    permission: vs.display.admin
+  friend:
+    description: Friend management
+    usage: /friend <add|remove|list>
+  group:
+    description: Player group management
+    usage: /group <create|disband|invite|accept|kick|leave|info>
+  station:
+    description: Station travel system
+    usage: /station <create|remove|list|travel>
+  contract:
+    description: Player contracts
+    usage: /contract <create|accept|complete|cancel|list>
+  analytics:
+    description: Server analytics dashboard
+    usage: /analytics
+    permission: vs.admin
+  vsadmin:
+    description: Admin dashboard and management
+    usage: /vsadmin <dashboard|reload|modules>
+    permission: vs.admin
+  store:
+    description: Cosmetic item shop
+    usage: /store <list|buy>
+  vsresourcepack:
+    description: Force-send resource pack
+    usage: /vsresourcepack [player|reload]
+    permission: vs.admin
+  vwe:
+    description: VS-WorldEdit building toolkit
+    usage: /vwe <wand|pos1|pos2|selection|clearselection|fill|replace|walls|outline|floor|ceiling|hollow|cylinder|circle|line|undo|confirm|cancel>
+    permission: vaultsurvival.vwe.use
+    aliases: [//wand, //pos1, //pos2, //selection, //clearselection, //undo, //fill, //replace, //walls, //outline, //floor, //ceiling, //hollow, //cylinder, //circle, //line, //confirm, //cancel]
+  chatpreview:
+    description: Preview your chat format with rank and district labels
+    usage: /chatpreview [message]
+  vsmenu:
+    description: Open the Vault Survival menu
+    usage: /vsmenu [districts|admin|staff|spawncity|vwe|auctionhall|vaults]
+    aliases: [vsm]
+  quickactions:
+    description: Open the Vault Survival quick actions menu
+    usage: /quickactions
+
+permissions:
+  vs.admin.rank:
+    description: Allows managing player ranks
+    default: op
+  vs.cash.admin:
+    description: Allows admin cash management
+    default: op
+  vs.vault.use:
+    description: Allows using vault commands
+    default: false
+  vs.vault.place:
+    description: Allows placing vaults
+    default: false
+  vs.vault.admin.inspect:
+    description: Allows inspecting any vault
+    default: op
+  vs.staffmode.use:
+    description: Allows using staff mode
+    default: op
+  vs.staffmode.bypass:
+    description: Allows bypassing staff mode restrictions (testing only)
+    default: false
+  vs.staffmode.bypass.grant:
+    description: Allows granting bypass to other staff members
+    default: false
+  vs.breach.use:
+    description: Allows breaching vaults
+    default: true
+  vs.breach.admin.kit:
+    description: Allows spawning breach kits
+    default: op
+  vs.breach.admin.log:
+    description: Allows viewing breach logs
+    default: op
+  vs.chat:
+    description: Allows chatting
+    default: true
+  vs.trade:
+    description: Allows trading
+    default: true
+  vs.market.buy:
+    description: Allows buying from the Auction Hall
+    default: true
+  vs.market.sell:
+    description: Allows selling on the Auction Hall
+    default: false
+  vs.market.admin:
+    description: Allows admin Auction Hall commands
+    default: op
+  vs.npc.admin:
+    description: Allows NPC management
+    default: op
+  vs.npc.admin.tp:
+    description: Allows teleporting NPCs
+    default: op
+  vs.region.admin:
+    description: Allows region management
+    default: op
+  vs.district.admin:
+    description: Allows district admin (approve/reject)
+    default: op
+  vs.damage.use:
+    description: Allows viewing temporary damage info
+    default: true
+  vs.damage.admin:
+    description: Allows force-restoring damage and listing all pending
+    default: op
+  vs.repair.use:
+    description: Allows using repair commands
+    default: true
+  vs.repair.emergency:
+    description: Allows emergency repair (council+ districts)
+    default: false
+  vs.crime.admin:
+    description: Allows viewing crime records of other players
+    default: op
+  vs.display.admin:
+    description: Allows managing display auction slots
+    default: op
+  vs.station.admin:
+    description: Allows creating/removing stations
+    default: op
+  vs.admin:
+    description: Full admin access to analytics and dashboard
+    default: op
+  vs.menu:
+    description: Allows opening Vault Survival menus
+    default: true
+  vs.admin.reload:
+    description: Allows reloading config
+    default: op
+  vs.update:
+    description: Allows checking, staging, and installing GitHub release updates
+    default: op
+  vaultsurvival.spawncity.info:
+    description: Allows viewing spawn city info
+    default: true
+  vaultsurvival.spawncity.admin:
+    description: Allows managing spawn city
+    default: op
+  vaultsurvival.vwe.use:
+    description: Allows using VS-WorldEdit
+    default: op
+  vaultsurvival.vwe.admin:
+    description: Allows VWE admin commands
+    default: op
+  vs.vault.place:
+    description: Allows placing vaults
+    default: false
+  vs.friends:
+    description: Allows using friend commands
+    default: false
+  vs.staff.chat:
+    description: Allows using staff chat
+    default: false
+  vs.police.use:
+    description: Allows using police commands
+    default: false
+  vs.district.admin.approve:
+    description: Allows approving district applications
+    default: false
+  vs.*:
+    description: All Vault Survival permissions
+    default: op
+    children:
+      vaultsurvival.vwe.use: true
+      vaultsurvival.vwe.admin: true
+      vaultsurvival.spawncity.admin: true
+      vaultsurvival.spawncity.info: true
+      vs.admin.rank: true
+      vs.admin.reload: true
+      vs.update: true
+      vs.admin: true
+      vs.chat: true
+      vs.trade: true
+      vs.market.buy: true
+      vs.market.sell: true
+      vs.vault.place: true
+      vs.friends: true
+      vs.staff.chat: true
+      vs.staffmode.use: true
+      vs.staffmode.bypass: true
+      vs.staffmode.bypass.grant: true
+      vs.police.use: true
+      vs.district.admin.approve: true

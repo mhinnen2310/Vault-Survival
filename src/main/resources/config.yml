@@ -1,0 +1,201 @@
+# =============================================================================
+# Vault Survival - Main Configuration
+# =============================================================================
+# This is the primary configuration file for the Vault Survival plugin.
+# All gameplay settings are documented here. Edit and restart/reload the server to apply.
+# =============================================================================
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ SERVER SETTINGS                                                          │
+# └──────────────────────────────────────────────────────────────────────────┘
+server:
+  # The server name shown in various places
+  name: "Vault Survival"
+  # Chat prefix shown before all plugin messages (supports & color codes)
+  chat_prefix: "&8[&6VS&8]"
+  # Enable debug logging (verbose - only enable when troubleshooting)
+  debug: false
+
+# Spawn City — the Kingdom capital
+spawn:
+  # Name of the spawn city (configurable)
+  cityName: "Spawn City"
+  # Spawn location (set by /spawncity setspawn)
+  world: "world"
+  x: 0.0
+  y: 64.0
+  z: 0.0
+  yaw: 0.0
+  pitch: 0.0
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ DATABASE                                                                 │
+# └──────────────────────────────────────────────────────────────────────────┘
+database:
+  # SQLite database file name (stored in plugin data folder)
+  file: "vault_survival.db"
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ CHAT FORMATTING                                                          │
+# └──────────────────────────────────────────────────────────────────────────┘
+chat:
+  enabled: true
+  # Format: %rank_label% ┃ %district_label% ┃ player_name > message
+  format: "%rank_label% &8┃ %district_label% &8┃ %player_name% &8> &f%message%"
+  playerNameColor: "&c"
+  noDistrictLabel: "&7OUTLANDS"
+  # Rank labels mapped by access group name (lowercase)
+  rankLabels:
+    owner: "&4&lOWNER"
+    admin: "&c&lADMIN"
+    mod: "&9&lMOD"
+    helper: "&a&lHELPER"
+    builder: "&b&lBUILDER"
+    developer: "&5&lDEV"
+    vip: "&6&lVIP"
+    default: "&7PLAYER"
+  # District label configuration
+  district:
+    enabled: true
+    format: "&e%district%"
+    noDistrict: "&7OUTLANDS"
+  # Show rank prefix before player names in tab list
+  tab_prefix: true
+  # Show rank prefix in player name tags (above head)
+  nametag_prefix: true
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ CURRENCY                                                                 │
+# └──────────────────────────────────────────────────────────────────────────┘
+currency:
+  # Name of a single coin
+  name: "Coin"
+  # Name of multiple coins
+  name_plural: "Coins"
+  # Custom model data ID for cash items (from resource pack)
+  custom_model_data: 1001
+  # Material used for physical cash items
+  material: "GOLD_NUGGET"
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ VAULTS                                                                   │
+# └──────────────────────────────────────────────────────────────────────────┘
+vaults:
+  # Cooldown in minutes before a breached vault can be breached again
+  breach_cooldown_minutes: 60
+  # Maximum percentage that can ever be stolen from a vault (0-100)
+  max_breach_percent: 50.0
+  # Material used for vault blocks in the world
+  vault_material: "BARREL"
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ STAFF MODE                                                               │
+# └──────────────────────────────────────────────────────────────────────────┘
+staffmode:
+  # Whether staff mode swaps inventories (separates staff/gameplay items)
+  separate_inventories: true
+  # Game mode set when entering staff mode (CREATIVE, SPECTATOR, SURVIVAL)
+  gamemode: "CREATIVE"
+  # Effect applied to staff in staffmode to make them visible
+  # Options: GLOWING, NONE
+  visibility_effect: "GLOWING"
+  # Color of the glowing effect (for Paper 1.21+)
+  glow_color: "RED"
+  # Chat prefix shown when staff types while in staffmode
+  staffmode_prefix: "&c[STAFF]"
+  # Allow staffmode users to interact with chests/containers
+  allow_container_interact: false
+  # Allow staffmode users to drop items
+  allow_item_drop: false
+  # Allow staffmode users to pick up items
+  allow_item_pickup: false
+  # Revert all blocks placed/broken in staffmode when toggling off
+  revert_blocks_on_exit: true
+  # Maximum number of blocks tracked per staffmode session (prevents memory issues)
+  max_tracked_blocks: 10000
+  # Players with this permission can bypass ALL staffmode restrictions
+  # Default: only owner rank has this. Use /staffmode * to toggle bypass.
+  bypass_permission: "vs.staffmode.bypass"
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ DISTRICTS                                                                │
+# └──────────────────────────────────────────────────────────────────────────┘
+districts:
+  # Minimum distance (in blocks) from spawn a district must be
+  min_distance_from_spawn: 1500
+  # Minimum distance (in blocks) between district borders
+  min_distance_between: 500
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ RESTORATION                                                              │
+# └──────────────────────────────────────────────────────────────────────────┘
+restoration:
+  # Minutes before structure blocks restore (when repair points available)
+  normal_delay_minutes: 10
+  # Minutes before structure blocks restore (when repair points exhausted)
+  exhausted_delay_minutes: 30
+  # Daily repair points per district repair crew
+  daily_repair_points: 500
+  # Daily wage cost for repair crew (paid from district treasury)
+  daily_wage: 1000
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ MARKET                                                                   │
+# └──────────────────────────────────────────────────────────────────────────┘
+market:
+  # Tax percentage taken from each Auction Hall sale (0-100)
+  tax_percent: 5.0
+  # Default listing duration in hours
+  default_listing_duration_hours: 48
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ BREACH                                                                   │
+# └──────────────────────────────────────────────────────────────────────────┘
+breach:
+  # Maximum distance (blocks) the thief can be from the vault during breach
+  max_distance_blocks: 8
+  # Seconds the thief cannot teleport after any breach (success or fail)
+  escape_cooldown_seconds: 30
+  # Ticks between indicator movements in the Timing Tumbler stage
+  tumbler_speed_ticks: 6
+  # Maximum attempts in the Timing Tumbler stage
+  tumbler_max_attempts: 3
+  # Duration of the Pressure Balance stage (in ticks, 20 ticks = 1 second)
+  pressure_duration_ticks: 80
+  # Time limit for the Final Dial stage (in ticks)
+  dial_time_ticks: 200
+  # Maximum attempts in the Final Dial stage
+  dial_max_attempts: 5
+
+# VS-WorldEdit
+vsworldedit:
+  maxBlocksPerOperation: 50000
+  blocksPerTick: 500
+  maxUndoOperations: 10
+  requireConfirmationAboveBlocks: 10000
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ RESOURCE PACK                                                            │
+# └──────────────────────────────────────────────────────────────────────────┘
+resourcepack:
+  # URL to the server resource pack (leave empty to disable)
+  url: ""
+  # SHA-1 hash of the resource pack file (required for proper loading)
+  hash: ""
+  # Force players to use the resource pack
+  required: false
+
+# GitHub release updater
+updates:
+  enabled: true
+  githubOwner: "mhinnen2310"
+  githubRepo: "Vault-Survival"
+  assetName: "VaultSurvival.jar"
+
+# Native Minecraft dialogs / fallback menus
+dialogs:
+  enabled: true
+  preferNativeDialogs: true
+  fallbackToInventoryGui: true
+  quickActions:
+    enabled: true

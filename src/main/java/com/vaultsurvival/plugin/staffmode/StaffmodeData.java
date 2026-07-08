@@ -1,0 +1,42 @@
+package com.vaultsurvival.plugin.staffmode;
+
+import org.bukkit.inventory.ItemStack;
+
+import java.util.*;
+
+/**
+ * Tracks all state for a player in staff mode.
+ * Stores gameplay inventory separately, tracks block changes for revert,
+ * and manages bypass status.
+ */
+public class StaffmodeData {
+
+    private final UUID playerUuid;
+    private boolean staffModeActive;
+    private boolean bypassMode; // Owner override - bypasses all restrictions
+    private ItemStack[] gameplayInventory;
+    private ItemStack[] gameplayArmor;
+    private final List<BlockChange> blockChanges = new ArrayList<>();
+
+    public StaffmodeData(UUID playerUuid) {
+        this.playerUuid = playerUuid;
+    }
+
+    public UUID getPlayerUuid() { return playerUuid; }
+    public boolean isStaffModeActive() { return staffModeActive; }
+    public void setStaffModeActive(boolean active) { this.staffModeActive = active; }
+    public boolean isBypassMode() { return bypassMode; }
+    public void setBypassMode(boolean bypass) { this.bypassMode = bypass; }
+
+    public ItemStack[] getGameplayInventory() { return gameplayInventory; }
+    public void setGameplayInventory(ItemStack[] inv) { this.gameplayInventory = inv; }
+
+    public ItemStack[] getGameplayArmor() { return gameplayArmor; }
+    public void setGameplayArmor(ItemStack[] armor) { this.gameplayArmor = armor; }
+
+    public List<BlockChange> getBlockChanges() { return blockChanges; }
+    public void addBlockChange(BlockChange change) { blockChanges.add(change); }
+    public void clearBlockChanges() { blockChanges.clear(); }
+
+    public int getBlockChangeCount() { return blockChanges.size(); }
+}
