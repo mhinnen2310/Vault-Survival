@@ -1,58 +1,91 @@
 @echo off
+setlocal
+
+set "PROJECT_DIR=%~dp0"
+set "WRAPPER=%PROJECT_DIR%mvnw.cmd"
+set "FINAL_JAR=%PROJECT_DIR%target\VaultSurvival.jar"
+set "TESTSERVER_PLUGINS=C:\Users\Mitchel\Desktop\MCServer\Vault-src\Vault Survival QWEN3 TESTSERVER\plugins"
+set "DEPLOYED_JAR=%TESTSERVER_PLUGINS%\VaultSurvival.jar"
+
 echo ============================================
 echo   Vault Survival - Dev Build ^& Deploy
 echo ============================================
+echo Project: %PROJECT_DIR%
+echo Test plugins: %TESTSERVER_PLUGINS%
 echo.
 
-cd /d "%~dp0"
+cd /d "%PROJECT_DIR%"
 
-set JAR=target\VaultSurvival-1.0.0.jar
-set PLUGINS=..\Vault Survival QWEN3 TESTSERVER\plugins
+if not exist "%WRAPPER%" (
+    echo ERROR: Maven Wrapper not found:
+    echo   %WRAPPER%
+    echo.
+    echo This project must build with mvnw.cmd, not global mvn.
+    goto fail
+)
+
+if not exist "%TESTSERVER_PLUGINS%" (
+    echo ERROR: Test server plugins folder not found:
+    echo   %TESTSERVER_PLUGINS%
+    goto fail
+)
 
 echo ============================================
 echo   STEP 1: Clean ^& Build
 echo ============================================
-call mvn clean package -DskipTests -q 2>&1
-if %ERRORLEVEL% NEQ 0 (
+echo Running: "%WRAPPER%" clean package
+echo.
+call "%WRAPPER%" clean package
+if errorlevel 1 (
     echo.
     echo ============================================
     echo   BUILD FAILED
     echo ============================================
-    exit /b 1
+    echo Maven output above contains the compile/build error.
+    goto fail
 )
 
+echo.
 echo ============================================
-echo   STEP 2: Verify JAR
+echo   STEP 2: Verify Final JAR
 echo ============================================
-if not exist "%JAR%" (
-    echo ERROR: JAR not found after build!
-    echo Expected: %JAR%
-    exit /b 1
+if not exist "%FINAL_JAR%" (
+    echo ERROR: Build finished but final JAR was not found:
+    echo   %FINAL_JAR%
+    goto fail
 )
-echo JAR found: VaultSurvival-1.0.0.jar
-for %%A in ("%JAR%") do echo Size: %%~zA bytes
+echo Found:
+echo   %FINAL_JAR%
+for %%A in ("%FINAL_JAR%") do echo Size: %%~zA bytes
 
+echo.
 echo ============================================
-echo   STEP 3: Deploy to Test Server
+echo   STEP 3: Deploy To Test Server
 echo ============================================
-copy /y "%JAR%" "%PLUGINS%\VaultSurvival-1.0.0.jar" >nul
-if %ERRORLEVEL% EQU 0 (
-    echo SUCCESS: JAR deployed to test server.
-    echo   %PLUGINS%\VaultSurvival-1.0.0.jar
-) else (
-    echo ERROR: Could not copy JAR. Check path:
-    echo   %PLUGINS%
-    exit /b 1
+copy /Y "%FINAL_JAR%" "%DEPLOYED_JAR%"
+if errorlevel 1 (
+    echo ERROR: Could not copy JAR to:
+    echo   %DEPLOYED_JAR%
+    goto fail
 )
 
 echo.
 echo ============================================
 echo   BUILD ^& DEPLOY COMPLETE
 echo ============================================
-echo   JAR: target\VaultSurvival-1.0.0.jar
-echo   DEPLOYED: %PLUGINS%\VaultSurvival-1.0.0.jar
+echo Deployed:
+echo   %DEPLOYED_JAR%
+for %%A in ("%DEPLOYED_JAR%") do echo Deployed size: %%~zA bytes
 echo.
-echo   Start the test server to verify.
-echo ============================================
+echo Restart/reload the test server to load the new JAR.
+echo.
+goto done
 
+:fail
+echo.
+pause
+exit /b 1
+
+:done
+pause
 exit /b 0

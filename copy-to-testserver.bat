@@ -1,34 +1,49 @@
 @echo off
+setlocal
+
+set "PROJECT_DIR=%~dp0"
+set "FINAL_JAR=%PROJECT_DIR%target\VaultSurvival.jar"
+set "TESTSERVER_PLUGINS=C:\Users\Mitchel\Desktop\MCServer\Vault-src\Vault Survival QWEN3 TESTSERVER\plugins"
+set "DEPLOYED_JAR=%TESTSERVER_PLUGINS%\VaultSurvival.jar"
+
 echo ============================================
-echo   Vault Survival - Deploy to Test Server
+echo   Vault Survival - Copy to Test Server
 echo ============================================
 echo.
 
-cd /d "%~dp0"
-
-set JAR=target\VaultSurvival.jar
-set PLUGINS=..\Vault Survival QWEN3 TESTSERVER\plugins
-
-if not exist "%JAR%" (
-    echo ERROR: JAR not found at %JAR%
-    echo Run build.bat first.
-    exit /b 1
+if not exist "%FINAL_JAR%" (
+    echo ERROR: JAR not found:
+    echo   %FINAL_JAR%
+    echo Run clean-build.bat or dev-build-deploy.bat first.
+    goto fail
 )
 
-if not exist "%PLUGINS%" (
-    echo ERROR: Test server plugins folder not found at %PLUGINS%
-    exit /b 1
+if not exist "%TESTSERVER_PLUGINS%" (
+    echo ERROR: Test server plugins folder not found:
+    echo   %TESTSERVER_PLUGINS%
+    goto fail
 )
 
-echo Copying VaultSurvival.jar to test server...
-copy /y "%JAR%" "%PLUGINS%\VaultSurvival.jar" >nul
-
-if %ERRORLEVEL% EQU 0 (
-    echo SUCCESS: JAR deployed to:
-    echo   %PLUGINS%\VaultSurvival.jar
-) else (
+echo Copying:
+echo   %FINAL_JAR%
+echo To:
+echo   %DEPLOYED_JAR%
+echo.
+copy /Y "%FINAL_JAR%" "%DEPLOYED_JAR%"
+if errorlevel 1 (
     echo FAILED: Could not copy JAR.
-    exit /b 1
+    goto fail
 )
 
+echo.
+echo SUCCESS: JAR deployed.
+for %%A in ("%DEPLOYED_JAR%") do echo Deployed size: %%~zA bytes
+goto done
+
+:fail
+pause
+exit /b 1
+
+:done
+pause
 exit /b 0
