@@ -33,6 +33,8 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
 
     // Pending confirmation: player must /vwe confirm
     private final Map<UUID, VSWorldEditData.ActiveOperation> pendingOps = new ConcurrentHashMap<>();
+    private final Map<UUID, List<VSWorldEditData.BlockPlacement>> pendingPlacementOps = new ConcurrentHashMap<>();
+    private final Map<UUID, PendingPositionOperation> pendingPositionOps = new ConcurrentHashMap<>();
     // Currently running operations
     private final Map<UUID, VSWorldEditData.ActiveOperation> activeOps = new ConcurrentHashMap<>();
 
@@ -182,6 +184,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
 
         if (total > getRequireConfirmationAbove()) {
             pendingOps.put(uuid, op);
+            pendingPlacementOps.put(uuid, placements);
             player.sendMessage(fmt.warn("Operation: &eHOLLOW &e" + total + " blocks (" + wallBlock.name() + " / " + airBlock.name() + ")"));
             player.sendMessage(fmt.warn("Type &e/vwe confirm &eto proceed, or &e/vwe cancel&e to abort."));
             return false;
@@ -208,6 +211,26 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         }
         return startPositionOp(player, VSWorldEditData.OperationType.CIRCLE, material,
             computeCirclePositions(player, radius, 1));
+    }
+
+    @Override
+    public boolean sphere(Player player, int radius, Material material) {
+        if (radius < 1) {
+            player.sendMessage(fmt.error("Radius must be at least 1."));
+            return false;
+        }
+        return startPositionOp(player, VSWorldEditData.OperationType.SPHERE, material,
+            computeSpherePositions(player, radius, false));
+    }
+
+    @Override
+    public boolean hollowSphere(Player player, int radius, Material material) {
+        if (radius < 2) {
+            player.sendMessage(fmt.error("Hollow sphere radius must be at least 2."));
+            return false;
+        }
+        return startPositionOp(player, VSWorldEditData.OperationType.HSPHERE, material,
+            computeSpherePositions(player, radius, true));
     }
 
     @Override
@@ -321,6 +344,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
 
         if (total > getRequireConfirmationAbove()) {
             pendingOps.put(uuid, op);
+            pendingPositionOps.put(uuid, new PendingPositionOperation(positions, material));
             player.sendMessage(fmt.warn("Operation: &e" + type.name() + " " + total + " blocks with " + material.name()));
             player.sendMessage(fmt.warn("Type &e/vwe confirm &eto proceed, or &e/vwe cancel&e to abort."));
             return false;
@@ -347,6 +371,33 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             if (d < 0) { d += 4 * x + 6; }
             else { d += 4 * (x - z) + 10; z--; }
             x++;
+        }
+        return positions;
+    }
+
+    private List<int[]> computeSpherePositions(Player player, int radius, boolean hollow) {
+        Location center = player.getLocation();
+        int cx = center.getBlockX();
+        int cy = center.getBlockY();
+        int cz = center.getBlockZ();
+        List<int[]> positions = new ArrayList<>();
+        int r2 = radius * radius;
+        int inner = Math.max(radius - 1, 0);
+        int inner2 = inner * inner;
+
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    int distance = x * x + y * y + z * z;
+                    if (distance > r2) {
+                        continue;
+                    }
+                    if (hollow && distance < inner2) {
+                        continue;
+                    }
+                    positions.add(new int[]{cx + x, cy + y, cz + z});
+                }
+            }
         }
         return positions;
     }
@@ -533,7 +584,15 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             return false;
         }
         player.sendMessage(fmt.success("Confirmed. Starting " + op.getType().name() + "..."));
-        executeOperation(op, player);
+        List<VSWorldEditData.BlockPlacement> placements = pendingPlacementOps.remove(uuid);
+        PendingPositionOperation positionOperation = pendingPositionOps.remove(uuid);
+        if (placements != null) {
+            executeOperationWithPlacements(op, player, placements);
+        } else if (positionOperation != null) {
+            executeOpWithPositions(op, player, positionOperation.positions(), positionOperation.material());
+        } else {
+            executeOperation(op, player);
+        }
         return true;
     }
 
@@ -544,6 +603,8 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         // Cancel pending
         var pending = pendingOps.remove(uuid);
         if (pending != null) {
+            pendingPlacementOps.remove(uuid);
+            pendingPositionOps.remove(uuid);
             player.sendMessage(fmt.info("Pending operation cancelled."));
             return true;
         }
@@ -662,7 +723,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
                         case FILL -> true;
                         case REPLACE -> loc.getBlock().getType() == op.getSecondaryMaterial();
                         case WALLS, OUTLINE, FLOOR, CEILING -> true; // Pre-filtered positions
-                        case HOLLOW, CYLINDER, CIRCLE, LINE -> true; // Not reached via this path
+                        case HOLLOW, CYLINDER, CIRCLE, SPHERE, HSPHERE, LINE -> true; // Not reached via this path
                     };
 
                     if (shouldPlace) {
@@ -755,9 +816,13 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         pos2Map.remove(uuid);
         undoStacks.remove(uuid);
         pendingOps.remove(uuid);
+        pendingPlacementOps.remove(uuid);
+        pendingPositionOps.remove(uuid);
         var active = activeOps.remove(uuid);
         if (active != null) active.cancel();
     }
+
+    private record PendingPositionOperation(List<int[]> positions, Material material) {}
 
     // ========================================================================
     // Undo

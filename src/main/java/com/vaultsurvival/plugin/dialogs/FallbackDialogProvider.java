@@ -43,10 +43,15 @@ public class FallbackDialogProvider implements DialogProvider {
 
     private void openInventory(Player player, DialogMenuType menuType, List<DialogMenuItem> items) {
         List<GUIFramework.GUIItem> guiItems = new ArrayList<>();
-        int[] slots = {10, 11, 12, 13, 14, 15, 16, 20, 21, 22, 23, 24, 25};
+        int[] slots = {10, 12, 14, 16, 19, 21, 23, 25};
         int index = 0;
+        DialogMenuItem back = null;
 
         for (DialogMenuItem item : items) {
+            if (isBack(item)) {
+                back = item;
+                continue;
+            }
             if (index >= slots.length) {
                 break;
             }
@@ -61,7 +66,16 @@ public class FallbackDialogProvider implements DialogProvider {
                 }));
         }
 
-        guiItems.add(GUIFramework.GUIItem.closeButton(4));
+        if (back != null) {
+            DialogMenuItem backItem = back;
+            guiItems.add(GUIFramework.GUIItem.button(27, backItem.material(), "&6" + backItem.label(),
+                backItem.lore(true),
+                (p, e) -> {
+                    p.closeInventory();
+                    dialogService.runItemCommand(p, backItem);
+                }));
+        }
+        guiItems.add(GUIFramework.GUIItem.closeButton(35));
         plugin.getGuiFramework().openGUI(player, "&6" + menuType.title(), 4, guiItems);
     }
 
@@ -85,5 +99,9 @@ public class FallbackDialogProvider implements DialogProvider {
             .clickEvent(ClickEvent.suggestCommand(input.exampleCommand().replace("<value>", "")))
             .hoverEvent(Component.text("Click to put the command in chat.")));
         return true;
+    }
+
+    private boolean isBack(DialogMenuItem item) {
+        return "Back".equalsIgnoreCase(item.label()) && "vsmenu".equalsIgnoreCase(item.command());
     }
 }

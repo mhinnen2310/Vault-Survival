@@ -1,5 +1,5 @@
 name: VaultSurvival
-version: 1.0.2
+version: 1.0.3
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -98,9 +98,8 @@ commands:
     permission: vs.admin
   vwe:
     description: VS-WorldEdit building toolkit
-    usage: /vwe <wand|pos1|pos2|selection|clearselection|fill|replace|walls|outline|floor|ceiling|hollow|cylinder|circle|line|undo|confirm|cancel>
+    usage: /vwe <wand|pos1|pos2|selection|clearselection|fill|replace|walls|outline|floor|ceiling|hollow|cylinder|circle|sphere|hsphere|line|undo|confirm|cancel>
     permission: vaultsurvival.vwe.use
-    aliases: [//wand, //pos1, //pos2, //selection, //clearselection, //undo, //fill, //replace, //walls, //outline, //floor, //ceiling, //hollow, //cylinder, //circle, //line, //confirm, //cancel]
   chatpreview:
     description: Preview your chat format with rank and district labels
     usage: /chatpreview [message]

@@ -40,12 +40,20 @@ public class NativePaperDialogProvider implements DialogProvider {
         }
 
         List<ActionButton> buttons = new ArrayList<>();
+        DialogMenuItem back = null;
         for (DialogMenuItem item : items) {
-            buttons.add(ActionButton.builder(Component.text(item.label()))
-                .tooltip(Component.text(item.description()))
-                .width(200)
-                .action(DialogAction.staticAction(ClickEvent.runCommand("/" + item.command())))
-                .build());
+            if (isBack(item)) {
+                back = item;
+                continue;
+            }
+            buttons.add(button(item));
+        }
+        if (buttons.size() % 2 != 0) {
+            buttons.add(spacer());
+        }
+        if (back != null) {
+            buttons.add(button(back));
+            buttons.add(spacer());
         }
 
         ActionButton exit = ActionButton.builder(Component.text("Close"))
@@ -64,6 +72,25 @@ public class NativePaperDialogProvider implements DialogProvider {
 
         player.showDialog(dialog);
         return true;
+    }
+
+    private ActionButton button(DialogMenuItem item) {
+        return ActionButton.builder(Component.text(item.label()))
+            .tooltip(Component.text(item.description()))
+            .width(200)
+            .action(DialogAction.staticAction(ClickEvent.runCommand("/" + item.command())))
+            .build();
+    }
+
+    private ActionButton spacer() {
+        return ActionButton.builder(Component.text(" "))
+            .tooltip(Component.text(" "))
+            .width(200)
+            .build();
+    }
+
+    private boolean isBack(DialogMenuItem item) {
+        return "Back".equalsIgnoreCase(item.label()) && "vsmenu".equalsIgnoreCase(item.command());
     }
 
     @Override

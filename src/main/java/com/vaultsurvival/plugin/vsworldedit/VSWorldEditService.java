@@ -41,6 +41,10 @@ public interface VSWorldEditService {
     boolean cylinder(Player player, int radius, int height, Material material);
     /** Create a flat circle centered on the player. */
     boolean circle(Player player, int radius, Material material);
+    /** Create a solid sphere centered on the player. */
+    boolean sphere(Player player, int radius, Material material);
+    /** Create a hollow sphere centered on the player. */
+    boolean hollowSphere(Player player, int radius, Material material);
     /** Create a line from pos1 to pos2. */
     boolean line(Player player, Material material);
 

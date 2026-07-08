@@ -29,10 +29,14 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        // Handle // aliases: extract subcommand from label (e.g. //wand -> wand)
+        // Handle slash aliases when they are dispatched by Bukkit.
         String effectiveCommand = label.toLowerCase();
         if (effectiveCommand.startsWith("//")) {
             effectiveCommand = effectiveCommand.substring(2);
+        } else if (effectiveCommand.startsWith("/")) {
+            effectiveCommand = effectiveCommand.substring(1);
+        }
+        if (!effectiveCommand.equals("vwe")) {
             // Reconstruct args so the alias subcommand becomes args[0]
             if (args.length == 0) {
                 args = new String[]{effectiveCommand};
@@ -69,6 +73,8 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
             case "hollow" -> handleHollow(player, args);
             case "cylinder" -> handleCylinder(player, args);
             case "circle" -> handleCircle(player, args);
+            case "sphere" -> handleSphere(player, args, false);
+            case "hsphere", "hollowsphere" -> handleSphere(player, args, true);
             case "line" -> handleLine(player, args);
             case "confirm" -> { service.confirm(player); yield true; }
             case "cancel" -> { service.cancelOperation(player); yield true; }
@@ -181,6 +187,24 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private boolean handleSphere(Player player, String[] args, boolean hollow) {
+        String usage = hollow ? "/vwe hsphere <radius> <block>" : "/vwe sphere <radius> <block>";
+        if (args.length < 3) { player.sendMessage(fmt.error(usage)); return true; }
+        try {
+            int radius = Integer.parseInt(args[1]);
+            Material m = Material.matchMaterial(args[2].toUpperCase());
+            if (m == null || !m.isBlock()) { player.sendMessage(fmt.error("Unknown block: " + args[2])); return true; }
+            if (hollow) {
+                service.hollowSphere(player, radius, m);
+            } else {
+                service.sphere(player, radius, m);
+            }
+        } catch (NumberFormatException e) {
+            player.sendMessage(fmt.error("Radius must be a number."));
+        }
+        return true;
+    }
+
     private boolean handleLine(Player player, String[] args) {
         if (args.length < 2) { player.sendMessage(fmt.error("/vwe line <block>")); return true; }
         Material m = Material.matchMaterial(args[1].toUpperCase());
@@ -204,6 +228,8 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(fmt.info("/vwe hollow <wall> <air> &8- Hollow with walls"));
         player.sendMessage(fmt.info("/vwe cylinder <radius> <height> <block> &8- Vertical cylinder"));
         player.sendMessage(fmt.info("/vwe circle <radius> <block> &8- Flat circle"));
+        player.sendMessage(fmt.info("/vwe sphere <radius> <block> &8- Solid sphere"));
+        player.sendMessage(fmt.info("/vwe hsphere <radius> <block> &8- Hollow sphere"));
         player.sendMessage(fmt.info("/vwe line <block> &8- Line pos1→pos2"));
         player.sendMessage(fmt.info("/vwe confirm &8- Confirm large operation"));
         player.sendMessage(fmt.info("/vwe cancel &8- Cancel pending/active"));
@@ -214,14 +240,19 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             return Stream.of("wand","pos1","pos2","selection","clearselection","fill","replace","walls","outline",
-                "floor","ceiling","hollow","cylinder","circle","line","confirm","cancel","undo")
+                "floor","ceiling","hollow","cylinder","circle","sphere","hsphere","line","confirm","cancel","undo")
                 .filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length >= 2) {
             String sub = args[0].toLowerCase();
-            if (sub.equals("fill") || sub.equals("walls") || sub.equals("outline"))
+            if (sub.equals("fill") || sub.equals("walls") || sub.equals("outline")
+                || sub.equals("floor") || sub.equals("ceiling") || sub.equals("line"))
                 return blockTabComplete(args[args.length - 1]);
             if (sub.equals("replace") && args.length <= 3)
+                return blockTabComplete(args[args.length - 1]);
+            if ((sub.equals("circle") || sub.equals("sphere") || sub.equals("hsphere")) && args.length == 3)
+                return blockTabComplete(args[args.length - 1]);
+            if (sub.equals("cylinder") && args.length == 4)
                 return blockTabComplete(args[args.length - 1]);
         }
         return List.of();

@@ -7,9 +7,12 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
+
+import java.util.Set;
 
 /**
  * Listener for VWE wand interactions.
@@ -20,10 +23,40 @@ public class VSWorldEditListener implements Listener {
 
     private final VaultSurvivalPlugin plugin;
     private final VSWorldEditService service;
+    private static final Set<String> DOUBLE_SLASH_COMMANDS = Set.of(
+        "wand", "pos1", "pos2", "selection", "clearselection", "undo",
+        "fill", "replace", "walls", "outline", "floor", "ceiling", "hollow",
+        "cylinder", "circle", "sphere", "hsphere", "hollowsphere", "line",
+        "confirm", "cancel"
+    );
 
     public VSWorldEditListener(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
         this.service = plugin.getServiceRegistry().get(VSWorldEditService.class);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onCommandPreprocess(PlayerCommandPreprocessEvent event) {
+        String message = event.getMessage();
+        if (!message.startsWith("//")) {
+            return;
+        }
+
+        String withoutPrefix = message.substring(2);
+        while (withoutPrefix.startsWith("/")) {
+            withoutPrefix = withoutPrefix.substring(1);
+        }
+        if (withoutPrefix.isBlank()) {
+            return;
+        }
+
+        String command = withoutPrefix.split("\\s+", 2)[0].toLowerCase();
+        if (!DOUBLE_SLASH_COMMANDS.contains(command)) {
+            return;
+        }
+
+        event.setCancelled(true);
+        event.getPlayer().performCommand("vwe " + withoutPrefix);
     }
 
     @EventHandler(priority = EventPriority.NORMAL)

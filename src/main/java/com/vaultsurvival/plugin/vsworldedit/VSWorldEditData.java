@@ -28,7 +28,7 @@ public class VSWorldEditData {
     public enum OperationType {
         FILL, REPLACE, WALLS, OUTLINE,
         FLOOR, CEILING, HOLLOW,
-        CYLINDER, CIRCLE, LINE
+        CYLINDER, CIRCLE, SPHERE, HSPHERE, LINE
     }
 
     /**
