@@ -77,17 +77,20 @@ public class EscrowServiceImpl implements EscrowService {
     }
 
     @Override
-    public boolean releaseToPayoutLocker(int contractId, UUID recipientUuid, String details) {
+    public synchronized boolean releaseToPayoutLocker(int contractId, UUID recipientUuid, String details) {
         long amount = getLockedAmount(contractId);
         if (amount <= 0) return false;
         try {
             plugin.getDatabase().executeUpdate(
-                "UPDATE cash_items SET state = 'SPENT', last_seen_at = datetime('now') WHERE location_type = 'CONTRACT_ESCROW' AND location_id = ?",
-                String.valueOf(contractId));
-            plugin.getDatabase().executeUpdate(
                 "UPDATE contract_escrows SET status = 'RELEASED', released_at = ? WHERE contract_id = ? AND status = 'LOCKED'",
                 System.currentTimeMillis(), contractId);
-            payouts.storePayout(recipientUuid, amount, "CONTRACT", String.valueOf(contractId), details);
+            if (payouts.storePayout(recipientUuid, amount, "CONTRACT", String.valueOf(contractId), details) < 0) {
+                plugin.getDatabase().executeUpdate("UPDATE contract_escrows SET status = 'LOCKED', released_at = NULL WHERE contract_id = ? AND status = 'RELEASED'", contractId);
+                return false;
+            }
+            plugin.getDatabase().executeUpdate(
+                "UPDATE cash_items SET state = 'SPENT', last_seen_at = datetime('now') WHERE location_type = 'CONTRACT_ESCROW' AND location_id = ?",
+                String.valueOf(contractId));
             audit.log(contractId, recipientUuid, "ESCROW_RELEASE", amount, details);
             return true;
         } catch (SQLException e) {
@@ -97,17 +100,20 @@ public class EscrowServiceImpl implements EscrowService {
     }
 
     @Override
-    public boolean refundToPayoutLocker(int contractId, UUID payerUuid, String details) {
+    public synchronized boolean refundToPayoutLocker(int contractId, UUID payerUuid, String details) {
         long amount = getLockedAmount(contractId);
         if (amount <= 0) return true;
         try {
             plugin.getDatabase().executeUpdate(
-                "UPDATE cash_items SET state = 'SPENT', last_seen_at = datetime('now') WHERE location_type = 'CONTRACT_ESCROW' AND location_id = ?",
-                String.valueOf(contractId));
-            plugin.getDatabase().executeUpdate(
                 "UPDATE contract_escrows SET status = 'REFUNDED', released_at = ? WHERE contract_id = ? AND status = 'LOCKED'",
                 System.currentTimeMillis(), contractId);
-            payouts.storePayout(payerUuid, amount, "CONTRACT_REFUND", String.valueOf(contractId), details);
+            if (payouts.storePayout(payerUuid, amount, "CONTRACT_REFUND", String.valueOf(contractId), details) < 0) {
+                plugin.getDatabase().executeUpdate("UPDATE contract_escrows SET status = 'LOCKED', released_at = NULL WHERE contract_id = ? AND status = 'REFUNDED'", contractId);
+                return false;
+            }
+            plugin.getDatabase().executeUpdate(
+                "UPDATE cash_items SET state = 'SPENT', last_seen_at = datetime('now') WHERE location_type = 'CONTRACT_ESCROW' AND location_id = ?",
+                String.valueOf(contractId));
             audit.log(contractId, payerUuid, "ESCROW_REFUND", amount, details);
             return true;
         } catch (SQLException e) {

@@ -70,6 +70,10 @@ public class PayoutLockerServiceImpl implements PayoutLockerService {
 
     @Override
     public boolean claim(Player player) {
+        if (currency == null) {
+            player.sendMessage(fmt.error("Currency service is unavailable. Your payout remains locked safely."));
+            return false;
+        }
         List<ContractData.PayoutLockerEntry> pending = getPending(player.getUniqueId());
         if (pending.isEmpty()) {
             player.sendMessage(fmt.info("No pending payouts."));
@@ -99,6 +103,9 @@ public class PayoutLockerServiceImpl implements PayoutLockerService {
             return true;
         } catch (SQLException e) {
             plugin.getLogger().log(Level.WARNING, "Failed to mark payout claimed", e);
+            player.getInventory().removeItem(cash);
+            currency.invalidateCash(cash, "PAYOUT_CLAIM_DATABASE_ROLLBACK");
+            player.sendMessage(fmt.error("Claim could not be completed. Your payout remains in the locker."));
             return false;
         }
     }
