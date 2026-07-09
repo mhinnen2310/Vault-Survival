@@ -35,6 +35,14 @@ public class AccessCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        return execute(sender, args);
+    }
+
+    /**
+     * Shared command entry point. The console bridge calls this directly so a
+     * conflicting Brigadier command cannot prevent local rank administration.
+     */
+    public boolean execute(CommandSender sender, String[] args) {
         // The server console is a trusted local administration channel, not an /op bypass.
         if (!(sender instanceof ConsoleCommandSender) && !sender.hasPermission("vs.admin.rank")) {
             sender.sendMessage(fmt.permissionDenied());

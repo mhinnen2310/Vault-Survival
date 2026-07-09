@@ -34,11 +34,17 @@ public class AccessModule extends Module {
     @Override
     public void onEnable() {
         // Register commands
-        plugin.getCommand("rank").setExecutor(new AccessCommand(plugin));
+        AccessCommand rankCommand = new AccessCommand(plugin);
+        plugin.getCommand("rank").setExecutor(rankCommand);
+        plugin.getCommand("rank").setTabCompleter(rankCommand);
 
         // Handle player join to ensure profile exists
         plugin.getServer().getPluginManager().registerEvents(
             new AccessListener(plugin, accessService), plugin
+        );
+        // Paper/Brigadier can reserve the plain `rank` label for console use.
+        plugin.getServer().getPluginManager().registerEvents(
+            new ConsoleRankCommandListener(rankCommand), plugin
         );
     }
 
