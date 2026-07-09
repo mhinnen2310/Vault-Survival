@@ -192,7 +192,7 @@ public class DialogService {
             case RAIL_ROUTES -> placeholderMenu("Routes", "Use /rail routes to see all routes.", "rail");
             case RAIL_TICKET -> placeholderMenu("Ticket", "Stand on a platform and use /rail travel <routeId>.", "rail");
             case RAIL_JOURNEY -> journeyMenu(player);
-            case ADMIN -> adminMenu();
+            case ADMIN -> adminMenu(player);
             case ADMIN_RANKS -> adminRanksMenu();
             case ADMIN_CASH -> adminCashMenu();
             case ADMIN_NPCS -> adminNpcsMenu();
@@ -200,7 +200,8 @@ public class DialogService {
             case ADMIN_DAMAGE -> adminDamageMenu();
             case ADMIN_DISPLAYS -> adminDisplaysMenu();
             case ADMIN_UPDATES -> adminUpdatesMenu();
-            case STAFF -> staffMenu();
+            case STAFF -> staffMenu(player);
+            case STAFF_QUICK -> staffQuickMenu();
             case STAFF_PLAYERS -> staffPlayersMenu();
             case STAFF_PLAYER_SEARCH -> placeholderMenu("Player Search", "Player search dialog is planned.", "staff");
             case STAFF_PLAYER_LIST -> placeholderMenu("Player List", "Player list dialog is planned.", "staff");
@@ -231,10 +232,13 @@ public class DialogService {
             DialogMenuItem.item("Orders", "Open order placeholders.", "vsmenu orders", null, Material.WRITABLE_BOOK),
             DialogMenuItem.item("Settings", "Open player settings.", "vsmenu settings", null, Material.COMPARATOR),
             DialogMenuItem.item("Guides", "Open guides.", "vsmenu guides", null, Material.BOOK),
-            DialogMenuItem.adminItem("Admin", "Open staff administration shortcuts.", "vsmenu admin", "vs.admin", Material.REDSTONE_BLOCK),
-            DialogMenuItem.adminItem("Staff", "Open staff mode shortcuts.", "vsmenu staff", "vs.staffmode.use", Material.COMPASS),
             DialogMenuItem.item("Vaults", "Open vault management shortcuts.", "vsmenu vaults", "vs.vault.use", Material.BARREL)
         ));
+
+        if (plugin.isStaffModeActive(player.getUniqueId())) {
+            if (hasVsPermission(player, "vs.staffmode.use")) items.add(DialogMenuItem.adminItem("Staff Tools", "Open the staff control room.", "vsmenu staff", "vs.staffmode.use", Material.COMPASS));
+            if (hasVsPermission(player, "vs.admin")) items.add(DialogMenuItem.adminItem("Admin", "Open staff administration tools.", "vsmenu admin", "vs.admin", Material.REDSTONE_BLOCK));
+        }
 
         DistrictData.District district = getDistrict(player);
         if (district == null) {
@@ -716,7 +720,7 @@ public class DialogService {
         );
     }
 
-    private List<DialogMenuItem> adminMenu() {
+    private List<DialogMenuItem> adminMenu(Player player) {
         return List.of(
             DialogMenuItem.adminItem("Players", "Open player administration placeholders.", "vsmenu players", "vs.admin", Material.PLAYER_HEAD),
             DialogMenuItem.adminItem("Security", "Open security dashboard.", "vsmenu security", "vs.admin", Material.SHIELD),
@@ -814,16 +818,19 @@ public class DialogService {
         );
     }
 
-    private List<DialogMenuItem> staffMenu() {
+    private List<DialogMenuItem> staffMenu(Player player) {
         return List.of(
-            DialogMenuItem.adminItem("Players", "Open player staff tools.", "vsmenu players", "vs.staffmode.use", Material.PLAYER_HEAD),
-            DialogMenuItem.adminItem("Reports", "Open reports placeholder.", "vsmenu staff.reports", "vs.staffmode.use", Material.PAPER),
-            DialogMenuItem.adminItem("Security", "Open security tools.", "vsmenu security", "vs.staffmode.use", Material.SHIELD),
-            DialogMenuItem.adminItem("Economy", "Open economy tools.", "vsmenu economy", "vs.staffmode.use", Material.GOLD_INGOT),
-            DialogMenuItem.adminItem("Contracts", "Open contract and escrow tools.", "vsmenu contracts", "vs.admin", Material.WRITABLE_BOOK),
-            DialogMenuItem.adminItem("System", "Open system status.", "vsmenu system", "vs.staffmode.use", Material.COMPARATOR),
-            DialogMenuItem.adminItem("Toggle Staffmode", "Enter or leave staff mode.", "staffmode", "vs.staffmode.use", Material.ENDER_EYE),
-            DialogMenuItem.adminItem("Toggle Bypass", "Toggle staffmode bypass if allowed.", "staffmode *", "vs.staffmode.bypass", Material.NETHER_STAR),
+            DialogMenuItem.adminItem("Quick Actions", "Freeze, inspect, debug, and return shortcuts.", "vsmenu staff.quick", "vs.staffmode.use", Material.LIGHTNING_ROD),
+            DialogMenuItem.adminItem("Player Inspector", "Search players and open audited profiles.", "vsmenu players", "vs.staffinspect", Material.PLAYER_HEAD),
+            DialogMenuItem.adminItem("Reports", "Open report queues.", "vsmenu staff.reports", "vs.staffmode.use", Material.PAPER),
+            DialogMenuItem.adminItem("Security Alerts", "Open security and abuse tools.", "vsmenu security", "vs.staffmode.use", Material.SHIELD),
+            DialogMenuItem.adminItem("Economy Tools", "Cash, vault, and contract oversight.", "vsmenu economy", "vs.cash.admin", Material.GOLD_INGOT),
+            DialogMenuItem.adminItem("Vault Tools", "Inspect vault administration tools.", "vsmenu vaults", "vs.vault.admin.inspect", Material.BARREL),
+            DialogMenuItem.adminItem("District Tools", "Open district moderation tools.", "vsmenu districts", "vs.district.admin", Material.MAP),
+            DialogMenuItem.adminItem("Contract Oversight", "Inspect contracts, escrow, and payouts.", "vsmenu contracts", "vs.admin", Material.WRITABLE_BOOK),
+            DialogMenuItem.adminItem("Region Debug", "Inspect this location's regions and flags.", "vsmenu debug", "vs.region.admin", Material.SPYGLASS),
+            DialogMenuItem.adminItem("System Tools", "Modules, config, updates, and diagnostics.", "vsmenu system", "vs.staffmode.use", Material.COMPARATOR),
+            DialogMenuItem.adminItem("Leave Staffmode", "Return to normal player mode.", "staffmode", "vs.staffmode.use", Material.ENDER_EYE),
             backItem(), homeItem(), closeItem()
         );
     }
@@ -836,6 +843,19 @@ public class DialogService {
             DialogMenuItem.adminItem("Recently Joined", "Show recently active players with pagination.", "staffinspect recent", "vs.staffinspect", Material.CLOCK),
             DialogMenuItem.adminItem("Wanted Players", "Show wanted players with pagination.", "staffinspect wanted", "vs.staffinspect", Material.CROSSBOW),
             DialogMenuItem.adminItem("Frozen Players", "Show players currently frozen by staff.", "staffinspect frozen", "vs.staffinspect", Material.ICE),
+            backItem("staff"), homeItem(), closeItem()
+        );
+    }
+
+    private List<DialogMenuItem> staffQuickMenu() {
+        return List.of(
+            DialogMenuItem.adminItem("Freeze Nearest Player", "Freeze the nearest online player.", "staffinspect freeze", "vs.staffinspect.freeze", Material.ICE),
+            DialogMenuItem.adminItem("Inspect Player", "Search a player and open their profile.", "vsmenu input staffinspect_profile", "vs.staffinspect", Material.PLAYER_HEAD),
+            DialogMenuItem.placeholder("Open Reports", "Report queues are not implemented yet.", Material.PAPER),
+            DialogMenuItem.placeholder("Security Alerts", "Alert routing is not implemented yet.", Material.BELL),
+            DialogMenuItem.adminItem("Region Debug Here", "Show regions and flags at your location.", "region here", "vs.region.admin", Material.SPYGLASS),
+            DialogMenuItem.placeholder("Teleport to Last Alert", "There is no alert location to teleport to yet.", Material.ENDER_PEARL),
+            DialogMenuItem.placeholder("Return to Previous Location", "Staff return-location tracking is not implemented yet.", Material.COMPASS),
             backItem("staff"), homeItem(), closeItem()
         );
     }
@@ -1095,10 +1115,11 @@ public class DialogService {
 
     private boolean canOpenRoute(Player player, DialogMenuType menuType) {
         if (menuType == DialogMenuType.ADMIN || menuType.name().startsWith("ADMIN_")) {
-            return hasVsPermission(player, "vs.admin");
+            return plugin.isStaffModeActive(player.getUniqueId()) && hasVsPermission(player, "vs.admin");
         }
         if (menuType == DialogMenuType.STAFF || menuType.name().startsWith("STAFF_")) {
-            return hasVsPermission(player, "vs.staffmode.use") || hasVsPermission(player, "vs.admin");
+            return plugin.isStaffModeActive(player.getUniqueId())
+                && (hasVsPermission(player, "vs.staffmode.use") || hasVsPermission(player, "vs.admin"));
         }
         return true;
     }

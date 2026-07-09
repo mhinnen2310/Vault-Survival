@@ -38,6 +38,7 @@ public enum DialogMenuType {
     RAIL_JOURNEY("rail.journey", "Journey", "Journey placeholder."),
 
     STAFF("staff.home", "Staff", "Staff mode shortcuts."),
+    STAFF_QUICK("staff.quick", "Quick Actions", "Audited staff shortcuts."),
     STAFF_PLAYERS("staff.players", "Players", "Staff player tools placeholder."),
     STAFF_PLAYER_SEARCH("staff.player.search", "Player Search", "Player search placeholder."),
     STAFF_PLAYER_LIST("staff.player.list", "Player List", "Player list placeholder."),

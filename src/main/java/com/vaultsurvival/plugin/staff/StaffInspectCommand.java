@@ -127,9 +127,9 @@ public final class StaffInspectCommand implements CommandExecutor, TabCompleter,
     }
 
     private void freeze(CommandSender sender, String[] args) {
-        if (args.length < 2) { sender.sendMessage(fmt.error("Usage: /staffinspect <freeze|unfreeze> <player>")); return; }
+        if (args.length < 2 && !args[0].equalsIgnoreCase("freeze")) { sender.sendMessage(fmt.error("Usage: /staffinspect <freeze|unfreeze> <player>")); return; }
         if (!sender.hasPermission("vs.staffinspect.freeze") && !sender.hasPermission("vs.admin")) { sender.sendMessage(fmt.permissionDenied()); return; }
-        Player target = Bukkit.getPlayerExact(args[1]);
+        Player target = args.length >= 2 ? Bukkit.getPlayerExact(args[1]) : nearestPlayer((Player) sender);
         if (target == null) { sender.sendMessage(fmt.error("Player must be online.")); return; }
         boolean enable = args[0].equalsIgnoreCase("freeze");
         if (enable) frozen.add(target.getUniqueId()); else frozen.remove(target.getUniqueId());
@@ -150,6 +150,7 @@ public final class StaffInspectCommand implements CommandExecutor, TabCompleter,
     private int parsePage(String value) { try { return Integer.parseInt(value); } catch (NumberFormatException e) { return 1; } }
     private String safeName(OfflinePlayer player) { return player.getName() == null ? player.getUniqueId().toString() : player.getName(); }
     private void usage(CommandSender sender) { sender.sendMessage(fmt.info("/staffinspect <player>|search <query>|online [page]|recent [page]|wanted [page]|frozen [page]")); }
+    private Player nearestPlayer(Player staff) { return Bukkit.getOnlinePlayers().stream().filter(p -> !p.equals(staff) && p.getWorld().equals(staff.getWorld())).min(Comparator.comparingDouble(p -> p.getLocation().distanceSquared(staff.getLocation()))).orElse(null); }
     private <T> T service(Class<T> type) { try { return plugin.getServiceRegistry().get(type); } catch (RuntimeException ignored) { return null; } }
     @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) { if(args.length==1) return List.of("search","online","recent","wanted","frozen","freeze","unfreeze","tp","bring","spectate","inventory","ender","cash","vaults","roles"); if(args.length==2) return Bukkit.getOnlinePlayers().stream().map(Player::getName).filter(n->n.toLowerCase(Locale.ROOT).startsWith(args[1].toLowerCase(Locale.ROOT))).toList(); return List.of(); }
 }

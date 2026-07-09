@@ -286,6 +286,13 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         return moduleManager;
     }
 
+    /** Staff-only menus must not leak operational tools outside active staffmode. */
+    public boolean isStaffModeActive(java.util.UUID playerUuid) {
+        return staffmodeModule != null
+            && staffmodeModule.getStaffData().containsKey(playerUuid)
+            && staffmodeModule.getStaffData().get(playerUuid).isStaffModeActive();
+    }
+
     public SchedulerHelper getScheduler() {
         return schedulerHelper;
     }
