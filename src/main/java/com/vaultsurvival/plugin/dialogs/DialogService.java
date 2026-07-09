@@ -7,6 +7,8 @@ import com.vaultsurvival.plugin.area.CurrentAreaService;
 import com.vaultsurvival.plugin.chat.ChatChannel;
 import com.vaultsurvival.plugin.chat.ChatChannelService;
 import com.vaultsurvival.plugin.crime.CrimeService;
+import com.vaultsurvival.plugin.currency.CurrencyService;
+import com.vaultsurvival.plugin.currency.CurrencyStats;
 import com.vaultsurvival.plugin.districts.DistrictData;
 import com.vaultsurvival.plugin.districts.DistrictService;
 import org.bukkit.Bukkit;
@@ -17,6 +19,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 
 public class DialogService {
 
@@ -207,11 +212,11 @@ public class DialogService {
             case STAFF_PLAYER_LIST -> placeholderMenu("Player List", "Player list dialog is planned.", "staff");
             case STAFF_PLAYER_PROFILE -> placeholderMenu("Player Profile", "Player profile dialog is planned.", "staff");
             case STAFF_REPORTS -> placeholderMenu("Reports", "Reports are planned for a later sprint.", "staff");
-            case STAFF_SECURITY -> staffSecurityMenu();
-            case STAFF_ECONOMY -> staffEconomyMenu();
+            case STAFF_SECURITY -> staffSecurityMenu(player);
+            case STAFF_ECONOMY -> staffEconomyMenu(player);
             case STAFF_CASH_TRACE -> placeholderMenu("Cash Trace", "Cash trace tooling is planned.", "economy");
-            case STAFF_VAULTS -> vaultMenu();
-            case STAFF_CONTRACTS -> staffContractsMenu();
+            case STAFF_VAULTS -> vaultMenu(player);
+            case STAFF_CONTRACTS -> staffContractsMenu(player);
             case STAFF_DISTRICTS -> placeholderMenu("Districts", "District moderation shortcuts are planned.", "staff");
             case STAFF_POLICE_ABUSE -> placeholderMenu("Police Abuse", "Police abuse review is planned.", "security");
             case STAFF_RAIL -> staffRailMenu();
@@ -220,7 +225,7 @@ public class DialogService {
             case SPAWNCITY -> spawnCityMenu();
             case VWE -> vweMenu();
             case AUCTIONHALL -> auctionHallMenu();
-            case VAULTS -> vaultMenu();
+            case VAULTS -> vaultMenu(player);
         };
     }
 
@@ -860,8 +865,17 @@ public class DialogService {
         );
     }
 
-    private List<DialogMenuItem> staffSecurityMenu() {
+    private List<DialogMenuItem> staffSecurityMenu(Player player) {
         return List.of(
+            metric("Invalid Cash", count("SELECT COUNT(*) FROM cash_items WHERE state='INVALIDATED'"), Material.REDSTONE),
+            metric("Cash Duplicate Signals", count("SELECT COUNT(*) FROM admin_audit_log WHERE action_type LIKE '%DUPLICATE%'"), Material.TRIPWIRE_HOOK),
+            metric("Vault Breaches", count("SELECT COUNT(*) FROM vault_breaches WHERE success=1"), Material.TNT),
+            metric("Contract Abuse Signals", count("SELECT COUNT(*) FROM contract_disputes"), Material.WRITABLE_BOOK),
+            metric("High Risk Players", count("SELECT COUNT(*) FROM wanted_players"), Material.CROSSBOW),
+            DialogMenuItem.placeholder("Anti-Xray", "Anti-Xray hook is not implemented yet.", Material.DEEPSLATE_DIAMOND_ORE),
+            DialogMenuItem.placeholder("Storage Discovery", "ChestESP/storage discovery hook is not implemented yet.", Material.CHEST),
+            DialogMenuItem.placeholder("Movement and Combat Alerts", "Movement/combat scoring hook is not implemented yet.", Material.LEATHER_BOOTS),
+            DialogMenuItem.placeholder("Inventory Exploit Alerts", "Inventory exploit scoring hook is not implemented yet.", Material.HOPPER),
             DialogMenuItem.adminItem("Police Abuse", "Open police abuse placeholder.", "vsmenu staff.police_abuse", "vs.staffmode.use", Material.IRON_BARS),
             DialogMenuItem.adminItem("Region Debug", "Open region debug shortcuts.", "vsmenu debug", "vs.region.admin", Material.SPYGLASS),
             DialogMenuItem.adminItem("Reports", "Open reports placeholder.", "vsmenu staff.reports", "vs.staffmode.use", Material.PAPER),
@@ -869,8 +883,17 @@ public class DialogService {
         );
     }
 
-    private List<DialogMenuItem> staffEconomyMenu() {
+    private List<DialogMenuItem> staffEconomyMenu(Player player) {
+        CurrencyStats stats = currencyStats();
         return List.of(
+            metric("Physical Cash Total", stats.getTotalEverCreated(), Material.GOLD_BLOCK),
+            metric("Cash In Inventories", stats.getTotalCashInCirculation(), Material.GOLD_NUGGET),
+            metric("Cash In Vaults", stats.getTotalCashInVaults(), Material.BARREL),
+            metric("Cash In Lockers", stats.getTotalCashInLockers(), Material.ENDER_CHEST),
+            metric("Cash In Treasuries", stats.getTotalCashInTreasuries(), Material.GOLD_INGOT),
+            metric("Cash In Escrow", stats.getTotalCashInEscrow(), Material.CHEST),
+            metric("Invalid Cash", stats.getTotalCashInvalidated(), Material.REDSTONE),
+            metric("Admin Cash Events", count("SELECT COUNT(*) FROM admin_audit_log WHERE action_type='CASH_CREATE'"), Material.COMMAND_BLOCK),
             DialogMenuItem.adminItem("Cash Admin", "Open cash admin shortcuts.", "vsmenu admin_cash", "vs.cash.admin", Material.GOLD_NUGGET),
             DialogMenuItem.adminItem("Cash Trace", "Open cash trace placeholder.", "vsmenu staff.cash_trace", "vs.cash.admin", Material.SPYGLASS),
             DialogMenuItem.adminItem("Vaults", "Open vault shortcuts.", "vsmenu vaults", "vs.vault.admin.inspect", Material.BARREL),
@@ -879,8 +902,14 @@ public class DialogService {
         );
     }
 
-    private List<DialogMenuItem> staffContractsMenu() {
+    private List<DialogMenuItem> staffContractsMenu(Player player) {
         return List.of(
+            metric("Merchant Orders", count("SELECT COUNT(*) FROM merchant_orders"), Material.EMERALD),
+            metric("District Jobs", count("SELECT COUNT(*) FROM district_jobs"), Material.IRON_PICKAXE),
+            metric("Spawn Jobs", count("SELECT COUNT(*) FROM spawn_city_jobs"), Material.MAP),
+            metric("Disputed Contracts", count("SELECT COUNT(*) FROM contract_disputes"), Material.REDSTONE_TORCH),
+            metric("Escrow Records", count("SELECT COUNT(*) FROM contract_escrows WHERE status='LOCKED'"), Material.CHEST),
+            metric("Cancelled High Value", count("SELECT COUNT(*) FROM contracts WHERE status='CANCELLED' AND amount >= 10000"), Material.GOLD_BLOCK),
             DialogMenuItem.adminItem("Active Contracts", "Show contract debug counts.", "contract debug", "vs.admin", Material.WRITABLE_BOOK),
             DialogMenuItem.adminItem("Escrow Audit", "Show contract audit log.", "contract audit", "vs.admin", Material.SPYGLASS),
             DialogMenuItem.adminItem("Escrow Debug", "List escrow records.", "escrow debug", "vs.admin", Material.CHEST),
@@ -980,8 +1009,16 @@ public class DialogService {
         );
     }
 
-    private List<DialogMenuItem> vaultMenu() {
-        return List.of(
+    private List<DialogMenuItem> vaultMenu(Player player) {
+        List<DialogMenuItem> items = new ArrayList<>();
+        if (plugin.isStaffModeActive(player.getUniqueId()) && hasVsPermission(player, "vs.vault.admin.inspect")) {
+            items.add(metric("All Vaults", count("SELECT COUNT(*) FROM vaults"), Material.BARREL));
+            items.add(metric("High Value Vaults", count("SELECT COUNT(*) FROM (SELECT location_id FROM cash_items WHERE state='IN_VAULT' GROUP BY location_id HAVING SUM(amount) >= 10000)"), Material.GOLD_BLOCK));
+            items.add(metric("Breached Vaults", count("SELECT COUNT(*) FROM vault_breaches WHERE success=1"), Material.TNT));
+            items.add(metric("Lockdown Vaults", count("SELECT COUNT(*) FROM vaults WHERE is_locked_down=1"), Material.IRON_BARS));
+            items.add(DialogMenuItem.adminItem("Vault Audit", "Inspect a vault by UUID.", "vsmenu input vault_inspect", "vs.vault.admin.inspect", Material.SPYGLASS));
+        }
+        items.addAll(List.of(
             DialogMenuItem.item("Info", "Inspect the vault you are looking at.", "vault info", "vs.vault.use", Material.BARREL),
             DialogMenuItem.item("Deposit", "Deposit held cash into a vault.", "vault deposit", "vs.vault.use", Material.HOPPER),
             DialogMenuItem.item("Withdraw", "Withdraw physical cash from the target vault.", "vsmenu input vault_withdraw", "vs.vault.use", Material.DROPPER),
@@ -990,8 +1027,25 @@ public class DialogService {
             DialogMenuItem.item("List", "List your vaults.", "vault list", "vs.vault.use", Material.BOOK),
             DialogMenuItem.item("Place", "Place a vault tier.", "vsmenu input vault_place", "vs.vault.place", Material.CHEST),
             DialogMenuItem.adminItem("Inspect", "Inspect a vault UUID.", "vsmenu input vault_inspect", "vs.vault.admin.inspect", Material.SPYGLASS),
-            backItem()
-        );
+            backItem()));
+        return items;
+    }
+
+    private CurrencyStats currencyStats() {
+        try { return plugin.getServiceRegistry().get(CurrencyService.class).getStats(); }
+        catch (RuntimeException ignored) { return new CurrencyStats(0, 0, 0, 0, 0, 0, 0, 0, 0); }
+    }
+
+    private DialogMenuItem metric(String label, long value, Material material) {
+        return DialogMenuItem.locked(label, "Live count/value: " + value, "Read-only dashboard metric.", material);
+    }
+
+    private long count(String sql) {
+        try (Connection connection = plugin.getDatabase().getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet result = statement.executeQuery()) {
+            return result.next() ? result.getLong(1) : 0L;
+        } catch (Exception ignored) { return 0L; }
     }
 
     private DialogMenuItem backItem() {
