@@ -71,6 +71,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "list" -> handleList(sender);
             case "disband" -> handleDisband(sender);
             case "applications" -> handleApplications(sender);
+            case "station" -> handleStation(sender, args);
             default -> { sendUsage(sender); yield true; }
         };
     }
@@ -539,6 +540,95 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    // ========================================================================
+    // Station Commands (Sprint 11)
+    // ========================================================================
+
+    private boolean handleStation(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(fmt.error("Players only."));
+            return true;
+        }
+        if (args.length < 2) {
+            sender.sendMessage(fmt.info("Usage: &e/district station <status|request|setplatform|setarrival>"));
+            return true;
+        }
+
+        String sub = args[1].toLowerCase();
+        return switch (sub) {
+            case "status" -> handleStationStatus(player);
+            case "request" -> handleStationRequest(player, args);
+            case "setplatform" -> handleStationSetPlatform(player, args);
+            case "setarrival" -> handleStationSetArrival(player, args);
+            default -> { player.sendMessage(fmt.error("Unknown: " + sub)); yield true; }
+        };
+    }
+
+    private boolean handleStationStatus(Player player) {
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            railService.getStationStatus(player);
+        } catch (Exception e) {
+            player.sendMessage(fmt.error("Rail service is not available."));
+        }
+        return true;
+    }
+
+    private boolean handleStationRequest(Player player, String[] args) {
+        if (args.length < 3) {
+            player.sendMessage(fmt.info("Usage: &e/district station request <name>"));
+            return true;
+        }
+        String name = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            railService.requestStation(player, name);
+        } catch (Exception e) {
+            player.sendMessage(fmt.error("Rail service is not available."));
+        }
+        return true;
+    }
+
+    private boolean handleStationSetPlatform(Player player, String[] args) {
+        if (args.length < 3) {
+            player.sendMessage(fmt.info("Usage: &e/district station setplatform <id> [radius]"));
+            return true;
+        }
+        int stationId = parseInt(args[2]);
+        int radius = args.length > 3 ? parseInt(args[3]) : 5;
+        if (radius < 3) radius = 3;
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            if (railService instanceof com.vaultsurvival.plugin.rail.RailServiceImpl impl) {
+                impl.setPlatform(stationId, player, radius);
+            } else {
+                railService.setPlatform(stationId, player);
+            }
+        } catch (Exception e) {
+            player.sendMessage(fmt.error("Rail service is not available."));
+        }
+        return true;
+    }
+
+    private boolean handleStationSetArrival(Player player, String[] args) {
+        if (args.length < 3) {
+            player.sendMessage(fmt.info("Usage: &e/district station setarrival <id>"));
+            return true;
+        }
+        int stationId = parseInt(args[2]);
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            railService.setArrival(stationId, player);
+        } catch (Exception e) {
+            player.sendMessage(fmt.error("Rail service is not available."));
+        }
+        return true;
+    }
+
     private boolean handleApplications(CommandSender sender) {
         if (!sender.hasPermission("vs.district.admin")) {
             sender.sendMessage(fmt.permissionDenied());
@@ -587,6 +677,10 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.header("District Commands"));
         sender.sendMessage(fmt.info("/district apply <name> &8- Found a district"));
         sender.sendMessage(fmt.info("/district info [id] &8- District info"));
+        sender.sendMessage(fmt.info("/district station status &8- Station status"));
+        sender.sendMessage(fmt.info("/district station request <name> &8- Request station"));
+        sender.sendMessage(fmt.info("/district station setplatform <id> [radius] &8- Set platform"));
+        sender.sendMessage(fmt.info("/district station setarrival <id> &8- Set arrival"));
         sender.sendMessage(fmt.info("/district invite <player> &8- Invite to your district"));
         sender.sendMessage(fmt.info("/district kick <player> &8- Kick member"));
         sender.sendMessage(fmt.info("/district role list <player> &8- List district roles"));
@@ -614,7 +708,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
             return Arrays.asList("apply", "current", "approve", "reject", "info", "invite", "kick",
-                "role", "permissions", "members", "deposit", "withdraw", "laws", "law", "jobs", "job", "list", "disband", "applications")
+                "role", "permissions", "members", "deposit", "withdraw", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("job")) {

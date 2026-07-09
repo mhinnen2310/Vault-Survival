@@ -25,7 +25,9 @@ public class NpcData {
         /** Open the Auction Hall listing GUI (integrated with VS-Market). */
         MARKET,
         /** Do nothing — just for decoration. */
-        NONE
+        NONE,
+        /** Open a merchant-owned shop GUI (integrated with VS-Merchant Shops). */
+        MERCHANT_SHOP
     }
 
     /**

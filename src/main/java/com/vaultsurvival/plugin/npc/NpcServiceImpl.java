@@ -536,6 +536,15 @@ public class NpcServiceImpl implements NpcService {
                 // Open Auction Hall listings
                 player.performCommand("ah listings");
             }
+            case MERCHANT_SHOP -> {
+                try {
+                    var shopService = plugin.getServiceRegistry().get(
+                        com.vaultsurvival.plugin.merchant.shop.MerchantShopService.class);
+                    shopService.openShopGui(player, npc.getId());
+                } catch (Exception ex) {
+                    player.sendMessage(fmt.error("Merchant shop service is not available."));
+                }
+            }
             case NONE -> {
                 // Do nothing — decoration NPC
             }

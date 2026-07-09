@@ -1,5 +1,5 @@
 name: VaultSurvival
-version: 1.0.4
+version: 1.0.5
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -80,7 +80,7 @@ commands:
     usage: /group <create|disband|invite|accept|kick|leave|info>
   station:
     description: Station travel system
-    usage: /station <create|remove|list|travel>
+    usage: /station <next|buy|board|journey|list>
   contract:
     description: Player contracts
     usage: /contract <create|accept|complete|cancel|list|debug|audit>
@@ -150,6 +150,12 @@ commands:
     description: Open the Vault Survival menu
     usage: /vsmenu [districts|admin|staff|spawncity|vwe|auctionhall|vaults]
     aliases: [vsm]
+  merchant:
+    description: Merchant buy order management
+    usage: /merchant <orders|order create|order list|order cancel|order deliver>
+  rail:
+    description: Train station and rail network commands
+    usage: /rail <stations|routes|applications|approve|deny|createroute|travel>
   quickactions:
     description: Open the Vault Survival quick actions menu
     usage: /quickactions
@@ -260,6 +266,9 @@ permissions:
   vaultsurvival.vwe.admin:
     description: Allows VWE admin commands
     default: op
+  vs.merchant.use:
+    description: Allows creating and managing merchant buy orders
+    default: false
   vs.friends:
     description: Allows using friend commands
     default: false
@@ -291,6 +300,7 @@ permissions:
       vs.trade: true
       vs.market.buy: true
       vs.market.sell: true
+      vs.merchant.use: true
       vs.vault.place: true
       vs.friends: true
       vs.staff.chat: true

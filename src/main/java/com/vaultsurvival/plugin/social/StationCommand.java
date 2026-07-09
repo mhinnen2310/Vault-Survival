@@ -9,10 +9,12 @@ import java.util.*;
 public class StationCommand implements CommandExecutor, TabCompleter {
     private final StationService service;
     private final MessageFormatter fmt;
+    private final VaultSurvivalPlugin plugin;
 
     public StationCommand(VaultSurvivalPlugin plugin) {
         this.service = plugin.getServiceRegistry().get(StationService.class);
         this.fmt = plugin.getMessageFormatter();
+        this.plugin = plugin;
     }
 
     @Override public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
@@ -23,6 +25,10 @@ public class StationCommand implements CommandExecutor, TabCompleter {
             case "remove" -> handleRemove(player, args);
             case "list" -> handleList(player);
             case "travel" -> handleTravel(player, args);
+            case "next" -> handleNext(player);
+            case "buy" -> handleBuy(player, args);
+            case "board" -> handleBoard(player, args);
+            case "journey" -> handleJourneyStatus(player);
             default -> { sendUsage(player); yield true; }
         };
     }
@@ -65,9 +71,105 @@ public class StationCommand implements CommandExecutor, TabCompleter {
         if (nearest != null) service.travel(nearest.getId(), targetId, player.getUniqueId());
         return true;
     }
+    private boolean handleBuy(Player player, String[] args) {
+        if (args.length < 2) { player.sendMessage(fmt.error("Usage: /station buy <routeId>")); return true; }
+        int routeId = Integer.parseInt(args[1]);
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            if (!railService.startJourney(player, routeId)) {
+                player.sendMessage(fmt.error("Could not buy ticket. Check the route and your location."));
+            }
+        } catch (Exception e) {
+            player.sendMessage(fmt.error("Rail service not available."));
+        }
+        return true;
+    }
+    private boolean handleBoard(Player player, String[] args) {
+        if (args.length < 2) { player.sendMessage(fmt.error("Usage: /station board <routeId>")); return true; }
+        int routeId = Integer.parseInt(args[1]);
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            if (!railService.boardTrain(player, routeId)) {
+                player.sendMessage(fmt.error("Could not board. Check your journey status with /station journey."));
+            }
+        } catch (Exception e) {
+            player.sendMessage(fmt.error("Rail service not available."));
+        }
+        return true;
+    }
+    private boolean handleJourneyStatus(Player player) {
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            var journey = railService.getActiveJourney(player.getUniqueId());
+            if (journey == null) {
+                player.sendMessage(fmt.info("You have no active journey."));
+                return true;
+            }
+            player.sendMessage(fmt.header("Your Journey"));
+            player.sendMessage(fmt.info("Route: &e" + journey.getFromStationName() +
+                " &8→ &f" + journey.getToStationName()));
+            player.sendMessage(fmt.info("Status: &e" + journey.getState().name()));
+            player.sendMessage(fmt.info("Ticket: &6" + fmt.formatMoney(journey.getTicketPrice(),
+                plugin.getConfigManager().getCurrencyName(),
+                plugin.getConfigManager().getCurrencyNamePlural())));
+            if (journey.getState() == com.vaultsurvival.plugin.rail.RailJourneyData.JourneyState.IN_TRANSIT) {
+                player.sendMessage(fmt.info("Time remaining: &e" + journey.getTimeRemaining()));
+            }
+            if (journey.canBoard()) {
+                player.sendMessage(fmt.info("Board with: &e/station board " + journey.getRouteId()));
+            }
+        } catch (Exception e) {
+            player.sendMessage(fmt.info("Rail service not available."));
+        }
+        return true;
+    }
+    private boolean handleNext(Player player) {
+        // Show departures from nearby rail stations
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            var stations = railService.getActiveStations();
+            var routes = railService.getAllRoutes();
+
+            player.sendMessage(fmt.header("Next Departures"));
+            boolean found = false;
+            for (var station : stations) {
+                var stationRoutes = routes.stream()
+                    .filter(r -> r.getFromStationId() == station.getId() &&
+                                 r.getStatus() == com.vaultsurvival.plugin.rail.RailData.RouteStatus.ACTIVE)
+                    .toList();
+                if (!stationRoutes.isEmpty()) {
+                    found = true;
+                    player.sendMessage(fmt.info("&e" + station.getName() + " &7(#" + station.getId() + ")"));
+                    for (var route : stationRoutes) {
+                        var toStation = stations.stream()
+                            .filter(s -> s.getId() == route.getToStationId()).findFirst();
+                        String toName = toStation.map(com.vaultsurvival.plugin.rail.RailData.Station::getName).orElse("?");
+                        player.sendMessage(fmt.info("  &8→ &f" + toName +
+                            " &7| Price: &6" + route.getTicketPrice() +
+                            " &7| Route: &e/rail travel " + route.getId()));
+                    }
+                }
+            }
+            if (!found) {
+                player.sendMessage(fmt.info("No departures available."));
+            }
+        } catch (Exception e) {
+            player.sendMessage(fmt.info("Rail service not available."));
+        }
+        return true;
+    }
+
     private void sendUsage(Player p) {
         p.sendMessage(fmt.header("Station Commands"));
         p.sendMessage(fmt.info("/station list &8- List all stations"));
+        p.sendMessage(fmt.info("/station next &8- Show next departures"));
+        p.sendMessage(fmt.info("/station buy <route> &8- Buy a ticket"));
+        p.sendMessage(fmt.info("/station board <route> &8- Board the train"));
+        p.sendMessage(fmt.info("/station journey &8- Show journey status"));
         p.sendMessage(fmt.info("/station travel <id> &8- Travel to a station"));
         if (p.hasPermission("vs.station.admin")) {
             p.sendMessage(fmt.info("/station create <name> <free|paid> <cost> &8- Create station"));
@@ -75,7 +177,7 @@ public class StationCommand implements CommandExecutor, TabCompleter {
         }
     }
     @Override public List<String> onTabComplete(CommandSender s, Command c, String a, String[] args) {
-        if (args.length == 1) return Arrays.asList("create","remove","list","travel");
+        if (args.length == 1) return Arrays.asList("create","remove","list","travel","next","buy","board","journey");
         return List.of();
     }
 }

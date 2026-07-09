@@ -178,20 +178,20 @@ public class DialogService {
             case DISTRICT_MERCHANT -> placeholderMenu("District Merchant", "District merchant integration is planned.", "district");
             case DISTRICT_TREASURY -> placeholderMenu("District Treasury", "Treasury shortcuts are available when your district role allows them.", "district");
             case DISTRICT_POLICE -> policeDeskMenu(player);
-            case DISTRICT_STATION -> placeholderMenu("District Station", "District station integration is planned.", "district");
+            case DISTRICT_STATION -> districtStationMenu(player);
             case DISTRICT_DIPLOMACY -> placeholderMenu("Diplomacy", "Diplomacy is planned for a later sprint.", "district");
             case DISTRICT_JOBS -> districtJobsMenu(player);
             case DISTRICT_DEVELOPMENT -> placeholderMenu("Development", "Development projects are planned for a later sprint.", "district");
             case MERCHANT_HOME -> merchantMenu();
-            case MERCHANT_SHOPS -> placeholderMenu("Shops", "Merchant shops are planned for a later sprint.", "merchant");
-            case MERCHANT_ORDERS -> placeholderMenu("Merchant Orders", "Merchant orders are planned for a later sprint.", "merchant");
-            case MERCHANT_CREATE_ORDER -> placeholderMenu("Create Order", "Order creation is planned for a later sprint.", "merchant");
-            case MERCHANT_EARNINGS -> placeholderMenu("Earnings", "Merchant earnings are planned for a later sprint.", "merchant");
+            case MERCHANT_SHOPS -> merchantShopsMenu(player);
+            case MERCHANT_ORDERS -> merchantOrdersMenu(player);
+            case MERCHANT_CREATE_ORDER -> placeholderMenu("Create Order", "Use &e/merchant order create <price> <quantity> [partial]&7 with the item in your hand.", "merchant");
+            case MERCHANT_EARNINGS -> merchantEarningsMenu(player);
             case RAIL_HOME -> railMenu();
-            case RAIL_STATION -> placeholderMenu("Station", "Station UI is planned for a later sprint.", "rail");
-            case RAIL_ROUTES -> placeholderMenu("Routes", "Rail route browsing is planned for a later sprint.", "rail");
-            case RAIL_TICKET -> placeholderMenu("Ticket", "Ticket purchase is planned for a later sprint.", "rail");
-            case RAIL_JOURNEY -> placeholderMenu("Journey", "Journey status is planned for a later sprint.", "rail");
+            case RAIL_STATION -> placeholderMenu("Station", "Use /rail stations to see all stations.", "rail");
+            case RAIL_ROUTES -> placeholderMenu("Routes", "Use /rail routes to see all routes.", "rail");
+            case RAIL_TICKET -> placeholderMenu("Ticket", "Stand on a platform and use /rail travel <routeId>.", "rail");
+            case RAIL_JOURNEY -> journeyMenu(player);
             case ADMIN -> adminMenu();
             case ADMIN_RANKS -> adminRanksMenu();
             case ADMIN_CASH -> adminCashMenu();
@@ -213,7 +213,7 @@ public class DialogService {
             case STAFF_CONTRACTS -> staffContractsMenu();
             case STAFF_DISTRICTS -> placeholderMenu("Districts", "District moderation shortcuts are planned.", "staff");
             case STAFF_POLICE_ABUSE -> placeholderMenu("Police Abuse", "Police abuse review is planned.", "security");
-            case STAFF_RAIL -> placeholderMenu("Rail Admin", "Rail administration is planned.", "staff");
+            case STAFF_RAIL -> staffRailMenu();
             case STAFF_REGION_DEBUG -> staffRegionDebugMenu();
             case STAFF_SYSTEM -> staffSystemMenu();
             case SPAWNCITY -> spawnCityMenu();
@@ -227,7 +227,7 @@ public class DialogService {
         return List.of(
             DialogMenuItem.item("Current Area", "Show current area information.", "vsmenu current", null, Material.COMPASS),
             DialogMenuItem.item("District", "Open district tools for your role.", "vsmenu district", null, Material.MAP),
-            DialogMenuItem.item("Merchant", "Open merchant placeholders.", "vsmenu merchant", null, Material.EMERALD),
+            DialogMenuItem.item("Merchant", "Open merchant buy orders and NPC shop tools.", "vsmenu merchant", null, Material.EMERALD),
             DialogMenuItem.item("Rail", "Open rail placeholders.", "vsmenu rail", null, Material.RAIL),
             DialogMenuItem.item("Jobs", "Open job placeholders.", "vsmenu jobs", null, Material.IRON_PICKAXE),
             DialogMenuItem.item("Orders", "Open order placeholders.", "vsmenu orders", null, Material.WRITABLE_BOOK),
@@ -523,23 +523,191 @@ public class DialogService {
 
     private List<DialogMenuItem> merchantMenu() {
         return List.of(
-            DialogMenuItem.item("Shops", "Open shops placeholder.", "vsmenu merchant.shops", null, Material.CHEST),
-            DialogMenuItem.item("Orders", "Open merchant orders placeholder.", "vsmenu merchant.orders", null, Material.WRITABLE_BOOK),
-            DialogMenuItem.item("Create Order", "Open create order placeholder.", "vsmenu merchant.create_order", null, Material.EMERALD),
-            DialogMenuItem.item("Earnings", "Open earnings placeholder.", "vsmenu merchant.earnings", null, Material.GOLD_NUGGET),
-            DialogMenuItem.item("Auction Hall", "Open physical Auction Hall shortcuts.", "vsmenu auctionhall", "vs.market.buy", Material.GOLD_INGOT),
+            DialogMenuItem.item("My Buy Orders", "View your merchant buy orders.", "merchant orders", null, Material.WRITABLE_BOOK),
+            DialogMenuItem.item("Create Buy Order", "Create a new buy order (hold the item).", "vsmenu input merchant_create", null, Material.EMERALD),
+            DialogMenuItem.item("Active Buy Orders", "Browse all active buy orders.", "merchant order list", null, Material.BOOKSHELF),
+            DialogMenuItem.item("Deliver Items", "Deliver items to an active order.", "vsmenu input merchant_deliver", null, Material.CHEST),
+            DialogMenuItem.item("Cancel Order", "Cancel your buy order.", "vsmenu input merchant_cancel", null, Material.BARRIER),
+            DialogMenuItem.item("Order Storage", "View delivered items in storage.", "vsmenu merchant.earnings", null, Material.BARREL),
+            DialogMenuItem.item("My NPC Shops", "Manage your merchant NPC shops.", "vsmenu merchant.shops", null, Material.VILLAGER_SPAWN_EGG),
+            DialogMenuItem.item("Claim Payout", "Claim pending payout locker cash.", "payouts claim", null, Material.GOLD_NUGGET),
             backItem(), homeItem(), closeItem()
         );
     }
 
+    private List<DialogMenuItem> merchantShopsMenu(Player player) {
+        try {
+            com.vaultsurvival.plugin.merchant.shop.MerchantShopService shopService =
+                plugin.getServiceRegistry().get(com.vaultsurvival.plugin.merchant.shop.MerchantShopService.class);
+            var shops = shopService.getMerchantShops(player.getUniqueId());
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var shop : shops) {
+                var shopItems = shopService.getShopItems(shop.getId());
+                int totalStock = shopItems.stream().mapToInt(com.vaultsurvival.plugin.merchant.shop.MerchantShopData.ShopItem::getStock).sum();
+                items.add(DialogMenuItem.locked(
+                    shop.getName() + " (#" + shop.getId() + ")",
+                    "NPC #" + shop.getNpcId() + " | Items: " + shopItems.size() + " | Stock: " + totalStock,
+                    "Use commands to manage: /merchant shop stock|prices " + shop.getId(),
+                    Material.EMERALD));
+            }
+            if (items.isEmpty()) {
+                items.add(DialogMenuItem.locked("No Shops", "You have no merchant shops.",
+                    "Create one with /merchant shop create <name>.", Material.BARRIER));
+            }
+            items.add(DialogMenuItem.item("Create Shop NPC", "Create a new merchant shop NPC at your location.",
+                "vsmenu input merchant_shop_create", null, Material.VILLAGER_SPAWN_EGG));
+            items.add(DialogMenuItem.item("Claim Payout", "Claim pending payout locker cash.",
+                "payouts claim", null, Material.GOLD_NUGGET));
+            items.add(backItem("merchant"));
+            items.add(homeItem());
+            items.add(closeItem());
+            return items;
+        } catch (RuntimeException e) {
+            return placeholderMenu("Shops", "Merchant shop service is not available.", "merchant");
+        }
+    }
+
+    private List<DialogMenuItem> merchantOrdersMenu(Player player) {
+        try {
+            com.vaultsurvival.plugin.merchant.MerchantOrderService merchantService =
+                plugin.getServiceRegistry().get(com.vaultsurvival.plugin.merchant.MerchantOrderService.class);
+            var orders = merchantService.getMerchantOrders(player.getUniqueId());
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var order : orders) {
+                String statusColor = switch (order.getStatus()) {
+                    case ACTIVE -> "&a";
+                    case PARTIALLY_FILLED -> "&e";
+                    case FILLED -> "&6";
+                    case CANCELLED -> "&c";
+                    case EXPIRED -> "&8";
+                    case DISPUTED -> "&4";
+                };
+                items.add(DialogMenuItem.locked(
+                    "Order #" + order.getId(),
+                    order.getItemDisplay() + " @ " + order.getPricePerItem() + " each",
+                    statusColor + order.getStatus().name() + " | " +
+                    order.getFilledQuantity() + "/" + order.getRequiredQuantity() +
+                    " | Escrow: " + order.getRemainingEscrow(),
+                    Material.WRITABLE_BOOK));
+            }
+            if (items.isEmpty()) {
+                items.add(DialogMenuItem.locked("No Orders", "You have no buy orders.",
+                    "Create one with /merchant order create.", Material.BARRIER));
+            }
+            items.add(backItem("merchant"));
+            items.add(homeItem());
+            items.add(closeItem());
+            return items;
+        } catch (RuntimeException e) {
+            return placeholderMenu("Merchant Orders", "Merchant order service is not available.", "merchant");
+        }
+    }
+
+    private List<DialogMenuItem> merchantEarningsMenu(Player player) {
+        try {
+            com.vaultsurvival.plugin.merchant.MerchantOrderService merchantService =
+                plugin.getServiceRegistry().get(com.vaultsurvival.plugin.merchant.MerchantOrderService.class);
+            var orders = merchantService.getMerchantOrders(player.getUniqueId());
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var order : orders) {
+                if (order.getStatus() == com.vaultsurvival.plugin.merchant.MerchantOrderData.OrderStatus.FILLED ||
+                    order.getStatus() == com.vaultsurvival.plugin.merchant.MerchantOrderData.OrderStatus.PARTIALLY_FILLED) {
+                    items.add(DialogMenuItem.item(
+                        "Collect Order #" + order.getId(),
+                        "Collect " + (order.getFilledQuantity()) + "x " + order.getItemDisplay() + " from storage.",
+                        "merchant order collect " + order.getId(),
+                        null, Material.CHEST));
+                }
+            }
+            if (items.isEmpty()) {
+                items.add(DialogMenuItem.locked("No Storage", "No orders have items to collect.",
+                    "Filled orders will appear here.", Material.BARRIER));
+            }
+            items.add(DialogMenuItem.item("Claim Payout", "Claim pending payout locker cash.",
+                "payouts claim", null, Material.GOLD_NUGGET));
+            items.add(backItem("merchant"));
+            items.add(homeItem());
+            items.add(closeItem());
+            return items;
+        } catch (RuntimeException e) {
+            return placeholderMenu("Earnings", "Merchant order service is not available.", "merchant");
+        }
+    }
+
     private List<DialogMenuItem> railMenu() {
         return List.of(
-            DialogMenuItem.item("Station", "Open station placeholder.", "vsmenu rail.station", null, Material.RAIL),
-            DialogMenuItem.item("Routes", "Open rail routes placeholder.", "vsmenu rail.routes", null, Material.MINECART),
-            DialogMenuItem.item("Ticket", "Open ticket placeholder.", "vsmenu rail.ticket", null, Material.PAPER),
-            DialogMenuItem.item("Journey", "Open journey placeholder.", "vsmenu rail.journey", null, Material.COMPASS),
+            DialogMenuItem.item("Stations", "List active train stations.", "rail stations", null, Material.RAIL),
+            DialogMenuItem.item("Routes", "View rail routes.", "rail routes", null, Material.MINECART),
+            DialogMenuItem.item("Buy Ticket", "Buy a ticket for a route (stand on platform).", "vsmenu input rail_travel", null, Material.PAPER),
+            DialogMenuItem.item("Journey Status", "View your active train journey.", "vsmenu rail.journey", null, Material.CLOCK),
+            DialogMenuItem.item("Station Info", "View your district station status.", "district station", null, Material.COMPASS),
             backItem(), homeItem(), closeItem()
         );
+    }
+
+    private List<DialogMenuItem> journeyMenu(Player player) {
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            var journey = railService.getActiveJourney(player.getUniqueId());
+            if (journey == null) {
+                return placeholderMenu("Journey", "You have no active journey. Buy a ticket first!", "rail");
+            }
+            List<DialogMenuItem> items = new ArrayList<>();
+            items.add(DialogMenuItem.locked("Route", journey.getFromStationName() + " → " + journey.getToStationName(),
+                "Route #" + journey.getRouteId() + " | Ticket: " + journey.getTicketPrice(), Material.MINECART));
+            items.add(DialogMenuItem.locked("Status", journey.getState().name(),
+                "State: " + journey.getState().name(), Material.CLOCK));
+            if (journey.getState() == com.vaultsurvival.plugin.rail.RailJourneyData.JourneyState.IN_TRANSIT) {
+                items.add(DialogMenuItem.locked("Time Remaining", journey.getTimeRemaining(),
+                    "The train is moving!", Material.COMPASS));
+            }
+            if (journey.canBoard()) {
+                items.add(DialogMenuItem.item("Board Now", "Board the train!",
+                    "station board " + journey.getRouteId(), null, Material.MINECART));
+            }
+            if (!journey.isEnded()) {
+                items.add(DialogMenuItem.item("Cancel Journey", "Cancel your train journey.",
+                    "vsmenu locked Journey cancellation is handled automatically.", null, Material.BARRIER));
+            }
+            items.add(DialogMenuItem.item("Refresh", "Refresh journey status.",
+                "station journey", null, Material.CLOCK));
+            items.add(backItem("rail"));
+            items.add(homeItem());
+            items.add(closeItem());
+            return items;
+        } catch (RuntimeException e) {
+            return placeholderMenu("Journey", "Rail service is not available.", "rail");
+        }
+    }
+
+    private List<DialogMenuItem> districtStationMenu(Player player) {
+        try {
+            var railService = plugin.getServiceRegistry().get(
+                com.vaultsurvival.plugin.rail.RailService.class);
+            var station = railService.getStationStatus(player);
+            List<DialogMenuItem> items = new ArrayList<>();
+            if (station == null) {
+                items.add(DialogMenuItem.item("Request Station", "Apply for a district train station.",
+                    "vsmenu input station_request", null, Material.RAIL));
+                items.add(DialogMenuItem.locked("Requirements", "District must be active and you need MAYOR/CO_MAYOR/DIPLOMAT role.",
+                    "Active district + council/diplomat role required.", Material.PAPER));
+            }
+            items.add(DialogMenuItem.item("View Status", "View your district station status.",
+                "district station status", null, Material.COMPASS));
+            items.add(DialogMenuItem.item("Set Platform", "Set station platform at your location.",
+                "vsmenu input station_setplatform", null, Material.OAK_PLANKS));
+            items.add(DialogMenuItem.item("Set Arrival", "Set arrival point at your location.",
+                "vsmenu input station_setarrival", null, Material.ENDER_PEARL));
+            items.add(DialogMenuItem.item("Submit Application", "Submit station application.",
+                "vsmenu input station_request", null, Material.WRITABLE_BOOK));
+            items.add(backItem("district"));
+            items.add(homeItem());
+            items.add(closeItem());
+            return items;
+        } catch (RuntimeException e) {
+            return placeholderMenu("District Station", "Rail service is not available.", "district");
+        }
     }
 
     private List<DialogMenuItem> placeholderMenu(String title, String reason, String backRoute) {
@@ -559,7 +727,7 @@ public class DialogService {
             DialogMenuItem.adminItem("Vaults", "Open vault administration shortcuts.", "vsmenu vaults", "vs.vault.admin.inspect", Material.BARREL),
             DialogMenuItem.adminItem("Contracts", "Open contract placeholders.", "vsmenu contracts", "vs.admin", Material.WRITABLE_BOOK),
             DialogMenuItem.adminItem("Districts", "Open district admin placeholders.", "vsmenu districts", "vs.district.admin", Material.MAP),
-            DialogMenuItem.adminItem("Rail Admin", "Open rail admin placeholder.", "vsmenu railadmin", "vs.admin", Material.POWERED_RAIL),
+            DialogMenuItem.adminItem("Rail Admin", "Manage station applications and routes.", "rail applications", "vs.admin", Material.POWERED_RAIL),
             DialogMenuItem.adminItem("Debug", "Open debug shortcuts.", "vsmenu debug", "vs.admin", Material.SPYGLASS),
             DialogMenuItem.adminItem("System", "Open system shortcuts.", "vsmenu system", "vs.admin", Material.COMMAND_BLOCK),
             DialogMenuItem.adminItem("Dashboard", "Open the admin dashboard.", "vsadmin dashboard", "vs.admin", Material.COMMAND_BLOCK),
@@ -709,6 +877,24 @@ public class DialogService {
             DialogMenuItem.adminItem("Regions Here", "Show regions at your location.", "region here", "vs.region.admin", Material.COMPASS),
             DialogMenuItem.adminItem("Region List", "List regions.", "region list", "vs.region.admin", Material.FILLED_MAP),
             DialogMenuItem.adminItem("Damage Info", "Show damage info for target block.", "damage info", "vs.damage.use", Material.STONE_BRICKS),
+            backItem("staff"), homeItem(), closeItem()
+        );
+    }
+
+    private List<DialogMenuItem> staffRailMenu() {
+        return List.of(
+            DialogMenuItem.adminItem("Pending Applications", "Review pending station applications.",
+                "rail applications", "vs.admin", Material.PAPER),
+            DialogMenuItem.adminItem("All Stations", "List all train stations.",
+                "rail stations", "vs.admin", Material.RAIL),
+            DialogMenuItem.adminItem("All Routes", "View all rail routes.",
+                "rail routes", "vs.admin", Material.MINECART),
+            DialogMenuItem.adminItem("Suspended Stations", "Review suspended stations.",
+                "rail stations", "vs.admin", Material.BARRIER),
+            DialogMenuItem.locked("Revenue Logs", "Revenue log viewer is planned for a future sprint.",
+                "Revenue logs are planned.", Material.GOLD_NUGGET),
+            DialogMenuItem.locked("Travel Logs", "Travel log viewer is planned for a future sprint.",
+                "Travel logs are planned.", Material.BOOK),
             backItem("staff"), homeItem(), closeItem()
         );
     }
@@ -991,7 +1177,15 @@ public class DialogService {
             input("vault_withdraw", "Vault Withdraw", "Look at a vault and enter amount.", "Amount", "vault withdraw $(value)", "vs.vault.use", false),
             input("vault_access", "Vault Access", "Look at a vault and enter add/remove plus player.", "add|remove player", "vault access $(value)", "vs.vault.use", true),
             input("vault_place", "Vault Place", "Enter tier: small, iron, reinforced, treasury, decoy.", "Tier", "vault place $(value)", "vs.vault.place", false),
-            input("vault_inspect", "Vault Inspect", "Enter vault UUID.", "Vault UUID", "vault inspect $(value)", "vs.vault.admin.inspect", true)
+            input("vault_inspect", "Vault Inspect", "Enter vault UUID.", "Vault UUID", "vault inspect $(value)", "vs.vault.admin.inspect", true),
+            input("merchant_create", "Create Buy Order", "Hold the item and enter: price quantity [partial]. Example: 100 64 partial.", "price quantity [partial]", "merchant order create $(value)", null, false),
+            input("merchant_deliver", "Deliver Items", "Enter order id and optional quantity.", "orderId [quantity]", "merchant order deliver $(value)", null, false),
+            input("merchant_cancel", "Cancel Order", "Enter the order id to cancel.", "orderId", "merchant order cancel $(value)", null, false),
+            input("merchant_shop_create", "Create Shop NPC", "Enter a name for your shop NPC.", "Shop name", "merchant shop create $(value)", null, false),
+            input("station_request", "Request Station", "Enter station name.", "Station name", "district station request $(value)", null, false),
+            input("station_setplatform", "Set Platform", "Stand at platform center. Enter radius (e.g. 5).", "Radius", "district station setplatform $(value)", null, false),
+            input("station_setarrival", "Set Arrival", "Stand at arrival point.", "any", "district station setarrival", null, false),
+            input("rail_travel", "Buy Ticket", "Enter the route ID to travel.", "Route ID", "rail travel $(value)", null, false)
         );
 
         return definitions.stream().collect(java.util.stream.Collectors.toUnmodifiableMap(

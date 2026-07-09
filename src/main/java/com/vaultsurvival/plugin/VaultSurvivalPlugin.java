@@ -16,6 +16,8 @@ import com.vaultsurvival.plugin.damage.DamageModule;
 import com.vaultsurvival.plugin.commands.ResourcePackCommand;
 import com.vaultsurvival.plugin.display.DisplayModule;
 import com.vaultsurvival.plugin.dialogs.DialogModule;
+import com.vaultsurvival.plugin.merchant.MerchantOrderModule;
+import com.vaultsurvival.plugin.rail.RailModule;
 import com.vaultsurvival.plugin.monitor.MonitorModule;
 import com.vaultsurvival.plugin.store.StoreModule;
 import com.vaultsurvival.plugin.social.FriendModule;
@@ -138,6 +140,14 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         // Phase 2: Vaults
         VaultModule vaultModule = new VaultModule(this);
         moduleManager.registerModule(vaultModule);
+
+        // Sprint 9: Merchant Buy Orders
+        MerchantOrderModule merchantModule = new MerchantOrderModule(this);
+        moduleManager.registerModule(merchantModule);
+
+        // Sprint 11: District Train Stations
+        RailModule railModule = new RailModule(this);
+        moduleManager.registerModule(railModule);
 
         // Register staff mode module
         staffmodeModule = new StaffmodeModule(this);

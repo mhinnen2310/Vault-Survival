@@ -619,6 +619,115 @@ public class DatabaseManager {
                 "status TEXT NOT NULL DEFAULT 'ACTIVE'," +
                 "created_at INTEGER NOT NULL," +
                 "expires_at INTEGER NOT NULL" +
+            ")",
+
+            // === Merchant Buy Orders (Sprint 9) ===
+            "CREATE TABLE IF NOT EXISTS merchant_orders (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "merchant_uuid TEXT NOT NULL," +
+                "item_template TEXT NOT NULL," +
+                "item_display TEXT NOT NULL," +
+                "price_per_item INTEGER NOT NULL," +
+                "req_quantity INTEGER NOT NULL," +
+                "filled_quantity INTEGER NOT NULL DEFAULT 0," +
+                "partial_delivery INTEGER NOT NULL DEFAULT 0," +
+                "escrow_amount INTEGER NOT NULL DEFAULT 0," +
+                "remaining_escrow INTEGER NOT NULL DEFAULT 0," +
+                "status TEXT NOT NULL DEFAULT 'ACTIVE'," +
+                "created_at INTEGER NOT NULL" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS merchant_order_storage (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "order_id INTEGER NOT NULL," +
+                "item_data TEXT NOT NULL," +
+                "claimed INTEGER NOT NULL DEFAULT 0" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS merchant_deliveries (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "order_id INTEGER NOT NULL," +
+                "supplier_uuid TEXT NOT NULL," +
+                "quantity_delivered INTEGER NOT NULL," +
+                "payout_amount INTEGER NOT NULL," +
+                "timestamp INTEGER NOT NULL" +
+            ")",
+
+            // === Merchant Shops (Sprint 10) ===
+            "CREATE TABLE IF NOT EXISTS merchant_shops (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "owner_uuid TEXT NOT NULL," +
+                "npc_id INTEGER NOT NULL," +
+                "district_id INTEGER NOT NULL," +
+                "name TEXT NOT NULL," +
+                "world_name TEXT NOT NULL," +
+                "created_at INTEGER NOT NULL" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS merchant_shop_items (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "shop_id INTEGER NOT NULL," +
+                "slot INTEGER NOT NULL," +
+                "item_data TEXT NOT NULL," +
+                "item_display TEXT NOT NULL," +
+                "stock INTEGER NOT NULL DEFAULT 0," +
+                "price INTEGER NOT NULL DEFAULT 0" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS merchant_shop_sales (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "shop_id INTEGER NOT NULL," +
+                "buyer_uuid TEXT NOT NULL," +
+                "item_data TEXT NOT NULL," +
+                "quantity INTEGER NOT NULL," +
+                "price_each INTEGER NOT NULL," +
+                "tax_amount INTEGER NOT NULL DEFAULT 0," +
+                "timestamp INTEGER NOT NULL" +
+            ")",
+
+            // === Rail / Train Stations (Sprint 11) ===
+            "CREATE TABLE IF NOT EXISTS rail_stations (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "district_id INTEGER NOT NULL," +
+                "requester_uuid TEXT NOT NULL," +
+                "name TEXT NOT NULL," +
+                "world_name TEXT NOT NULL," +
+                "plat_min_x INTEGER NOT NULL, plat_min_y INTEGER NOT NULL, plat_min_z INTEGER NOT NULL," +
+                "plat_max_x INTEGER NOT NULL, plat_max_y INTEGER NOT NULL, plat_max_z INTEGER NOT NULL," +
+                "arr_x REAL NOT NULL, arr_y REAL NOT NULL, arr_z REAL NOT NULL," +
+                "arr_yaw REAL NOT NULL DEFAULT 0, arr_pitch REAL NOT NULL DEFAULT 0," +
+                "ticket_price INTEGER NOT NULL DEFAULT 0," +
+                "upkeep_cost INTEGER NOT NULL DEFAULT 0," +
+                "kingdom_tax_percent INTEGER NOT NULL DEFAULT 10," +
+                "status TEXT NOT NULL DEFAULT 'PENDING'," +
+                "total_revenue INTEGER NOT NULL DEFAULT 0," +
+                "created_at INTEGER NOT NULL" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS rail_routes (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "from_station_id INTEGER NOT NULL," +
+                "to_station_id INTEGER NOT NULL," +
+                "ticket_price INTEGER NOT NULL DEFAULT 0," +
+                "kingdom_tax_percent INTEGER NOT NULL DEFAULT 10," +
+                "travel_time_ticks INTEGER NOT NULL DEFAULT 100," +
+                "status TEXT NOT NULL DEFAULT 'ACTIVE'," +
+                "created_at INTEGER NOT NULL" +
+            ")",
+
+            // === Rail Journey Log (Sprint 12) ===
+            "CREATE TABLE IF NOT EXISTS rail_journey_log (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "player_uuid TEXT NOT NULL," +
+                "player_name TEXT NOT NULL," +
+                "route_id INTEGER NOT NULL," +
+                "from_station_id INTEGER NOT NULL," +
+                "to_station_id INTEGER NOT NULL," +
+                "from_station TEXT NOT NULL," +
+                "to_station TEXT NOT NULL," +
+                "ticket_price INTEGER NOT NULL DEFAULT 0," +
+                "event TEXT NOT NULL," +
+                "created_at INTEGER NOT NULL" +
             ")"
         };
 

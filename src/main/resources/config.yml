@@ -153,6 +153,52 @@ restoration:
   daily_wage: 1000
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
+# │ MERCHANT                                                                 │
+# └──────────────────────────────────────────────────────────────────────────┘
+merchant:
+  # Maximum number of active orders a merchant can have at once
+  max_active_orders: 10
+  # Default duration for orders in hours before they expire (0 = never)
+  default_expire_hours: 168
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ RAIL (District Train Stations)                                           │
+# └──────────────────────────────────────────────────────────────────────────┘
+rail:
+  enabled: true
+  # Default ticket price for new stations
+  defaultTicketPrice: 100
+  # Default upkeep cost deducted from district treasury
+  defaultUpkeepCost: 5000
+  # Kingdoms tax percent on ticket sales (goes to Spawn City)
+  defaultKingdomTaxPercent: 10
+  # Application fee paid from district treasury
+  applicationFee: 10000
+  # Minimum platform radius in blocks
+  minPlatformRadius: 3
+  # Journey timing settings
+  journey:
+    # Ticks for the full boarding window (20 ticks = 1 second)
+    boardingWindowTicks: 200
+    # Minimum ticks before boarding opens
+    minBoardingTicks: 60
+    # Y-offset for the train car above the platform
+    trainCarYOffset: 5.0
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ DISTRICT MARKET (Merchant NPC Shops)                                     │
+# └──────────────────────────────────────────────────────────────────────────┘
+districtMarket:
+  enabled: true
+  requireMarketZone: true
+  maxNpcPerMerchant: 3
+  maxNpcPerDistrict: 25
+  minTaxPercent: 0
+  maxTaxPercent: 50
+  defaultTaxPercent: 10
+  merchantLockerEnabled: true
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
 # │ MARKET                                                                   │
 # └──────────────────────────────────────────────────────────────────────────┘
 market:
