@@ -40,8 +40,8 @@ database:
 # └──────────────────────────────────────────────────────────────────────────┘
 chat:
   enabled: true
-  # Format: %rank_label% ┃ %district_label% ┃ player_name > message
-  format: "%rank_label% &8┃ %district_label% &8┃ %player_name% &8> &f%message%"
+  # Format: staff marker + district role | district | player
+  format: "%staff_marker%%district_role% &8┃ %district_label% &8┃ %player_name% &8> &f%message%"
   playerNameColor: "&c"
   noDistrictLabel: "&7OUTLANDS"
   # Rank labels mapped by access group name (lowercase)

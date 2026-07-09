@@ -52,8 +52,26 @@ public class ChatFormatService {
         }
     }
 
+    public String getDistrictRoleLabel(Player player) {
+        try {
+            DistrictService districts = plugin.getServiceRegistry().get(DistrictService.class);
+            DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
+            if (district == null) return "&7VISITOR";
+            return "&b" + districts.getHighestDistrictRole(player.getUniqueId(), district).name();
+        } catch (RuntimeException ignored) { return "&7VISITOR"; }
+    }
+
+    private String getStaffMarker(Player player) {
+        try {
+            AccessService access = plugin.getServiceRegistry().get(AccessService.class);
+            return access.isStaff(player.getUniqueId()) ? "&c* &r" : "";
+        } catch (RuntimeException ignored) { return ""; }
+    }
+
     public String formatChat(Player player, String message) {
         return config.getChatFormat()
+            .replace("%staff_marker%", getStaffMarker(player))
+            .replace("%district_role%", getDistrictRoleLabel(player))
             .replace("%rank_label%", getRankLabel(player))
             .replace("%district_label%", getDistrictLabel(player))
             .replace("%player_name%", config.getChatPlayerNameColor() + player.getName())

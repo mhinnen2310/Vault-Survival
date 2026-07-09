@@ -519,6 +519,12 @@ public class NpcServiceImpl implements NpcService {
     public void handleInteraction(Player player, NpcData.Npc npc) {
         if (npc == null) return;
 
+        // Conductor NPCs always open the rail dialog, independent of cosmetic NPC action data.
+        if (npc.getName().toLowerCase(java.util.Locale.ROOT).contains("conductor")) {
+            try { plugin.getServiceRegistry().get(com.vaultsurvival.plugin.dialogs.DialogService.class).openMenu(player, com.vaultsurvival.plugin.dialogs.DialogMenuType.RAIL_HOME); return; }
+            catch (RuntimeException ignored) { player.performCommand("station next"); return; }
+        }
+
         // Fire custom event for other modules
         NpcInteractEvent event = new NpcInteractEvent(player, npc);
         Bukkit.getPluginManager().callEvent(event);
