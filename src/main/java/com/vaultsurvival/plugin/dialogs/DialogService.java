@@ -859,6 +859,11 @@ public class DialogService {
         );
     }
 
+    /** Opens a command result as a follow-up dialog instead of dumping it into chat. */
+    public void openResult(Player player, String title, String body, List<DialogMenuItem> items) {
+        openCustomMenu(player, title, body, items);
+    }
+
     private List<DialogMenuItem> staffQuickMenu() {
         return List.of(
             DialogMenuItem.adminItem("Freeze Nearest Player", "Freeze the nearest online player.", "staffinspect freeze", "vs.staffinspect.freeze", Material.ICE),
