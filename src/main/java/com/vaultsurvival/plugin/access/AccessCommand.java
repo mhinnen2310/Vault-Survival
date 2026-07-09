@@ -8,6 +8,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
@@ -34,7 +35,8 @@ public class AccessCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!sender.hasPermission("vs.admin.rank")) {
+        // The server console is a trusted local administration channel, not an /op bypass.
+        if (!(sender instanceof ConsoleCommandSender) && !sender.hasPermission("vs.admin.rank")) {
             sender.sendMessage(fmt.permissionDenied());
             return true;
         }

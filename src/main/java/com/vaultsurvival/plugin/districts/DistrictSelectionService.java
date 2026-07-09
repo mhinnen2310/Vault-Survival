@@ -22,6 +22,9 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerKickEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -332,6 +335,18 @@ public final class DistrictSelectionService implements Listener {
     }
 
     @EventHandler public void onQuit(PlayerQuitEvent event) { cancel(event.getPlayer(), true); }
+    @EventHandler public void onKick(PlayerKickEvent event) { cancel(event.getPlayer(), true); }
+    @EventHandler public void onWorldChange(PlayerChangedWorldEvent event) {
+        if (selections.containsKey(event.getPlayer().getUniqueId())) {
+            cancel(event.getPlayer(), true);
+            event.getPlayer().sendMessage(fmt.warn("District chunk selection reset after changing worlds."));
+        }
+    }
+    @EventHandler public void onDeath(PlayerDeathEvent event) {
+        if (!selections.containsKey(event.getEntity().getUniqueId())) return;
+        event.getDrops().removeIf(this::isWand);
+        cancel(event.getEntity(), true);
+    }
     @EventHandler public void onJoin(PlayerJoinEvent event) { removeWands(event.getPlayer()); }
 
     private void giveWand(Player player) {
@@ -428,20 +443,27 @@ public final class DistrictSelectionService implements Listener {
     }
 
     private void updateActionbar(Player player, Selection selection) {
-        player.sendActionBar(Component.text("District chunks: " + selection.chunks.size() + "/" + selection.limit + " | /district confirm"));
+        player.sendActionBar(Component.text("Chunks: " + selection.chunks.size() + "/" + selection.limit
+            + " | " + (asRectangle(selection) == null ? "fill rectangle" : "rectangle ready") + " | confirm"));
     }
 
     private void drawChunkMarkers(Player player, Selection selection) {
+        int previewLimit = Math.max(1, plugin.getConfigManager().getConfig().getInt("districts.selection.overlay.maxPreviewChunks", 64));
+        int shown = 0;
         for (ChunkKey key : selection.chunks) {
+            if (shown++ >= previewLimit) break;
             int x = (key.x << 4) + 8;
             int z = (key.z << 4) + 8;
             int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
-            player.spawnParticle(Particle.DUST, x + .5, y + .5, z + .5, 2, .2, .2, .2, 0, new Particle.DustOptions(Color.AQUA, 1.2f));
+            Particle.DustOptions dust = new Particle.DustOptions(Color.AQUA, 1.8f);
+            player.spawnParticle(Particle.DUST, x + .5, y + .5, z + .5, 5, .5, .3, .5, 0, dust);
+            drawVerticalMarker(player, (key.x << 4), (key.z << 4), dust);
+            drawVerticalMarker(player, (key.x << 4) + 15, (key.z << 4) + 15, dust);
         }
     }
 
     private void drawRectangle(Player player, DistrictData.ChunkClaim claim, Color color, int step) {
-        Particle.DustOptions dust = new Particle.DustOptions(color, 1.2f);
+        Particle.DustOptions dust = new Particle.DustOptions(color, 1.8f);
         for (int x = claim.minBlockX(); x <= claim.maxBlockX(); x += step) {
             particleAtSurface(player, x, claim.minBlockZ(), dust);
             particleAtSurface(player, x, claim.maxBlockZ(), dust);
@@ -450,11 +472,22 @@ public final class DistrictSelectionService implements Listener {
             particleAtSurface(player, claim.minBlockX(), z, dust);
             particleAtSurface(player, claim.maxBlockX(), z, dust);
         }
+        drawVerticalMarker(player, claim.minBlockX(), claim.minBlockZ(), dust);
+        drawVerticalMarker(player, claim.minBlockX(), claim.maxBlockZ(), dust);
+        drawVerticalMarker(player, claim.maxBlockX(), claim.minBlockZ(), dust);
+        drawVerticalMarker(player, claim.maxBlockX(), claim.maxBlockZ(), dust);
     }
 
     private void particleAtSurface(Player player, int x, int z, Particle.DustOptions dust) {
         int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
-        player.spawnParticle(Particle.DUST, x + .5, y + .5, z + .5, 1, 0, 0, 0, 0, dust);
+        player.spawnParticle(Particle.DUST, x + .5, y + .5, z + .5, 2, .05, .05, .05, 0, dust);
+    }
+
+    private void drawVerticalMarker(Player player, int x, int z, Particle.DustOptions dust) {
+        int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
+        for (int height = 0; height <= 8; height += 2) {
+            player.spawnParticle(Particle.DUST, x + .5, y + height + .5, z + .5, 2, .08, .08, .08, 0, dust);
+        }
     }
 
     private record ChunkKey(int x, int z) { }

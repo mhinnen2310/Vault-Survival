@@ -161,6 +161,7 @@ districts:
     timeoutMinutes: 20
     overlay:
       enabled: true
+      maxPreviewChunks: 64
     # Claim capacity grows with the district development level.
     chunksByLevel:
       0: 15
