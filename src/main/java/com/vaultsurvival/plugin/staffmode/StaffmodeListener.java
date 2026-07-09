@@ -83,7 +83,18 @@ public class StaffmodeListener implements Listener {
         Player player = event.getPlayer();
         StaffmodeData data = staffData.get(player.getUniqueId());
         if (data != null && data.isStaffModeActive()) {
-            // Save state but don't auto-disable (restore on rejoin)
+            // Logout is fail-closed: never preserve staff tools, inventory, or staff location.
+            if (config.isStaffModeRevertBlocks() && !data.isBypassMode()) revertBlocks(player, data);
+            player.getInventory().clear();
+            if (data.getGameplayInventory() != null) player.getInventory().setContents(data.getGameplayInventory());
+            if (data.getGameplayArmor() != null) player.getInventory().setArmorContents(data.getGameplayArmor());
+            if (data.getGameplayLocation() != null) player.teleport(data.getGameplayLocation());
+            player.setGameMode(org.bukkit.GameMode.SURVIVAL);
+            data.setStaffModeActive(false);
+            data.setBypassMode(false);
+            data.setGameplayLocation(null);
+            data.clearBlockChanges();
+            plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "STAFFMODE_AUTO_EXIT", "PLAYER", player.getUniqueId().toString(), "logout");
         }
     }
 

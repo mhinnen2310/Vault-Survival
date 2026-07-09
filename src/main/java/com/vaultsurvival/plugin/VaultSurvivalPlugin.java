@@ -31,6 +31,7 @@ import com.vaultsurvival.plugin.npc.NpcModule;
 import com.vaultsurvival.plugin.regions.RegionModule;
 import com.vaultsurvival.plugin.staffmode.StaffmodeModule;
 import com.vaultsurvival.plugin.staff.StaffInspectCommand;
+import com.vaultsurvival.plugin.security.AntiCheatListener;
 import com.vaultsurvival.plugin.spawncity.SpawnCityModule;
 import com.vaultsurvival.plugin.spawnjobs.SpawnJobModule;
 import com.vaultsurvival.plugin.updates.UpdateService;
@@ -68,6 +69,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         // Initialize core infrastructure
         this.serviceRegistry = new ServiceRegistry();
         this.configManager = new ConfigManager(getLogger(), getDataFolder());
+        if (!new java.io.File(getDataFolder(), "permissions.yml").exists()) saveResource("permissions.yml", false);
         this.databaseManager = new DatabaseManager(getLogger(), getDataFolder());
         this.moduleManager = new ModuleManager(getLogger());
 
@@ -249,6 +251,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         getCommand("staffinspect").setExecutor(staffInspect);
         getCommand("staffinspect").setTabCompleter(staffInspect);
         getServer().getPluginManager().registerEvents(staffInspect, this);
+        getServer().getPluginManager().registerEvents(new AntiCheatListener(this), this);
 
         // Register resource pack command
         var rpCmd = new ResourcePackCommand(this);

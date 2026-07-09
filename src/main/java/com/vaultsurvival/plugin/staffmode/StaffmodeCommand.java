@@ -77,6 +77,7 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
 
     private void enableStaffMode(Player player, StaffmodeData data) {
         data.setStaffModeActive(true);
+        data.setGameplayLocation(player.getLocation().clone());
 
         // Store gameplay inventory if config says to separate
         if (config.isStaffModeSeparateInventories()) {
@@ -138,6 +139,8 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
         data.clearBlockChanges();
 
         player.setGameMode(GameMode.SURVIVAL);
+        if (data.getGameplayLocation() != null) player.teleport(data.getGameplayLocation());
+        data.setGameplayLocation(null);
         player.sendMessage(fmt.success("Staff mode disabled. Gameplay inventory restored."));
     }
 

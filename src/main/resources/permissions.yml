@@ -1,0 +1,30 @@
+# Vault Survival permission matrix. Runtime checks are enforced by AccessService and plugin.yml.
+# Assign only the rank permissions needed; staff tools additionally require active staffmode.
+ranks:
+  player:
+    allow: [vs.menu, vs.chat, vs.trade, vs.market.buy, vs.breach.use]
+  merchant:
+    inherits: player
+    allow: [vs.market.sell, vs.merchant.use]
+  police:
+    inherits: player
+    allow: [vs.police.use]
+  helper:
+    inherits: player
+    allow: [vs.staffmode.use, vs.staffinspect]
+  moderator:
+    inherits: helper
+    allow: [vs.staffinspect.freeze, vs.staff.chat]
+  admin:
+    inherits: moderator
+    allow: [vs.admin, vs.cash.admin, vs.vault.admin.inspect, vs.district.admin, vs.region.admin, vs.admin.reload]
+  owner:
+    inherits: admin
+    allow: [vs.*, vs.update, vs.staffmode.bypass, vs.staffmode.bypass.grant]
+
+# District roles are not global ranks. They are checked in DistrictService for their own district.
+districtRoles:
+  MERCHANT: [merchant shops, merchant buy orders, merchant chat]
+  POLICE: [evidence, police chat, crime actions]
+  TREASURER: [treasury tools]
+  MAYOR: [roles, laws, projects, station requests]

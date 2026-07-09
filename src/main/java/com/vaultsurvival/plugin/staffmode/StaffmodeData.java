@@ -1,6 +1,7 @@
 package com.vaultsurvival.plugin.staffmode;
 
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.Location;
 
 import java.util.*;
 
@@ -16,6 +17,7 @@ public class StaffmodeData {
     private boolean bypassMode; // Owner override - bypasses all restrictions
     private ItemStack[] gameplayInventory;
     private ItemStack[] gameplayArmor;
+    private Location gameplayLocation;
     private final List<BlockChange> blockChanges = new ArrayList<>();
 
     public StaffmodeData(UUID playerUuid) {
@@ -33,6 +35,8 @@ public class StaffmodeData {
 
     public ItemStack[] getGameplayArmor() { return gameplayArmor; }
     public void setGameplayArmor(ItemStack[] armor) { this.gameplayArmor = armor; }
+    public Location getGameplayLocation() { return gameplayLocation; }
+    public void setGameplayLocation(Location location) { this.gameplayLocation = location; }
 
     public List<BlockChange> getBlockChanges() { return blockChanges; }
     public void addBlockChange(BlockChange change) { blockChanges.add(change); }

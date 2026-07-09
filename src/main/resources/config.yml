@@ -126,6 +126,21 @@ staffmode:
   # Default: only owner rank has this. Use /staffmode * to toggle bypass.
   bypass_permission: "vs.staffmode.bypass"
 
+# Paper handles real chunk obfuscation. Enable anti-xray in Paper's world configuration:
+# anti-xray.enabled: true, engine-mode: 2, max-block-height: 64, update-radius: 2.
+# Do not rely on resource-pack-only fake block IDs for security.
+security:
+  anticheat:
+    enabled: true
+    autoBan: false
+    scoreDecayMinutes: 30
+    movementMaxDistanceSquared: 36
+    fastBreakMinIntervalMs: 45
+  antiXray:
+    managedByPaper: true
+    requireEngineMode: 2
+    hideLavaCaves: true
+
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ DISTRICTS                                                                │
 # └──────────────────────────────────────────────────────────────────────────┘
