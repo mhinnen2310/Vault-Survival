@@ -17,6 +17,7 @@ public class DistrictJobServiceImpl implements DistrictJobService {
     private final VaultSurvivalPlugin plugin;
     private final DistrictService districts;
     private final PayoutLockerService payouts;
+    private final EscrowService escrow;
     private final ContractAuditService audit;
     private final Map<Integer, DistrictJobData.Job> jobs = new ConcurrentHashMap<>();
     private final Map<Integer, DistrictJobData.Claim> claims = new ConcurrentHashMap<>();
@@ -25,6 +26,7 @@ public class DistrictJobServiceImpl implements DistrictJobService {
         this.plugin = plugin;
         this.districts = plugin.getServiceRegistry().get(DistrictService.class);
         this.payouts = plugin.getServiceRegistry().get(PayoutLockerService.class);
+        this.escrow = plugin.getServiceRegistry().get(EscrowService.class);
         this.audit = plugin.getServiceRegistry().get(ContractAuditService.class);
     }
 
@@ -102,7 +104,7 @@ public class DistrictJobServiceImpl implements DistrictJobService {
     @Override
     public boolean acceptJob(Player player, int jobId) {
         var job = jobs.get(jobId);
-        if (job == null || job.getStatus() != DistrictJobData.JobStatus.ACTIVE) return false;
+        if (job == null || job.getStatus() != DistrictJobData.JobStatus.ACTIVE || System.currentTimeMillis() > job.getDeadline()) return false;
         try (Connection conn = plugin.getDatabase().getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT OR IGNORE INTO district_job_claims (job_id, player_uuid, status, created_at) VALUES (?, ?, 'IN_PROGRESS', ?)",
@@ -112,6 +114,7 @@ public class DistrictJobServiceImpl implements DistrictJobService {
             ps.setLong(3, System.currentTimeMillis());
             ps.executeUpdate();
             loadAll();
+            setJobStatus(jobs.get(jobId), DistrictJobData.JobStatus.IN_PROGRESS);
             return true;
         } catch (SQLException e) {
             plugin.getLogger().log(Level.WARNING, "Failed to accept job", e);
@@ -123,19 +126,18 @@ public class DistrictJobServiceImpl implements DistrictJobService {
     public boolean deliverJob(Player player, int jobId) {
         var job = jobs.get(jobId);
         var claim = findClaim(jobId, player.getUniqueId());
-        if (job == null || claim == null) return false;
+        if (job == null || claim == null || job.getStatus() != DistrictJobData.JobStatus.IN_PROGRESS || claim.getStatus() != DistrictJobData.JobStatus.IN_PROGRESS) return false;
         if (job.getTrackingMode() != DistrictJobData.TrackingMode.AUTO_ITEM) return false;
         Material material = parseItem(job.getRequiredItem());
         if (material == null || !removeItems(player, material, job.getRequiredAmount())) return false;
-        pay(job, claim, player.getUniqueId());
-        return true;
+        return pay(job, claim, player.getUniqueId());
     }
 
     @Override
     public boolean submitJob(Player player, int jobId) {
         var job = jobs.get(jobId);
         var claim = findClaim(jobId, player.getUniqueId());
-        if (job == null || claim == null) return false;
+        if (job == null || claim == null || claim.getStatus() != DistrictJobData.JobStatus.IN_PROGRESS) return false;
         if (!job.isManualApproval() && job.getTrackingMode() == DistrictJobData.TrackingMode.AUTO_ITEM) return deliverJob(player, jobId);
         setClaimStatus(claim, DistrictJobData.JobStatus.SUBMITTED, null, null);
         return true;
@@ -148,7 +150,7 @@ public class DistrictJobServiceImpl implements DistrictJobService {
         var job = jobs.get(claim.getJobId());
         var district = job != null ? districts.getDistrict(job.getDistrictId()) : null;
         if (district == null || !districts.canApproveDistrictJob(approver.getUniqueId(), district)) return false;
-        pay(job, claim, claim.getPlayerUuid());
+        if (!pay(job, claim, claim.getPlayerUuid())) return false;
         setClaimStatus(claim, DistrictJobData.JobStatus.APPROVED, approver.getUniqueId(), null);
         return true;
     }
@@ -240,15 +242,12 @@ public class DistrictJobServiceImpl implements DistrictJobService {
         return true;
     }
 
-    private void pay(DistrictJobData.Job job, DistrictJobData.Claim claim, UUID recipient) {
-        try {
-            plugin.getDatabase().executeUpdate("UPDATE cash_items SET state='SPENT', last_seen_at=datetime('now') WHERE location_type='CONTRACT_ESCROW' AND location_id=?", String.valueOf(-job.getId()));
-            plugin.getDatabase().executeUpdate("UPDATE contract_escrows SET status='RELEASED', released_at=? WHERE contract_id=? AND status='LOCKED'", System.currentTimeMillis(), -job.getId());
-        } catch (SQLException e) { plugin.getLogger().log(Level.WARNING, "Failed to release district job escrow", e); }
-        payouts.storePayout(recipient, job.getReward(), "DISTRICT_JOB", String.valueOf(job.getId()), job.getTitle());
+    private boolean pay(DistrictJobData.Job job, DistrictJobData.Claim claim, UUID recipient) {
+        if (!escrow.releaseToPayoutLocker(-job.getId(), recipient, "district-job=" + job.getId() + " " + job.getTitle())) return false;
         setClaimStatus(claim, DistrictJobData.JobStatus.PAYOUT_PENDING, null, null);
         setJobStatus(job, DistrictJobData.JobStatus.PAYOUT_PENDING);
         audit.log(-job.getId(), recipient, "DISTRICT_JOB_PAYOUT_PENDING", job.getReward(), "claim=" + claim.getId());
+        return true;
     }
 
     private boolean removeItems(Player player, Material material, int amount) {
