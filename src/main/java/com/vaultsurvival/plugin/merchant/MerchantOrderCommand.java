@@ -10,6 +10,9 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.Material;
+import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
+import com.vaultsurvival.plugin.dialogs.DialogService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -68,6 +71,14 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleOrdersList(Player player) {
         List<MerchantOrderData.Order> merchantOrders = service.getMerchantOrders(player.getUniqueId());
+        DialogService dialogs = dialogs();
+        if (dialogs != null) {
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var order : merchantOrders) items.add(DialogMenuItem.item("#" + order.getId() + " " + order.getItemDisplay(), order.getStatus() + " | " + order.getFilledQuantity() + "/" + order.getRequiredQuantity(), "merchant order collect " + order.getId(), null, Material.BARREL));
+            items.add(DialogMenuItem.item("Create Buy Order", "Hold an item, then set price and quantity.", "vsmenu input merchant_create", null, Material.EMERALD));
+            dialogs.openResult(player, "My Buy Orders", merchantOrders.isEmpty() ? "No orders yet." : "Select an order to collect stored items.", items);
+            return true;
+        }
         if (merchantOrders.isEmpty()) {
             player.sendMessage(fmt.info("You have no buy orders. Create one with &e/merchant order create&7."));
             return true;
@@ -178,6 +189,14 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleList(Player player) {
         List<MerchantOrderData.Order> active = service.getActiveOrders();
+        DialogService dialogs = dialogs();
+        if (dialogs != null) {
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var order : active) items.add(DialogMenuItem.item("#" + order.getId() + " " + order.getItemDisplay(), "Reward " + order.getPricePerItem() + " | Remaining " + order.getRemainingQuantity(), "merchant order deliver " + order.getId(), null, Material.CHEST));
+            items.add(DialogMenuItem.item("Back", "Return to merchant dashboard.", "vsmenu merchant", null, Material.ARROW));
+            dialogs.openResult(player, "Active Buy Orders", active.isEmpty() ? "No active buy orders." : "Select an order to deliver matching items.", items);
+            return true;
+        }
         if (active.isEmpty()) {
             player.sendMessage(fmt.info("No active buy orders."));
             return true;
@@ -463,4 +482,6 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
 
         return completions;
     }
+
+    private DialogService dialogs() { try { return plugin.getServiceRegistry().get(DialogService.class); } catch (RuntimeException ignored) { return null; } }
 }

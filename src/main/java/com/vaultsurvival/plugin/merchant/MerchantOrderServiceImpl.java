@@ -4,6 +4,7 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.AuditLogger;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.currency.CurrencyService;
+import com.vaultsurvival.plugin.districts.DistrictService;
 import com.vaultsurvival.plugin.social.PayoutLockerService;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -54,6 +55,13 @@ public class MerchantOrderServiceImpl implements MerchantOrderService {
     @Override
     public MerchantOrderData.Order createOrder(Player merchant, long pricePerItem, int requiredQuantity,
                                                 boolean partialDelivery) {
+        DistrictService districts;
+        try { districts = plugin.getServiceRegistry().get(DistrictService.class); } catch (RuntimeException e) { merchant.sendMessage(fmt.error("District service unavailable.")); return null; }
+        var district = districts.getPlayerDistrict(merchant.getUniqueId());
+        if (district == null || !districts.canCreateMerchantNpc(merchant.getUniqueId(), district)) {
+            merchant.sendMessage(fmt.error("Requires MERCHANT, CO_MAYOR, or MAYOR in an active district."));
+            return null;
+        }
         ItemStack heldItem = merchant.getInventory().getItemInMainHand();
         if (heldItem.getType().isAir()) {
             merchant.sendMessage(fmt.error("You must hold the item you want to buy in your hand."));
