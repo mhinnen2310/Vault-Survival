@@ -52,6 +52,12 @@ public class AccessListener implements Listener {
         if (groups.length == 0) {
             accessService.addToGroup(uuid, "default", null);
         }
+        accessService.refreshPlayerPermissions(player);
+    }
+
+    @EventHandler
+    public void onPlayerQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+        accessService.clearPlayerPermissions(event.getPlayer().getUniqueId());
     }
 
     private void ensurePlayerRecord(java.util.UUID uuid, String name) {

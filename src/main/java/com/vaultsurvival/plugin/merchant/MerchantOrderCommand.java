@@ -13,6 +13,13 @@ import org.bukkit.entity.Player;
 import org.bukkit.Material;
 import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
 import com.vaultsurvival.plugin.dialogs.DialogService;
+import com.vaultsurvival.plugin.districts.DistrictData;
+import com.vaultsurvival.plugin.districts.DistrictService;
+import com.vaultsurvival.plugin.regions.RegionService;
+import net.kyori.adventure.text.Component;
+import org.bukkit.block.Sign;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.NamespacedKey;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,12 +47,6 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        // Permission check - all merchant commands require vs.merchant.use
-        if (!player.hasPermission("vs.merchant.use")) {
-            player.sendMessage(fmt.permissionDenied());
-            return true;
-        }
-
         if (args.length == 0) {
             showHelp(player);
             return true;
@@ -62,6 +63,8 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
 
             case "shop":
                 return handleShop(player, args);
+            case "orderboard", "board":
+                return handleOrderBoard(player);
         }
 
         // /merchant help
@@ -105,6 +108,45 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
             ));
         }
         return true;
+    }
+
+    private boolean handleOrderBoard(Player player) {
+        DistrictService districts;
+        try { districts = plugin.getServiceRegistry().get(DistrictService.class); }
+        catch (RuntimeException e) { player.sendMessage(fmt.error("District service is unavailable.")); return true; }
+        DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
+        if (district == null || !districts.canCreateMerchantNpc(player.getUniqueId(), district)) {
+            player.sendMessage(fmt.error("Requires the MERCHANT, CO_MAYOR, or MAYOR district role."));
+            return true;
+        }
+        if (!isInMarketZone(player, district)) {
+            player.sendMessage(fmt.error("Place order boards inside your district market zone."));
+            return true;
+        }
+        var block = player.getTargetBlockExact(6);
+        if (!(block != null && block.getState() instanceof Sign sign)) {
+            player.sendMessage(fmt.error("Look directly at a placed sign, then run /merchant orderboard."));
+            return true;
+        }
+        NamespacedKey boardKey = new NamespacedKey(plugin, "merchant_order_board");
+        sign.getPersistentDataContainer().set(boardKey, PersistentDataType.INTEGER, district.getId());
+        sign.line(0, Component.text("Merchant Orders"));
+        sign.line(1, Component.text(district.getName()));
+        sign.line(2, Component.text("Right-click"));
+        sign.line(3, Component.text("to browse"));
+        sign.update(true, false);
+        plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "MERCHANT_ORDER_BOARD_CREATE", "DISTRICT", String.valueOf(district.getId()),
+            "x=" + block.getX() + " y=" + block.getY() + " z=" + block.getZ());
+        player.sendMessage(fmt.success("Merchant order board created."));
+        return true;
+    }
+
+    private boolean isInMarketZone(Player player, DistrictData.District district) {
+        try {
+            RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
+            return regions.getRegionsAt(player.getLocation()).stream()
+                .anyMatch(region -> region.getName().equalsIgnoreCase("district_market_" + district.getId()));
+        } catch (RuntimeException ignored) { return false; }
     }
 
     private boolean handleOrder(Player player, String[] args) {
@@ -418,6 +460,7 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(fmt.info("&e/merchant order cancel <id> &7- Cancel your order"));
         player.sendMessage(fmt.info("&e/merchant order deliver <id> &7- Deliver items to an order"));
         player.sendMessage(fmt.info("&e/merchant order collect <id> &7- Collect delivered items from storage"));
+        player.sendMessage(fmt.info("&e/merchant orderboard &7- Turn the sign you are looking at into a browseable order board"));
         player.sendMessage(fmt.info("&e/merchant shop create &7- Create a merchant shop NPC"));
         player.sendMessage(fmt.info("&e/merchant shop list &7- List your shops"));
         player.sendMessage(fmt.info("&e/merchant shop stock <id> <slot> <qty> &7- Add stock to shop"));

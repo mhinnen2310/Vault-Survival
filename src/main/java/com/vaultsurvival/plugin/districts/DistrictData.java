@@ -11,6 +11,23 @@ import java.util.UUID;
 
 public class DistrictData {
 
+    /**
+     * A rectangular claim expressed in whole chunks. Keeping the source of truth
+     * in chunks avoids accidental partial-chunk district borders.
+     */
+    public record ChunkClaim(String worldName, int minChunkX, int minChunkZ, int maxChunkX, int maxChunkZ) {
+        public int chunkCount() {
+            return (maxChunkX - minChunkX + 1) * (maxChunkZ - minChunkZ + 1);
+        }
+
+        public int minBlockX() { return minChunkX << 4; }
+        public int minBlockZ() { return minChunkZ << 4; }
+        public int maxBlockX() { return (maxChunkX << 4) + 15; }
+        public int maxBlockZ() { return (maxChunkZ << 4) + 15; }
+        public int centerBlockX() { return (minBlockX() + maxBlockX()) / 2; }
+        public int centerBlockZ() { return (minBlockZ() + maxBlockZ()) / 2; }
+    }
+
     public enum DistrictStatus {
         APPLICATION,
         ACTIVE,

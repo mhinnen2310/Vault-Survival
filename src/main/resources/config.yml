@@ -145,10 +145,37 @@ security:
 # │ DISTRICTS                                                                │
 # └──────────────────────────────────────────────────────────────────────────┘
 districts:
-  # Minimum distance (in blocks) from spawn a district must be
-  min_distance_from_spawn: 1500
-  # Minimum distance (in blocks) between district borders
-  min_distance_between: 500
+  # Measured from claim edge to Spawn City / another district claim edge.
+  min_distance_from_spawn: 500
+  min_distance_between: 350
+  selection:
+    # New districts must form one filled rectangle of exactly this many chunks.
+    requiredChunks: 15
+    wandMaterial: GOLDEN_AXE
+    timeoutMinutes: 20
+    overlay:
+      enabled: true
+    # Claim capacity grows with the district development level.
+    chunksByLevel:
+      0: 15
+      1: 20
+      2: 30
+      3: 45
+      4: 65
+      5: 90
+      6: 120
+  marketZone:
+    # One rectangular district public market. Its cap grows with the owned claim.
+    maxPercentOfDistrict: 0.40
+  stationPlatform:
+    # Platform chunk cap also grows as the district's claim grows with levels.
+    maxPercentOfDistrict: 0.25
+  npcPlanning:
+    # /district npcs gives one facing marker for each entry below.
+    enabled: true
+    level0: [CLERK, JOB_BOARD]
+    level1: [MARKET_STEWARD]
+    level2: [CONDUCTOR]
   laws:
     maxChangesPerDay: 5
   evidence:
@@ -241,6 +268,9 @@ districtMarket:
   maxTaxPercent: 50
   defaultTaxPercent: 10
   merchantLockerEnabled: true
+  merchantNpc:
+    killable: true
+    respawnMinutes: 15
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ MARKET                                                                   │
@@ -276,6 +306,9 @@ vsworldedit:
   blocksPerTick: 500
   maxUndoOperations: 10
   requireConfirmationAboveBlocks: 10000
+  patterns:
+    maxEntries: 8
+    maxWeight: 10000
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ RESOURCE PACK                                                            │

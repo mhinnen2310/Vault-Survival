@@ -1,5 +1,5 @@
-name: VaultSurvival
-version: 1.0.23
+﻿name: VaultSurvival
+version: 1.0.24
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -13,7 +13,7 @@ softdepend: []
 commands:
   vs:
     description: Vault Survival core commands
-    usage: /vs <version|modules|debug|reload|update|checklist|debugbundle|permissions|configcheck>
+    usage: /vs <version|modules|debug|reload|update|checklist|debugbundle|permissions|configcheck|audit>
     aliases: []
   spawncity:
     description: Spawn City management
@@ -62,6 +62,7 @@ commands:
   district:
     description: District foundation commands
     usage: /district <apply|approve|reject|info|invite|kick|role|deposit|withdraw|law|list|disband|applications>
+    aliases: [d, districts]
   damage:
     description: Temporary damage management commands
     usage: /damage <info|list|restore>
@@ -111,8 +112,9 @@ commands:
     permission: vs.admin
   vwe:
     description: VS-WorldEdit building toolkit
-    usage: /vwe <wand|pos1|pos2|selection|clearselection|fill|replace|walls|outline|floor|ceiling|hollow|cylinder|circle|sphere|hsphere|line|undo|confirm|cancel>
+    usage: /vwe <wand|pos1|pos2|selection|set|replace|walls|outline|floor|ceiling|hollow|cylinder|hcylinder|circle|hcircle|sphere|hsphere|line|undo|confirm|cancel>
     permission: vaultsurvival.vwe.use
+    aliases: [vswe, vedit]
   chatpreview:
     description: Preview your chat format with rank and district labels
     usage: /chatpreview [message]
@@ -157,6 +159,7 @@ commands:
   merchant:
     description: Merchant buy order management
     usage: /merchant <orders|order create|order list|order cancel|order deliver>
+    aliases: [merch]
   rail:
     description: Train station and rail network commands
     usage: /rail <stations|routes|applications|approve|deny|createroute|travel>
@@ -167,10 +170,10 @@ commands:
 permissions:
   vs.admin.rank:
     description: Allows managing player ranks
-    default: op
+    default: false
   vs.cash.admin:
     description: Allows admin cash management
-    default: op
+    default: false
   vs.vault.use:
     description: Allows using vault commands
     default: false
@@ -179,16 +182,16 @@ permissions:
     default: false
   vs.vault.admin.inspect:
     description: Allows inspecting any vault
-    default: op
+    default: false
   vs.staffmode.use:
     description: Allows using staff mode
-    default: op
+    default: false
   vs.staffinspect:
     description: Allows opening staff player profiles and searches
-    default: op
+    default: false
   vs.staffinspect.freeze:
     description: Allows freezing and unfreezing players
-    default: op
+    default: false
   vs.staffmode.bypass:
     description: Allows bypassing staff mode restrictions (testing only)
     default: false
@@ -200,10 +203,10 @@ permissions:
     default: true
   vs.breach.admin.kit:
     description: Allows spawning breach kits
-    default: op
+    default: false
   vs.breach.admin.log:
     description: Allows viewing breach logs
-    default: op
+    default: false
   vs.chat:
     description: Allows chatting
     default: true
@@ -218,25 +221,25 @@ permissions:
     default: false
   vs.market.admin:
     description: Allows admin Auction Hall commands
-    default: op
+    default: false
   vs.npc.admin:
     description: Allows NPC management
-    default: op
+    default: false
   vs.npc.admin.tp:
     description: Allows teleporting NPCs
-    default: op
+    default: false
   vs.region.admin:
     description: Allows region management
-    default: op
+    default: false
   vs.district.admin:
     description: Allows district admin (approve/reject)
-    default: op
+    default: false
   vs.damage.use:
     description: Allows viewing temporary damage info
     default: true
   vs.damage.admin:
     description: Allows force-restoring damage and listing all pending
-    default: op
+    default: false
   vs.repair.use:
     description: Allows using repair commands
     default: true
@@ -245,37 +248,37 @@ permissions:
     default: false
   vs.crime.admin:
     description: Allows viewing crime records of other players
-    default: op
+    default: false
   vs.display.admin:
     description: Allows managing display auction slots
-    default: op
+    default: false
   vs.station.admin:
     description: Allows creating/removing stations
-    default: op
+    default: false
   vs.admin:
     description: Full admin access to analytics and dashboard
-    default: op
+    default: false
   vs.menu:
     description: Allows opening Vault Survival menus
     default: true
   vs.admin.reload:
     description: Allows reloading config
-    default: op
+    default: false
   vs.update:
     description: Allows checking, staging, and installing GitHub release updates
-    default: op
+    default: false
   vaultsurvival.spawncity.info:
     description: Allows viewing spawn city info
     default: true
   vaultsurvival.spawncity.admin:
     description: Allows managing spawn city
-    default: op
+    default: false
   vaultsurvival.vwe.use:
     description: Allows using VS-WorldEdit
-    default: op
+    default: false
   vaultsurvival.vwe.admin:
     description: Allows VWE admin commands
-    default: op
+    default: false
   vs.merchant.use:
     description: Allows creating and managing merchant buy orders
     default: false
@@ -287,7 +290,13 @@ permissions:
     default: false
   vs.staff.spy:
     description: Allows staff chat spy visibility
-    default: op
+    default: false
+  vs.staff.alerts:
+    description: Receives live anti-cheat operational alerts
+    default: false
+  vs.admin.alerts:
+    description: Receives startup-audit and server-error alerts
+    default: false
   vs.police.use:
     description: Allows using police commands
     default: false
@@ -296,7 +305,7 @@ permissions:
     default: false
   vs.*:
     description: All Vault Survival permissions
-    default: op
+    default: false
     children:
       vaultsurvival.vwe.use: true
       vaultsurvival.vwe.admin: true

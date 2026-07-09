@@ -10,6 +10,9 @@ import java.util.*;
  */
 public class VSWorldEditData {
 
+    /** A validated weighted material entry used by VWE patterns. */
+    public record WeightedMaterial(Material material, int weight) { }
+
     // Max undo operations per player
     public static final int DEFAULT_MAX_UNDO = 10;
     // Max blocks per operation

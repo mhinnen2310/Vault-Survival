@@ -30,6 +30,7 @@ public class DistrictServiceImpl implements DistrictService {
     private final MessageFormatter fmt;
     private final Logger logger;
     private final Map<Integer, DistrictData.District> districts = new ConcurrentHashMap<>();
+    private final Map<Integer, DistrictData.ChunkClaim> claims = new ConcurrentHashMap<>();
     private BukkitTask lawReloadTask;
     private LocalDate lastLawReload = LocalDate.now();
 
@@ -44,12 +45,31 @@ public class DistrictServiceImpl implements DistrictService {
 
     @Override
     public DistrictData.District apply(Player founder, String name) {
-        // Check min distance from spawn (1500 blocks)
+        founder.sendMessage(fmt.error("Select your district chunks first with /district apply <name>, then /district confirm."));
+        return null;
+    }
+
+    @Override
+    public DistrictData.District apply(Player founder, String name, DistrictData.ChunkClaim claim) {
+        if (claim == null || !claim.worldName().equals(founder.getWorld().getName())
+            || claim.chunkCount() != plugin.getConfigManager().getDistrictInitialClaimChunks()) {
+            founder.sendMessage(fmt.error("District applications require exactly "
+                + plugin.getConfigManager().getDistrictInitialClaimChunks() + " selected chunks."));
+            return null;
+        }
+        if (districts.values().stream().anyMatch(d -> d.getFounderUuid().equals(founder.getUniqueId())
+            && d.getStatus() != DistrictData.DistrictStatus.DISBANDED)) {
+            founder.sendMessage(fmt.error("You already have a district application or district."));
+            return null;
+        }
+
+        // Check min distance from Spawn City against the claim edge, not just the founder's feet.
         var spawnCity = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.spawncity.SpawnCityService.class);
         Location spawn = spawnCity.getSpawnLocation();
         if (spawn == null) spawn = founder.getWorld().getSpawnLocation();
         String cityName = spawnCity.getCityName();
-        if (founder.getLocation().distance(spawn) < plugin.getConfigManager().getDistrictMinDistanceFromSpawn()) {
+        if (spawn.getWorld().getName().equals(claim.worldName())
+            && distanceToClaim(spawn.getBlockX(), spawn.getBlockZ(), claim) < plugin.getConfigManager().getDistrictMinDistanceFromSpawn()) {
             founder.sendMessage(fmt.error("You must be at least " +
                 plugin.getConfigManager().getDistrictMinDistanceFromSpawn() + " blocks from " + cityName + " to found a district."));
             return null;
@@ -58,10 +78,11 @@ public class DistrictServiceImpl implements DistrictService {
         // Check distance from other districts
         int minDist = plugin.getConfigManager().getDistrictMinDistanceBetween();
         for (var d : districts.values()) {
-            if (d.getWorldName().equals(founder.getWorld().getName())) {
-                double dist = Math.sqrt(
-                    Math.pow(founder.getLocation().getBlockX() - d.getCenterX(), 2) +
-                    Math.pow(founder.getLocation().getBlockZ() - d.getCenterZ(), 2));
+            if (d.getStatus() != DistrictData.DistrictStatus.DISBANDED && d.getWorldName().equals(claim.worldName())) {
+                DistrictData.ChunkClaim existing = claims.get(d.getId());
+                double dist = existing == null
+                    ? Math.hypot(claim.centerBlockX() - d.getCenterX(), claim.centerBlockZ() - d.getCenterZ())
+                    : distanceBetweenClaims(claim, existing);
                 if (dist < minDist) {
                     founder.sendMessage(fmt.error("Too close to district '" + d.getName() +
                         "'. Minimum distance: " + minDist + " blocks."));
@@ -76,17 +97,16 @@ public class DistrictServiceImpl implements DistrictService {
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, name);
             ps.setString(2, founder.getUniqueId().toString());
-            ps.setString(3, founder.getWorld().getName());
-            ps.setInt(4, founder.getLocation().getBlockX());
-            ps.setInt(5, founder.getLocation().getBlockZ());
+            ps.setString(3, claim.worldName());
+            ps.setInt(4, claim.centerBlockX());
+            ps.setInt(5, claim.centerBlockZ());
             ps.executeUpdate();
 
             ResultSet keys = ps.getGeneratedKeys();
             if (keys.next()) {
                 int id = keys.getInt(1);
                 DistrictData.District district = new DistrictData.District(id, name,
-                    founder.getUniqueId(), founder.getWorld().getName(),
-                    founder.getLocation().getBlockX(), founder.getLocation().getBlockZ());
+                    founder.getUniqueId(), claim.worldName(), claim.centerBlockX(), claim.centerBlockZ());
                 district.addMember(founder.getUniqueId(), DistrictData.DistrictRole.MAYOR);
                 districts.put(id, district);
 
@@ -97,6 +117,10 @@ public class DistrictServiceImpl implements DistrictService {
                 plugin.getDatabase().executeUpdate(
                     "INSERT OR IGNORE INTO district_member_roles (district_id, player_uuid, role) VALUES (?, ?, 'MAYOR')",
                     id, founder.getUniqueId().toString());
+                plugin.getDatabase().executeUpdate(
+                    "INSERT INTO district_claims (district_id, world, min_chunk_x, min_chunk_z, max_chunk_x, max_chunk_z) VALUES (?, ?, ?, ?, ?, ?)",
+                    id, claim.worldName(), claim.minChunkX(), claim.minChunkZ(), claim.maxChunkX(), claim.maxChunkZ());
+                claims.put(id, claim);
 
                 audit.log(founder.getUniqueId(), founder.getName(), "DISTRICT_APPLY", "DISTRICT",
                     String.valueOf(id), "name=" + name);
@@ -112,6 +136,53 @@ public class DistrictServiceImpl implements DistrictService {
     }
 
     @Override
+    public DistrictData.ChunkClaim getClaim(int districtId) {
+        return claims.get(districtId);
+    }
+
+    @Override
+    public int getClaimChunkLimit(DistrictData.District district) {
+        if (district == null) return plugin.getConfigManager().getDistrictInitialClaimChunks();
+        int level = 0;
+        try (Connection conn = plugin.getDatabase().getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT level FROM district_development WHERE district_id = ?")) {
+            ps.setInt(1, district.getId());
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) level = rs.getInt(1);
+        } catch (SQLException ignored) {
+            // A fresh district has no development row yet, so level zero is correct.
+        }
+        return plugin.getConfigManager().getDistrictClaimChunksAtLevel(level);
+    }
+
+    @Override
+    public boolean updateClaim(DistrictData.District district, UUID actorUuid, DistrictData.ChunkClaim claim) {
+        if (district == null || claim == null || district.getStatus() != DistrictData.DistrictStatus.ACTIVE
+            || !district.getWorldName().equals(claim.worldName()) || !canManageDevelopment(actorUuid, district)) return false;
+        DistrictData.ChunkClaim previous = claims.get(district.getId());
+        if (previous == null || claim.chunkCount() <= previous.chunkCount() || claim.chunkCount() > getClaimChunkLimit(district)) return false;
+        for (DistrictData.District other : districts.values()) {
+            if (other.getId() == district.getId() || other.getStatus() == DistrictData.DistrictStatus.DISBANDED
+                || !other.getWorldName().equals(claim.worldName())) continue;
+            DistrictData.ChunkClaim otherClaim = claims.get(other.getId());
+            if (otherClaim != null && distanceBetweenClaims(claim, otherClaim) < plugin.getConfigManager().getDistrictMinDistanceBetween()) return false;
+        }
+        try {
+            plugin.getDatabase().executeUpdate(
+                "UPDATE district_claims SET min_chunk_x = ?, min_chunk_z = ?, max_chunk_x = ?, max_chunk_z = ?, updated_at = datetime('now') WHERE district_id = ?",
+                claim.minChunkX(), claim.minChunkZ(), claim.maxChunkX(), claim.maxChunkZ(), district.getId());
+            claims.put(district.getId(), claim);
+            replaceDistrictRegion(district, claim);
+            audit.log(actorUuid, "DISTRICT", "DISTRICT_CLAIM_EXPAND", "DISTRICT", String.valueOf(district.getId()),
+                "chunks=" + previous.chunkCount() + "->" + claim.chunkCount());
+            return true;
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to update district claim", e);
+            return false;
+        }
+    }
+
+    @Override
     public boolean approve(int districtId, UUID adminUuid) {
         DistrictData.District d = districts.get(districtId);
         if (d == null || d.getStatus() != DistrictData.DistrictStatus.APPLICATION) return false;
@@ -124,20 +195,9 @@ public class DistrictServiceImpl implements DistrictService {
             logger.log(Level.WARNING, "Failed to approve district", e);
         }
 
-        // Auto-create a DISTRICT region (250 block radius)
-        if (regions != null) {
-            var world = Bukkit.getWorld(d.getWorldName());
-            if (world != null) {
-                var region = regions.createRegion("district_" + d.getName(), RegionData.RegionType.DISTRICT,
-                    d.getWorldName(),
-                    d.getCenterX() - 250, world.getMinHeight(), d.getCenterZ() - 250,
-                    d.getCenterX() + 250, world.getMaxHeight(), d.getCenterZ() + 250,
-                    10); // priority 10
-                if (region == null) {
-                    logger.warning("Failed to auto-create region for district " + d.getName());
-                }
-            }
-        }
+        DistrictData.ChunkClaim claim = claims.get(districtId);
+        if (claim != null) replaceDistrictRegion(d, claim);
+        else createLegacyDistrictRegion(d);
 
         audit.log(adminUuid, "ADMIN", "DISTRICT_APPROVE", "DISTRICT",
             String.valueOf(districtId), "name=" + d.getName());
@@ -671,9 +731,51 @@ public class DistrictServiceImpl implements DistrictService {
         return 0;
     }
 
+    private void createLegacyDistrictRegion(DistrictData.District district) {
+        if (regions == null) return;
+        var world = Bukkit.getWorld(district.getWorldName());
+        if (world == null) return;
+        var region = regions.createRegion("district_" + district.getName(), RegionData.RegionType.DISTRICT,
+            district.getWorldName(), district.getCenterX() - 250, world.getMinHeight(), district.getCenterZ() - 250,
+            district.getCenterX() + 250, world.getMaxHeight(), district.getCenterZ() + 250, 10);
+        if (region == null) logger.warning("Failed to create legacy region for district " + district.getName());
+    }
+
+    private void replaceDistrictRegion(DistrictData.District district, DistrictData.ChunkClaim claim) {
+        if (regions == null) return;
+        var world = Bukkit.getWorld(claim.worldName());
+        if (world == null) {
+            logger.warning("Cannot create district region; world is unavailable: " + claim.worldName());
+            return;
+        }
+        String regionName = "district_" + district.getName();
+        regions.getAllRegions().stream()
+            .filter(region -> region.getType() == RegionData.RegionType.DISTRICT && region.getName().equalsIgnoreCase(regionName))
+            .map(RegionData.Region::getId)
+            .toList()
+            .forEach(regions::deleteRegion);
+        var region = regions.createRegion(regionName, RegionData.RegionType.DISTRICT, claim.worldName(),
+            claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(),
+            claim.maxBlockX(), world.getMaxHeight(), claim.maxBlockZ(), 10);
+        if (region == null) logger.warning("Failed to create region for district " + district.getName());
+    }
+
+    private double distanceToClaim(int x, int z, DistrictData.ChunkClaim claim) {
+        int nearestX = Math.max(claim.minBlockX(), Math.min(x, claim.maxBlockX()));
+        int nearestZ = Math.max(claim.minBlockZ(), Math.min(z, claim.maxBlockZ()));
+        return Math.hypot(x - nearestX, z - nearestZ);
+    }
+
+    private double distanceBetweenClaims(DistrictData.ChunkClaim first, DistrictData.ChunkClaim second) {
+        int xGap = Math.max(0, Math.max(first.minBlockX() - second.maxBlockX(), second.minBlockX() - first.maxBlockX()));
+        int zGap = Math.max(0, Math.max(first.minBlockZ() - second.maxBlockZ(), second.minBlockZ() - first.maxBlockZ()));
+        return Math.hypot(xGap, zGap);
+    }
+
     @Override
     public void loadAll() {
         districts.clear();
+        claims.clear();
         try (Connection conn = plugin.getDatabase().getConnection()) {
             // Load districts
             String sql = "SELECT * FROM districts WHERE status != 'DISBANDED'";
@@ -712,6 +814,16 @@ public class DistrictServiceImpl implements DistrictService {
                             migrate.executeUpdate();
                         }
                     }
+                }
+            }
+
+            String claimSql = "SELECT * FROM district_claims";
+            try (PreparedStatement ps = conn.prepareStatement(claimSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    claims.put(rs.getInt("district_id"), new DistrictData.ChunkClaim(
+                        rs.getString("world"), rs.getInt("min_chunk_x"), rs.getInt("min_chunk_z"),
+                        rs.getInt("max_chunk_x"), rs.getInt("max_chunk_z")));
                 }
             }
 

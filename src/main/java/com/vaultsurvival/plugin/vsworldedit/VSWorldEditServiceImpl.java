@@ -130,6 +130,48 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     }
 
     @Override
+    public boolean fillPattern(Player player, List<VSWorldEditData.WeightedMaterial> pattern) {
+        UUID uuid = player.getUniqueId();
+        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid)) {
+            player.sendMessage(fmt.error("An operation is already pending or running."));
+            return false;
+        }
+        var selection = getSelection(player);
+        if (selection == null) {
+            player.sendMessage(fmt.error("No selection. Set pos1 and pos2 first."));
+            return false;
+        }
+        if (selection.getVolume() > getMaxBlocksPerOperation()) {
+            player.sendMessage(fmt.error("Selection too large: " + selection.getVolume() + " blocks (max: " + getMaxBlocksPerOperation() + ")"));
+            return false;
+        }
+        if (pattern == null || pattern.isEmpty() || pattern.stream().anyMatch(entry -> entry.material() == null
+            || !entry.material().isBlock() || entry.material().isAir() || entry.weight() <= 0)) {
+            player.sendMessage(fmt.error("Invalid block pattern."));
+            return false;
+        }
+        List<VSWorldEditData.BlockPlacement> placements = new ArrayList<>();
+        Random random = new Random(uuid.getMostSignificantBits() ^ uuid.getLeastSignificantBits() ^ selection.getVolume());
+        for (int y = selection.getY1(); y <= selection.getY2(); y++) {
+            for (int z = selection.getZ1(); z <= selection.getZ2(); z++) {
+                for (int x = selection.getX1(); x <= selection.getX2(); x++) {
+                    placements.add(new VSWorldEditData.BlockPlacement(x, y, z, choosePatternMaterial(pattern, random)));
+                }
+            }
+        }
+        var operation = new VSWorldEditData.ActiveOperation(uuid, VSWorldEditData.OperationType.FILL, selection, pattern.getFirst().material(), null);
+        operation.setTotalBlocks(placements.size());
+        if (placements.size() > getRequireConfirmationAbove()) {
+            pendingOps.put(uuid, operation);
+            pendingPlacementOps.put(uuid, placements);
+            player.sendMessage(fmt.warn("Pattern set: &e" + placements.size() + " blocks. Type &e/vwe confirm&e to proceed."));
+            return false;
+        }
+        executeOperationWithPlacements(operation, player, placements);
+        return true;
+    }
+
+    @Override
     public boolean replace(Player player, Material from, Material to) {
         return startOperation(player, VSWorldEditData.OperationType.REPLACE, to, from);
     }
@@ -200,11 +242,31 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             return false;
         }
         return startPositionOp(player, VSWorldEditData.OperationType.CYLINDER, material,
+            computeDiscPositions(player, radius, height));
+    }
+
+    @Override
+    public boolean hollowCylinder(Player player, int radius, int height, Material material) {
+        if (radius < 1 || height < 1) {
+            player.sendMessage(fmt.error("Radius and height must be at least 1."));
+            return false;
+        }
+        return startPositionOp(player, VSWorldEditData.OperationType.CYLINDER, material,
             computeCirclePositions(player, radius, height));
     }
 
     @Override
     public boolean circle(Player player, int radius, Material material) {
+        if (radius < 1) {
+            player.sendMessage(fmt.error("Radius must be at least 1."));
+            return false;
+        }
+        return startPositionOp(player, VSWorldEditData.OperationType.CIRCLE, material,
+            computeDiscPositions(player, radius, 1));
+    }
+
+    @Override
+    public boolean hollowCircle(Player player, int radius, Material material) {
         if (radius < 1) {
             player.sendMessage(fmt.error("Radius must be at least 1."));
             return false;
@@ -373,6 +435,32 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             x++;
         }
         return positions;
+    }
+
+    private List<int[]> computeDiscPositions(Player player, int radius, int height) {
+        Location center = player.getLocation();
+        int cx = center.getBlockX(), cy = center.getBlockY(), cz = center.getBlockZ();
+        int radiusSquared = radius * radius;
+        List<int[]> positions = new ArrayList<>();
+        for (int y = 0; y < height; y++) {
+            for (int x = -radius; x <= radius; x++) {
+                for (int z = -radius; z <= radius; z++) {
+                    if (x * x + z * z <= radiusSquared) positions.add(new int[]{cx + x, cy + y, cz + z});
+                }
+            }
+        }
+        return positions;
+    }
+
+    private Material choosePatternMaterial(List<VSWorldEditData.WeightedMaterial> pattern, Random random) {
+        int total = pattern.stream().mapToInt(VSWorldEditData.WeightedMaterial::weight).sum();
+        int target = random.nextInt(total);
+        int running = 0;
+        for (VSWorldEditData.WeightedMaterial entry : pattern) {
+            running += entry.weight();
+            if (target < running) return entry.material();
+        }
+        return pattern.getLast().material();
     }
 
     private List<int[]> computeSpherePositions(Player player, int radius, boolean hollow) {

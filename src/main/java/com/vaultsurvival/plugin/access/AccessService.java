@@ -1,6 +1,7 @@
 package com.vaultsurvival.plugin.access;
 
 import java.util.UUID;
+import org.bukkit.entity.Player;
 
 /**
  * Service interface for the permission/access system.
@@ -87,4 +88,10 @@ public interface AccessService {
      * Get all effective permissions for a player.
      */
     String[] getEffectivePermissions(UUID playerUuid);
+
+    /** Apply the database-backed rank permissions to an online Bukkit player. */
+    void refreshPlayerPermissions(Player player);
+
+    /** Remove the plugin-owned permission attachment when a player leaves. */
+    void clearPlayerPermissions(UUID playerUuid);
 }

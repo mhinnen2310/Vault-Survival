@@ -95,4 +95,10 @@ public interface NpcService {
      * Load all NPCs from the database and spawn them for online players.
      */
     void loadAndSpawnAll();
+
+    /** Remove the visual and click hitbox without deleting the persisted NPC. */
+    void despawnNpcVisual(int npcId);
+
+    /** Respawn a persisted NPC after a temporary lifecycle event. */
+    void respawnNpc(int npcId);
 }

@@ -12,6 +12,7 @@ import org.bukkit.entity.Player;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.stream.Stream;
 
 /**
@@ -64,15 +65,17 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
             case "pos2" -> { service.setPos2(player, player.getLocation()); yield true; }
             case "selection" -> handleSelection(player);
             case "clearselection" -> { service.clearSelection(player); yield true; }
-            case "fill" -> handleFill(player, args);
+            case "fill", "set" -> handleFill(player, args);
             case "replace" -> handleReplace(player, args);
             case "walls" -> handleWalls(player, args);
             case "outline" -> handleOutline(player, args);
             case "floor" -> handleFloor(player, args);
             case "ceiling" -> handleCeiling(player, args);
             case "hollow" -> handleHollow(player, args);
-            case "cylinder" -> handleCylinder(player, args);
-            case "circle" -> handleCircle(player, args);
+            case "cylinder" -> handleCylinder(player, args, false);
+            case "hcylinder", "hollowcylinder" -> handleCylinder(player, args, true);
+            case "circle" -> handleCircle(player, args, false);
+            case "hcircle", "hollowcircle" -> handleCircle(player, args, true);
             case "sphere" -> handleSphere(player, args, false);
             case "hsphere", "hollowsphere" -> handleSphere(player, args, true);
             case "line" -> handleLine(player, args);
@@ -99,10 +102,11 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleFill(Player player, String[] args) {
-        if (args.length < 2) { player.sendMessage(fmt.error("/vwe fill <block>")); return true; }
-        Material m = Material.matchMaterial(args[1].toUpperCase());
-        if (m == null || !m.isBlock()) { player.sendMessage(fmt.error("Unknown block: " + args[1])); return true; }
-        service.fill(player, m);
+        if (args.length < 2) { player.sendMessage(fmt.error("//set <block[,block...]> [weight,weight...]")); return true; }
+        List<VSWorldEditData.WeightedMaterial> pattern = parsePattern(player, args[1], args.length >= 3 ? args[2] : null);
+        if (pattern == null) return true;
+        if (pattern.size() == 1) service.fill(player, pattern.getFirst().material());
+        else service.fillPattern(player, pattern);
         return true;
     }
 
@@ -160,27 +164,27 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private boolean handleCylinder(Player player, String[] args) {
-        if (args.length < 4) { player.sendMessage(fmt.error("/vwe cylinder <radius> <height> <block>")); return true; }
+    private boolean handleCylinder(Player player, String[] args, boolean hollow) {
+        if (args.length < 4) { player.sendMessage(fmt.error((hollow ? "//hcylinder" : "//cylinder") + " <radius> <height> <block>")); return true; }
         try {
             int radius = Integer.parseInt(args[1]);
             int height = Integer.parseInt(args[2]);
             Material m = Material.matchMaterial(args[3].toUpperCase());
             if (m == null || !m.isBlock()) { player.sendMessage(fmt.error("Unknown block: " + args[3])); return true; }
-            service.cylinder(player, radius, height, m);
+            if (hollow) service.hollowCylinder(player, radius, height, m); else service.cylinder(player, radius, height, m);
         } catch (NumberFormatException e) {
             player.sendMessage(fmt.error("Radius and height must be numbers."));
         }
         return true;
     }
 
-    private boolean handleCircle(Player player, String[] args) {
-        if (args.length < 3) { player.sendMessage(fmt.error("/vwe circle <radius> <block>")); return true; }
+    private boolean handleCircle(Player player, String[] args, boolean hollow) {
+        if (args.length < 3) { player.sendMessage(fmt.error((hollow ? "//hcircle" : "//circle") + " <radius> <block>")); return true; }
         try {
             int radius = Integer.parseInt(args[1]);
             Material m = Material.matchMaterial(args[2].toUpperCase());
             if (m == null || !m.isBlock()) { player.sendMessage(fmt.error("Unknown block: " + args[2])); return true; }
-            service.circle(player, radius, m);
+            if (hollow) service.hollowCircle(player, radius, m); else service.circle(player, radius, m);
         } catch (NumberFormatException e) {
             player.sendMessage(fmt.error("Radius must be a number."));
         }
@@ -219,15 +223,15 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(fmt.info("/vwe pos1|pos2 &8- Set position"));
         player.sendMessage(fmt.info("/vwe selection &8- View selection"));
         player.sendMessage(fmt.info("/vwe clearselection &8- Clear selection"));
-        player.sendMessage(fmt.info("/vwe fill <block> &8- Fill selection"));
+        player.sendMessage(fmt.info("//set <block[,block...]> [weights] &8- Fill selection; example: //set oak_planks,birch_planks 50,50"));
         player.sendMessage(fmt.info("/vwe replace <from> <to> &8- Replace blocks"));
         player.sendMessage(fmt.info("/vwe walls <block> &8- Build walls"));
         player.sendMessage(fmt.info("/vwe outline <block> &8- Build outline"));
         player.sendMessage(fmt.info("/vwe floor <block> &8- Fill bottom layer"));
         player.sendMessage(fmt.info("/vwe ceiling <block> &8- Fill top layer"));
         player.sendMessage(fmt.info("/vwe hollow <wall> <air> &8- Hollow with walls"));
-        player.sendMessage(fmt.info("/vwe cylinder <radius> <height> <block> &8- Vertical cylinder"));
-        player.sendMessage(fmt.info("/vwe circle <radius> <block> &8- Flat circle"));
+        player.sendMessage(fmt.info("//cylinder|//hcylinder <radius> <height> <block> &8- Solid or hollow cylinder"));
+        player.sendMessage(fmt.info("//circle|//hcircle <radius> <block> &8- Solid or hollow flat circle"));
         player.sendMessage(fmt.info("/vwe sphere <radius> <block> &8- Solid sphere"));
         player.sendMessage(fmt.info("/vwe hsphere <radius> <block> &8- Hollow sphere"));
         player.sendMessage(fmt.info("/vwe line <block> &8- Line pos1→pos2"));
@@ -239,20 +243,20 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return Stream.of("wand","pos1","pos2","selection","clearselection","fill","replace","walls","outline",
-                "floor","ceiling","hollow","cylinder","circle","sphere","hsphere","line","confirm","cancel","undo")
+            return Stream.of("wand","pos1","pos2","selection","clearselection","fill","set","replace","walls","outline",
+                "floor","ceiling","hollow","cylinder","hcylinder","circle","hcircle","sphere","hsphere","line","confirm","cancel","undo")
                 .filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length >= 2) {
             String sub = args[0].toLowerCase();
-            if (sub.equals("fill") || sub.equals("walls") || sub.equals("outline")
+            if (sub.equals("fill") || sub.equals("set") || sub.equals("walls") || sub.equals("outline")
                 || sub.equals("floor") || sub.equals("ceiling") || sub.equals("line"))
                 return blockTabComplete(args[args.length - 1]);
             if (sub.equals("replace") && args.length <= 3)
                 return blockTabComplete(args[args.length - 1]);
-            if ((sub.equals("circle") || sub.equals("sphere") || sub.equals("hsphere")) && args.length == 3)
+            if ((sub.equals("circle") || sub.equals("hcircle") || sub.equals("sphere") || sub.equals("hsphere")) && args.length == 3)
                 return blockTabComplete(args[args.length - 1]);
-            if (sub.equals("cylinder") && args.length == 4)
+            if ((sub.equals("cylinder") || sub.equals("hcylinder")) && args.length == 4)
                 return blockTabComplete(args[args.length - 1]);
         }
         return List.of();
@@ -264,5 +268,38 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
             .map(Material::name)
             .filter(n -> n.toLowerCase().startsWith(partial.toLowerCase()))
             .limit(30).toList();
+    }
+
+    private List<VSWorldEditData.WeightedMaterial> parsePattern(Player player, String blockList, String weights) {
+        String[] blockNames = blockList.split(",");
+        if (blockNames.length == 0 || blockNames.length > 8) {
+            player.sendMessage(fmt.error("A pattern must contain between 1 and 8 blocks."));
+            return null;
+        }
+        String[] weightParts = weights == null ? new String[0] : weights.split(",");
+        if (weightParts.length != 0 && weightParts.length != blockNames.length) {
+            player.sendMessage(fmt.error("Pattern weights must match the number of blocks."));
+            return null;
+        }
+        List<VSWorldEditData.WeightedMaterial> pattern = new ArrayList<>();
+        for (int i = 0; i < blockNames.length; i++) {
+            String raw = blockNames[i].trim().replace("minecraft:", "");
+            Material material = Material.matchMaterial(raw.toUpperCase());
+            if (material == null || !material.isBlock() || material.isAir()) {
+                player.sendMessage(fmt.error("Unknown block: " + blockNames[i]));
+                return null;
+            }
+            int weight = 1;
+            if (weightParts.length > 0) {
+                try { weight = Integer.parseInt(weightParts[i].trim()); }
+                catch (NumberFormatException ignored) { player.sendMessage(fmt.error("Pattern weights must be whole numbers.")); return null; }
+            }
+            if (weight < 1 || weight > 10_000) {
+                player.sendMessage(fmt.error("Pattern weights must be between 1 and 10000."));
+                return null;
+            }
+            pattern.add(new VSWorldEditData.WeightedMaterial(material, weight));
+        }
+        return pattern;
     }
 }

@@ -4,6 +4,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import java.util.List;
 
 /**
  * Lightweight internal build/edit toolkit for Vault Survival.
@@ -25,6 +26,8 @@ public interface VSWorldEditService {
     // --- Operations (batched) ---
     /** Start a batched fill operation. Returns true if queued/started. */
     boolean fill(Player player, Material material);
+    /** Fill the selection using a weighted material pattern. */
+    boolean fillPattern(Player player, List<VSWorldEditData.WeightedMaterial> pattern);
     /** Start a batched replace operation. */
     boolean replace(Player player, Material from, Material to);
     /** Start a batched walls operation. */
@@ -39,8 +42,12 @@ public interface VSWorldEditService {
     boolean hollow(Player player, Material wallBlock, Material airBlock);
     /** Create a vertical cylinder centered on the player. */
     boolean cylinder(Player player, int radius, int height, Material material);
+    /** Create a hollow vertical cylinder centered on the player. */
+    boolean hollowCylinder(Player player, int radius, int height, Material material);
     /** Create a flat circle centered on the player. */
     boolean circle(Player player, int radius, Material material);
+    /** Create a hollow flat circle centered on the player. */
+    boolean hollowCircle(Player player, int radius, Material material);
     /** Create a solid sphere centered on the player. */
     boolean sphere(Player player, int radius, Material material);
     /** Create a hollow sphere centered on the player. */

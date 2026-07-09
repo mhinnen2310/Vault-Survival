@@ -20,6 +20,18 @@ public interface DistrictService {
      */
     DistrictData.District apply(Player founder, String name);
 
+    /** Submit an application using a validated whole-chunk claim. */
+    DistrictData.District apply(Player founder, String name, DistrictData.ChunkClaim claim);
+
+    /** Return the persisted chunk claim for a district, or null for legacy districts. */
+    DistrictData.ChunkClaim getClaim(int districtId);
+
+    /** Update an active district claim after a level-gated expansion. */
+    boolean updateClaim(DistrictData.District district, UUID actorUuid, DistrictData.ChunkClaim claim);
+
+    /** The configured chunk cap for the district's current development level. */
+    int getClaimChunkLimit(DistrictData.District district);
+
     /**
      * Admin approves a district application. Auto-creates a DISTRICT region.
      */

@@ -172,8 +172,15 @@ public class ConfigManager {
     public String getStaffModeBypassPerm() { return config.getString("staffmode.bypass_permission", "vs.staffmode.bypass"); }
 
     // Districts
-    public int getDistrictMinDistanceFromSpawn() { return config.getInt("districts.min_distance_from_spawn", 1500); }
-    public int getDistrictMinDistanceBetween() { return config.getInt("districts.min_distance_between", 500); }
+    public int getDistrictMinDistanceFromSpawn() { return config.getInt("districts.min_distance_from_spawn", 500); }
+    public int getDistrictMinDistanceBetween() { return config.getInt("districts.min_distance_between", 350); }
+    public int getDistrictInitialClaimChunks() { return Math.max(1, config.getInt("districts.selection.requiredChunks", 15)); }
+    public int getDistrictClaimChunksAtLevel(int level) {
+        int highestKnown = Math.max(0, Math.min(6, level));
+        return Math.max(getDistrictInitialClaimChunks(), config.getInt("districts.selection.chunksByLevel." + highestKnown, getDistrictInitialClaimChunks()));
+    }
+    public boolean isDistrictSelectionOverlayEnabled() { return config.getBoolean("districts.selection.overlay.enabled", true); }
+    public int getDistrictSelectionTimeoutMinutes() { return Math.max(1, config.getInt("districts.selection.timeoutMinutes", 20)); }
     public int getDistrictMaxLawChangesPerDay() { return config.getInt("districts.laws.maxChangesPerDay", 5); }
     public int getEvidenceExpireDays() { return config.getInt("districts.evidence.expireDays", 14); }
 

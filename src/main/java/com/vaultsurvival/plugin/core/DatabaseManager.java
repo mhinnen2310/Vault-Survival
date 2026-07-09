@@ -729,9 +729,20 @@ public class DatabaseManager {
                 "event TEXT NOT NULL," +
                 "created_at INTEGER NOT NULL" +
             ")",
+
+            "CREATE TABLE IF NOT EXISTS district_claims (" +
+                "district_id INTEGER PRIMARY KEY REFERENCES districts(id) ON DELETE CASCADE," +
+                "world TEXT NOT NULL," +
+                "min_chunk_x INTEGER NOT NULL," +
+                "min_chunk_z INTEGER NOT NULL," +
+                "max_chunk_x INTEGER NOT NULL," +
+                "max_chunk_z INTEGER NOT NULL," +
+                "updated_at TEXT NOT NULL DEFAULT (datetime('now'))" +
+            ")",
             "CREATE TABLE IF NOT EXISTS district_development (district_id INTEGER PRIMARY KEY, level INTEGER NOT NULL DEFAULT 0, economy INTEGER NOT NULL DEFAULT 0, infrastructure INTEGER NOT NULL DEFAULT 0, security INTEGER NOT NULL DEFAULT 0, community INTEGER NOT NULL DEFAULT 0, trade_score INTEGER NOT NULL DEFAULT 0, law_and_order INTEGER NOT NULL DEFAULT 0, maintenance INTEGER NOT NULL DEFAULT 0, maintenance_state TEXT NOT NULL DEFAULT 'STABLE', updated_at INTEGER NOT NULL DEFAULT 0)",
             "CREATE TABLE IF NOT EXISTS district_projects (id INTEGER PRIMARY KEY AUTOINCREMENT, district_id INTEGER NOT NULL, type TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'DRAFT', cash_required INTEGER NOT NULL DEFAULT 0, cash_contributed INTEGER NOT NULL DEFAULT 0, item_required INTEGER NOT NULL DEFAULT 0, item_contributed INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL, created_at INTEGER NOT NULL, approved_by TEXT)",
             "CREATE TABLE IF NOT EXISTS district_development_contributions (id INTEGER PRIMARY KEY AUTOINCREMENT, district_id INTEGER NOT NULL, project_id INTEGER, player_uuid TEXT NOT NULL, category TEXT NOT NULL, source TEXT NOT NULL, amount INTEGER NOT NULL, contributed_at INTEGER NOT NULL, details TEXT)",
+            "CREATE TABLE IF NOT EXISTS district_npc_plans (id INTEGER PRIMARY KEY AUTOINCREMENT, district_id INTEGER NOT NULL, npc_type TEXT NOT NULL, world TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL, yaw REAL NOT NULL, pitch REAL NOT NULL, minimum_level INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'PLANNED', npc_id INTEGER, planned_by TEXT NOT NULL, planned_at INTEGER NOT NULL, UNIQUE(district_id, npc_type))",
             "CREATE TABLE IF NOT EXISTS anticheat_flags (id INTEGER PRIMARY KEY AUTOINCREMENT, player_uuid TEXT NOT NULL, check_type TEXT NOT NULL, score REAL NOT NULL, details TEXT, created_at INTEGER NOT NULL)"
         };
 

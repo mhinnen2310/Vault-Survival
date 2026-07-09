@@ -1,6 +1,9 @@
 package com.vaultsurvival.plugin.access;
 
+import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.DatabaseManager;
+import org.bukkit.entity.Player;
+import org.bukkit.permissions.PermissionAttachment;
 
 import java.sql.*;
 import java.util.*;
@@ -16,14 +19,17 @@ public class AccessServiceImpl implements AccessService {
 
     private final Logger logger;
     private final DatabaseManager db;
+    private final VaultSurvivalPlugin plugin;
 
     // Cache of group data for fast permission checks
     private final Map<String, GroupData> groupCache = new ConcurrentHashMap<>();
+    private final Map<UUID, PermissionAttachment> playerAttachments = new ConcurrentHashMap<>();
     private boolean cacheLoaded = false;
 
-    public AccessServiceImpl(Logger logger, DatabaseManager db) {
-        this.logger = logger;
-        this.db = db;
+    public AccessServiceImpl(VaultSurvivalPlugin plugin) {
+        this.plugin = plugin;
+        this.logger = plugin.getLogger();
+        this.db = plugin.getDatabase();
     }
 
     /**
@@ -360,7 +366,7 @@ public class AccessServiceImpl implements AccessService {
             // Player-specific permissions
             String sql = "SELECT permission_node FROM access_player_permissions " +
                          "WHERE player_uuid = ? AND value = TRUE " +
-                         "AND (expires_at IS NULL OR expires_at > NOW())";
+                "AND (expires_at IS NULL OR expires_at > datetime('now'))";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setObject(1, playerUuid);
                 try (ResultSet rs = ps.executeQuery()) {
@@ -378,6 +384,25 @@ public class AccessServiceImpl implements AccessService {
             logger.log(Level.WARNING, "Failed to get permissions", e);
         }
         return allPerms.toArray(new String[0]);
+    }
+
+    @Override
+    public void refreshPlayerPermissions(Player player) {
+        clearPlayerPermissions(player.getUniqueId());
+        PermissionAttachment attachment = player.addAttachment(plugin);
+        Set<String> permissions = new HashSet<>(Arrays.asList(getEffectivePermissions(player.getUniqueId())));
+        if (permissions.contains("*")) {
+            plugin.getDescription().getPermissions().forEach(permission -> attachment.setPermission(permission.getName(), true));
+        } else {
+            permissions.forEach(permission -> attachment.setPermission(permission, true));
+        }
+        playerAttachments.put(player.getUniqueId(), attachment);
+    }
+
+    @Override
+    public void clearPlayerPermissions(UUID playerUuid) {
+        PermissionAttachment attachment = playerAttachments.remove(playerUuid);
+        if (attachment != null) attachment.remove();
     }
 
     private void collectGroupPermissions(String groupName, Set<String> permissions, Set<String> checked) {
@@ -411,11 +436,12 @@ public class AccessServiceImpl implements AccessService {
 
         loadGroups();
 
-        // Set up inheritance
-        setGroupParent("helper", "mod");
-        setGroupParent("mod", "admin");
-        setGroupParent("admin", "developer");
-        setGroupParent("developer", "owner");
+        // Higher ranks inherit lower ranks, never the reverse.
+        setGroupParent("helper", "default");
+        setGroupParent("mod", "helper");
+        setGroupParent("admin", "mod");
+        setGroupParent("developer", "admin");
+        setGroupParent("owner", "developer");
         setGroupParent("vip", "supporter");
         setGroupParent("supporter", "default");
 
@@ -438,6 +464,29 @@ public class AccessServiceImpl implements AccessService {
 
         loadGroups();
         logger.info("Default access groups initialized");
+    }
+
+    /** Repair the historical inverted staff hierarchy on both new and existing databases. */
+    public void normalizeDefaultGroupHierarchy() {
+        try {
+            db.executeUpdate("DELETE FROM access_group_inheritance WHERE group_id IN (SELECT id FROM access_groups WHERE LOWER(name) IN ('owner','developer','admin','mod','helper','vip','supporter','default')) "
+                + "AND parent_group_id IN (SELECT id FROM access_groups WHERE LOWER(name) IN ('owner','developer','admin','mod','helper','vip','supporter','default'))");
+            setGroupParent("supporter", "default");
+            setGroupParent("vip", "supporter");
+            setGroupParent("helper", "default");
+            setGroupParent("mod", "helper");
+            setGroupParent("admin", "mod");
+            setGroupParent("developer", "admin");
+            setGroupParent("owner", "developer");
+            addGroupPermission("default", "vs.menu");
+            addGroupPermission("helper", "vs.staffinspect");
+            addGroupPermission("helper", "vs.staff.alerts");
+            addGroupPermission("mod", "vs.staffinspect.freeze");
+            loadGroups();
+            logger.info("Normalized strict default access hierarchy");
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to normalize access hierarchy", e);
+        }
     }
 
     /**

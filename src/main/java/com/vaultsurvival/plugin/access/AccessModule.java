@@ -22,9 +22,10 @@ public class AccessModule extends Module {
 
     @Override
     public void onLoad() {
-        accessService = new AccessServiceImpl(plugin.getLogger(), plugin.getDatabase());
+        accessService = new AccessServiceImpl(plugin);
         accessService.loadGroups();
         accessService.initializeDefaultGroups();
+        accessService.normalizeDefaultGroupHierarchy();
 
         // Register the service so other modules can use it
         plugin.getServiceRegistry().register(AccessService.class, accessService);

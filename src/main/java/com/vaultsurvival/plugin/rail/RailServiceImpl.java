@@ -208,6 +208,31 @@ public class RailServiceImpl implements RailService {
         return true;
     }
 
+    /** Set a pending station platform from a validated whole-chunk district selection. */
+    public boolean setPlatformChunks(int stationId, Player player, DistrictData.ChunkClaim claim) {
+        RailData.Station station = stations.get(stationId);
+        if (station == null || !station.getRequesterUuid().equals(player.getUniqueId())
+            || station.getStatus() != RailData.StationStatus.PENDING || claim == null
+            || !station.getWorldName().equals(claim.worldName())) return false;
+        var world = player.getWorld();
+        try {
+            plugin.getDatabase().executeUpdate(
+                "UPDATE rail_stations SET plat_min_x=?,plat_min_y=?,plat_min_z=?,plat_max_x=?,plat_max_y=?,plat_max_z=? WHERE id=?",
+                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight(), claim.maxBlockZ(), stationId);
+            RailData.Station updated = new RailData.Station(station.getId(), station.getDistrictId(), station.getRequesterUuid(), station.getName(), station.getWorldName(),
+                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight(), claim.maxBlockZ(),
+                station.getArrX(), station.getArrY(), station.getArrZ(), station.getArrYaw(), station.getArrPitch(), station.getTicketPrice(),
+                station.getUpkeepCost(), station.getKingdomTaxPercent(), station.getStatus(), station.getTotalRevenue(), station.getCreatedAt());
+            stations.put(stationId, updated);
+            player.sendMessage(fmt.success("Station platform set to &e" + claim.chunkCount() + " chunks&a."));
+            audit.log(player.getUniqueId(), player.getName(), "RAIL_PLATFORM_CHUNKS_SET", "STATION", String.valueOf(stationId), "chunks=" + claim.chunkCount());
+            return true;
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to set chunk station platform", e);
+            return false;
+        }
+    }
+
     @Override
     public boolean setPlatform(int stationId, Player player) {
         return setPlatform(stationId, player, 5);

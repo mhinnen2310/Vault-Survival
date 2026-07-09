@@ -56,6 +56,8 @@ public class MerchantOrderModule extends Module {
         var cmd = new MerchantOrderCommand(plugin);
         plugin.getCommand("merchant").setExecutor(cmd);
         plugin.getCommand("merchant").setTabCompleter(cmd);
+        plugin.getServer().getPluginManager().registerEvents(new MerchantOrderBoardListener(plugin), plugin);
+        plugin.getServer().getPluginManager().registerEvents(new MerchantNpcLifecycleListener(plugin), plugin);
 
         plugin.getLogger().info("Merchant commands registered");
     }

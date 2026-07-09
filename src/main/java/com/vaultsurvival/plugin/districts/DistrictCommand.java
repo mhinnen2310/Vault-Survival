@@ -38,12 +38,16 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     private final DistrictService districtService;
     private final MessageFormatter fmt;
     private final DistrictDevelopmentService development;
+    private final DistrictSelectionService selection;
+    private final DistrictNpcPlanningService npcPlanning;
 
     public DistrictCommand(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
         this.districtService = plugin.getServiceRegistry().get(DistrictService.class);
         this.fmt = plugin.getMessageFormatter();
         this.development = new DistrictDevelopmentService(plugin);
+        this.selection = plugin.getServiceRegistry().get(DistrictSelectionService.class);
+        this.npcPlanning = plugin.getServiceRegistry().get(DistrictNpcPlanningService.class);
     }
 
     @Override
@@ -55,6 +59,13 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
 
         return switch (args[0].toLowerCase()) {
             case "apply" -> handleApply(sender, args);
+            case "confirm" -> handleSelectionConfirm(sender);
+            case "cancel" -> handleSelectionCancel(sender);
+            case "selection", "chunks" -> handleSelectionStatus(sender);
+            case "expand" -> handleExpansion(sender);
+            case "borders", "border" -> handleBorders(sender);
+            case "marketzone", "market" -> handleMarketZone(sender, args);
+            case "npcs", "npc" -> handleNpcs(sender, args);
             case "current" -> handleCurrent(sender);
             case "approve" -> handleApprove(sender, args);
             case "reject" -> handleReject(sender, args);
@@ -94,7 +105,59 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         String name = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
-        districtService.apply(player, name);
+        selection.start(name, player);
+        return true;
+    }
+
+    private boolean handleSelectionConfirm(CommandSender sender) {
+        if (sender instanceof Player player) selection.confirm(player);
+        else sender.sendMessage(fmt.error("Players only."));
+        return true;
+    }
+
+    private boolean handleSelectionCancel(CommandSender sender) {
+        if (sender instanceof Player player) selection.cancel(player);
+        else sender.sendMessage(fmt.error("Players only."));
+        return true;
+    }
+
+    private boolean handleSelectionStatus(CommandSender sender) {
+        if (sender instanceof Player player) selection.showStatus(player);
+        else sender.sendMessage(fmt.error("Players only."));
+        return true;
+    }
+
+    private boolean handleExpansion(CommandSender sender) {
+        if (sender instanceof Player player) selection.startExpansion(player);
+        else sender.sendMessage(fmt.error("Players only."));
+        return true;
+    }
+
+    private boolean handleBorders(CommandSender sender) {
+        if (sender instanceof Player player) selection.showDistrictBorders(player);
+        else sender.sendMessage(fmt.error("Players only."));
+        return true;
+    }
+
+    private boolean handleMarketZone(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        if (args.length >= 2 && args[1].equalsIgnoreCase("confirm")) selection.confirm(player);
+        else if (args.length >= 2 && args[1].equalsIgnoreCase("cancel")) selection.cancel(player);
+        else if (args.length >= 2 && (args[1].equalsIgnoreCase("status") || args[1].equalsIgnoreCase("selection"))) selection.showStatus(player);
+        else selection.startMarketZone(player);
+        return true;
+    }
+
+    private boolean handleNpcs(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        String action = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "start";
+        switch (action) {
+            case "start", "plan" -> npcPlanning.start(player);
+            case "confirm" -> npcPlanning.confirm(player);
+            case "cancel" -> npcPlanning.cancel(player);
+            case "activate", "unlock" -> npcPlanning.activate(player);
+            default -> player.sendMessage(fmt.info("Usage: /district npcs <start|confirm|cancel|activate>"));
+        }
         return true;
     }
 
@@ -558,7 +621,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         if (args.length < 2) {
-            sender.sendMessage(fmt.info("Usage: &e/district station <status|request|setplatform|setarrival>"));
+            sender.sendMessage(fmt.info("Usage: &e/district station <status|request|setplatform|confirm|cancel|setarrival>"));
             return true;
         }
 
@@ -567,6 +630,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "status" -> handleStationStatus(player);
             case "request" -> handleStationRequest(player, args);
             case "setplatform" -> handleStationSetPlatform(player, args);
+            case "confirm" -> { selection.confirm(player); yield true; }
+            case "cancel" -> { selection.cancel(player); yield true; }
             case "setarrival" -> handleStationSetArrival(player, args);
             default -> { player.sendMessage(fmt.error("Unknown: " + sub)); yield true; }
         };
@@ -601,23 +666,11 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleStationSetPlatform(Player player, String[] args) {
         if (args.length < 3) {
-            player.sendMessage(fmt.info("Usage: &e/district station setplatform <id> [radius]"));
+            player.sendMessage(fmt.info("Usage: &e/district station setplatform <id>"));
             return true;
         }
         int stationId = parseInt(args[2]);
-        int radius = args.length > 3 ? parseInt(args[3]) : 5;
-        if (radius < 3) radius = 3;
-        try {
-            var railService = plugin.getServiceRegistry().get(
-                com.vaultsurvival.plugin.rail.RailService.class);
-            if (railService instanceof com.vaultsurvival.plugin.rail.RailServiceImpl impl) {
-                impl.setPlatform(stationId, player, radius);
-            } else {
-                railService.setPlatform(stationId, player);
-            }
-        } catch (Exception e) {
-            player.sendMessage(fmt.error("Rail service is not available."));
-        }
+        selection.startStationPlatform(player, stationId);
         return true;
     }
 
@@ -684,10 +737,15 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     private void sendUsage(CommandSender sender) {
         sender.sendMessage(fmt.header("District Commands"));
         sender.sendMessage(fmt.info("/district apply <name> &8- Found a district"));
+        sender.sendMessage(fmt.info("/district confirm|cancel|selection &8- Complete or adjust chunk selection"));
+        sender.sendMessage(fmt.info("/district borders &8- Show nearby district chunk borders"));
+        sender.sendMessage(fmt.info("/district expand &8- Expand your level-gated district claim"));
+        sender.sendMessage(fmt.info("/district marketzone [confirm|cancel] &8- Select the merchant market zone"));
+        sender.sendMessage(fmt.info("/district npcs <start|confirm|cancel|activate> &8- Plan and unlock district NPCs"));
         sender.sendMessage(fmt.info("/district info [id] &8- District info"));
         sender.sendMessage(fmt.info("/district station status &8- Station status"));
         sender.sendMessage(fmt.info("/district station request <name> &8- Request station"));
-        sender.sendMessage(fmt.info("/district station setplatform <id> [radius] &8- Set platform"));
+        sender.sendMessage(fmt.info("/district station setplatform <id> &8- Select a chunk platform with the district wand"));
         sender.sendMessage(fmt.info("/district station setarrival <id> &8- Set arrival"));
         sender.sendMessage(fmt.info("/district invite <player> &8- Invite to your district"));
         sender.sendMessage(fmt.info("/district kick <player> &8- Kick member"));
@@ -715,7 +773,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
-            return Arrays.asList("apply", "current", "approve", "reject", "info", "invite", "kick",
+            return Arrays.asList("apply", "confirm", "cancel", "selection", "chunks", "expand", "borders", "marketzone", "npcs", "current", "approve", "reject", "info", "invite", "kick",
                 "role", "permissions", "members", "deposit", "withdraw", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
@@ -741,6 +799,12 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("role")) {
             return List.of("list", "set", "remove").stream()
                 .filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("marketzone")) {
+            return List.of("confirm", "cancel", "status").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("npcs")) {
+            return List.of("start", "confirm", "cancel", "activate").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
         if (args.length == 4 && args[0].equalsIgnoreCase("role")
             && (args[1].equalsIgnoreCase("set") || args[1].equalsIgnoreCase("remove"))) {

@@ -30,12 +30,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Implementation of NpcService using Bukkit entities for reliable visible NPCs
- * and Interaction entities for click detection.
- *
- * Older generated code attempted packet-only player NPCs. Current Paper builds can
- * change those constructors, causing invisible bodies with only nametags. The Bukkit
- * visual keeps existing NPC data/actions working without external plugins.
+ * Implementation of NpcService using packet-backed player visuals with a Bukkit
+ * Interaction entity for click detection. A villager is used only when Mojang's
+ * profile service or the packet bridge is unavailable.
  * NPCs persist in the SQLite database and are respawned on server restart.
  */
 public class NpcServiceImpl implements NpcService {
@@ -143,6 +140,18 @@ public class NpcServiceImpl implements NpcService {
         }
 
         return true;
+    }
+
+    @Override
+    public void despawnNpcVisual(int npcId) {
+        NpcData.Npc npc = npcs.get(npcId);
+        if (npc != null) despawnNpcFromAll(npc);
+    }
+
+    @Override
+    public void respawnNpc(int npcId) {
+        NpcData.Npc npc = npcs.get(npcId);
+        if (npc != null) spawnNpcToAll(npc);
     }
 
     @Override
@@ -321,8 +330,17 @@ public class NpcServiceImpl implements NpcService {
     private void spawnNpcToPlayer(NpcData.Npc npc, Player player) {
         World world = Bukkit.getWorld(npc.getWorldName());
         if (world == null || !world.equals(player.getWorld())) return;
-
-        Bukkit.getScheduler().runTask(plugin, () -> spawnBukkitNpc(npc));
+        CompletableFuture.supplyAsync(() -> fetchSkin(npc.getSkinUsername()))
+            .thenAccept(skin -> Bukkit.getScheduler().runTask(plugin, () -> {
+                if (!player.isOnline() || !player.getWorld().equals(world)) return;
+                spawnInteractionEntity(npc);
+                if (skin != null && sendSpawnPackets(npc, player, skin)) {
+                    playerNpcEntities.computeIfAbsent(player.getUniqueId(), ignored -> ConcurrentHashMap.newKeySet()).add(npc.getEntityId());
+                    return;
+                }
+                // Visible, functional fallback. This is deliberately only used after a real skin failure.
+                spawnBukkitNpc(npc);
+            }));
     }
 
     // ========================================================================
@@ -330,7 +348,8 @@ public class NpcServiceImpl implements NpcService {
     // ========================================================================
 
     @SuppressWarnings("unchecked")
-    private void sendSpawnPackets(NpcData.Npc npc, Player player, SkinTexture skin) throws Exception {
+    private boolean sendSpawnPackets(NpcData.Npc npc, Player player, SkinTexture skin) {
+        try {
         Object connection = getPlayerConnection(player);
 
         // Build GameProfile with skin texture
@@ -368,18 +387,26 @@ public class NpcServiceImpl implements NpcService {
             Class<?> entryClass = Class.forName(
                 "net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket$Entry");
 
-            // Build entry list
             List<Object> entryList = new ArrayList<>();
             for (Constructor<?> c : entryClass.getConstructors()) {
-                if (c.getParameterCount() >= 2) {
-                    // Try the simple constructor with minimal params
-                    try {
-                        Object entry = c.newInstance(npcUuid, gameProfile, true, 1, (Object) null, (Object) null, (Object) null);
-                        entryList.add(entry);
-                        break;
-                    } catch (Exception ignored) {}
-                }
+                try {
+                    Class<?>[] parameters = c.getParameterTypes();
+                    Object[] values = new Object[parameters.length];
+                    for (int i = 0; i < parameters.length; i++) {
+                        Class<?> type = parameters[i];
+                        if (type == UUID.class) values[i] = npcUuid;
+                        else if (type == gameProfileClass) values[i] = gameProfile;
+                        else if (type == boolean.class) values[i] = true;
+                        else if (type == int.class) values[i] = 0;
+                        else if (type.getName().equals("net.minecraft.world.level.GameType")) values[i] = type.getEnumConstants()[0];
+                        else values[i] = null;
+                    }
+                    entryList.add(c.newInstance(values));
+                    break;
+                } catch (Exception ignored) { }
             }
+
+            if (entryList.isEmpty()) return false;
 
             // Create the packet: ClientboundPlayerInfoUpdatePacket(EnumSet<Action>, List<Entry>)
             for (Constructor<?> c : playerInfoClass.getConstructors()) {
@@ -390,7 +417,8 @@ public class NpcServiceImpl implements NpcService {
                 }
             }
         } catch (Exception e) {
-            logger.log(Level.FINE, "Failed to send PlayerInfo packet (NPC will use default skin): " + e.getMessage());
+            logger.log(Level.FINE, "Failed to send skin profile packet: " + e.getMessage());
+            return false;
         }
 
         // 2. Send ClientboundAddEntityPacket to spawn the entity visually
@@ -417,7 +445,8 @@ public class NpcServiceImpl implements NpcService {
 
             sendPacket(connection, addEntityPacket);
         } catch (Exception e) {
-            logger.log(Level.WARNING, "Failed to send entity spawn packet: " + e.getMessage());
+            logger.log(Level.FINE, "Failed to send player NPC spawn packet: " + e.getMessage());
+            return false;
         }
 
         // 3. Send ClientboundSetEntityDataPacket — enable all skin layers
@@ -443,6 +472,11 @@ public class NpcServiceImpl implements NpcService {
             sendPacket(connection, setDataPacket);
         } catch (Exception e) {
             logger.log(Level.FINE, "Failed to send skin metadata packet: " + e.getMessage());
+        }
+        return true;
+        } catch (Exception e) {
+            logger.log(Level.FINE, "NPC skin packet bridge failed: " + e.getMessage());
+            return false;
         }
     }
 
@@ -492,11 +526,12 @@ public class NpcServiceImpl implements NpcService {
             existingVisual.remove();
         }
 
+        boolean merchantShop = isMerchantShop(npc.getId());
         Villager villager = world.spawn(loc, Villager.class, spawned -> {
             spawned.customName(MessageFormatter.deserializeLegacy(npc.getName()));
             spawned.setCustomNameVisible(true);
             spawned.setAI(false);
-            spawned.setInvulnerable(true);
+            spawned.setInvulnerable(!merchantShop || !plugin.getConfigManager().getConfig().getBoolean("districtMarket.merchantNpc.killable", true));
             spawned.setSilent(true);
             spawned.setCollidable(false);
             spawned.setRemoveWhenFarAway(false);
@@ -509,6 +544,13 @@ public class NpcServiceImpl implements NpcService {
         npc.setVisualUuid(villager.getUniqueId());
 
         spawnInteractionEntity(npc);
+    }
+
+    private boolean isMerchantShop(int npcId) {
+        try {
+            var shops = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.merchant.shop.MerchantShopService.class);
+            return shops.getShopByNpcId(npcId) != null;
+        } catch (RuntimeException ignored) { return false; }
     }
 
     // ========================================================================
@@ -533,7 +575,7 @@ public class NpcServiceImpl implements NpcService {
             case COMMAND -> {
                 String cmd = npc.getActionData()
                     .replace("%player%", player.getName());
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+                player.performCommand(cmd.startsWith("/") ? cmd.substring(1) : cmd);
                 audit.log(player.getUniqueId(), player.getName(), "NPC_COMMAND",
                     "NPC_" + npc.getId(), cmd, "");
             }
@@ -714,7 +756,7 @@ public class NpcServiceImpl implements NpcService {
                     " (" + skinUsername + ") at " + worldName);
             }
 
-            npcs.values().forEach(this::spawnBukkitNpc);
+            npcs.values().forEach(this::spawnNpcToAll);
 
             logger.info("Loaded " + npcs.size() + " NPCs from database");
 

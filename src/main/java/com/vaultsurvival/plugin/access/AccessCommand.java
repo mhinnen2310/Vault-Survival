@@ -111,6 +111,7 @@ public class AccessCommand implements CommandExecutor, TabCompleter {
             accessService.removeFromGroup(uuid, g);
         }
         accessService.addToGroup(uuid, group, getSenderUuid(sender));
+        if (targetUuidOnline(uuid) != null) accessService.refreshPlayerPermissions(targetUuidOnline(uuid));
         sender.sendMessage(fmt.success("Set " + name + "'s rank to &e" + group));
 
         // Audit log
@@ -120,6 +121,7 @@ public class AccessCommand implements CommandExecutor, TabCompleter {
 
     private void addRank(CommandSender sender, UUID uuid, String name, String group) {
         accessService.addToGroup(uuid, group, getSenderUuid(sender));
+        if (targetUuidOnline(uuid) != null) accessService.refreshPlayerPermissions(targetUuidOnline(uuid));
         sender.sendMessage(fmt.success("Added &e" + group + "&a rank to " + name));
 
         plugin.getAuditLogger().logAdminAction(getSenderUuid(sender), sender.getName(),
@@ -128,6 +130,7 @@ public class AccessCommand implements CommandExecutor, TabCompleter {
 
     private void removeRank(CommandSender sender, UUID uuid, String name, String group) {
         accessService.removeFromGroup(uuid, group);
+        if (targetUuidOnline(uuid) != null) accessService.refreshPlayerPermissions(targetUuidOnline(uuid));
         sender.sendMessage(fmt.success("Removed &e" + group + "&a rank from " + name));
 
         plugin.getAuditLogger().logAdminAction(getSenderUuid(sender), sender.getName(),
@@ -137,6 +140,8 @@ public class AccessCommand implements CommandExecutor, TabCompleter {
     private UUID getSenderUuid(CommandSender sender) {
         return sender instanceof Player ? ((Player) sender).getUniqueId() : null;
     }
+
+    private Player targetUuidOnline(UUID uuid) { return Bukkit.getPlayer(uuid); }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {

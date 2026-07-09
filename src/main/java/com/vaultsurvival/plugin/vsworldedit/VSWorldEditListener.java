@@ -25,8 +25,8 @@ public class VSWorldEditListener implements Listener {
     private final VSWorldEditService service;
     private static final Set<String> DOUBLE_SLASH_COMMANDS = Set.of(
         "wand", "pos1", "pos2", "selection", "clearselection", "undo",
-        "fill", "replace", "walls", "outline", "floor", "ceiling", "hollow",
-        "cylinder", "circle", "sphere", "hsphere", "hollowsphere", "line",
+        "fill", "set", "replace", "walls", "outline", "floor", "ceiling", "hollow",
+        "cylinder", "hcylinder", "hollowcylinder", "circle", "hcircle", "hollowcircle", "sphere", "hsphere", "hollowsphere", "line",
         "confirm", "cancel"
     );
 

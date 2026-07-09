@@ -87,7 +87,9 @@ public class MerchantShopServiceImpl implements MerchantShopService {
             try {
                 RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
                 boolean market = regions.getRegionsAt(merchant.getLocation()).stream().anyMatch(region ->
-                    region.getType() == RegionData.RegionType.DISTRICT_PUBLIC || region.getType() == RegionData.RegionType.AUCTION_HALL);
+                    region.getType() == RegionData.RegionType.AUCTION_HALL
+                        || (region.getType() == RegionData.RegionType.DISTRICT_PUBLIC
+                            && region.getName().equalsIgnoreCase("district_market_" + district.getId())));
                 if (!market) {
                     merchant.sendMessage(fmt.error("This district requires merchant NPCs to be placed inside a market zone."));
                     return null;

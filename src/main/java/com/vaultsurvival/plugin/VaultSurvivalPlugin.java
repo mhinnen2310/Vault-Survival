@@ -32,6 +32,7 @@ import com.vaultsurvival.plugin.regions.RegionModule;
 import com.vaultsurvival.plugin.staffmode.StaffmodeModule;
 import com.vaultsurvival.plugin.staff.StaffInspectCommand;
 import com.vaultsurvival.plugin.security.AntiCheatListener;
+import com.vaultsurvival.plugin.security.StaffAlertService;
 import com.vaultsurvival.plugin.spawncity.SpawnCityModule;
 import com.vaultsurvival.plugin.spawnjobs.SpawnJobModule;
 import com.vaultsurvival.plugin.updates.UpdateService;
@@ -63,6 +64,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
     // Modules
     private AccessModule accessModule;
     private StaffmodeModule staffmodeModule;
+    private StaffAlertService staffAlertService;
 
     @Override
     public void onEnable() {
@@ -115,6 +117,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (staffAlertService != null) staffAlertService.shutdown();
         if (moduleManager != null) {
             moduleManager.disableAll();
         }
@@ -251,6 +254,11 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         getCommand("staffinspect").setExecutor(staffInspect);
         getCommand("staffinspect").setTabCompleter(staffInspect);
         getServer().getPluginManager().registerEvents(staffInspect, this);
+        staffAlertService = new StaffAlertService(this);
+        serviceRegistry.register(StaffAlertService.class, staffAlertService);
+        staffAlertService.install();
+        getServer().getPluginManager().registerEvents(staffAlertService, this);
+        staffAlertService.runStartupAudit();
         getServer().getPluginManager().registerEvents(new AntiCheatListener(this), this);
 
         // Register resource pack command

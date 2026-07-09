@@ -6,6 +6,7 @@ import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.core.Module;
 import com.vaultsurvival.plugin.dialogs.DialogService;
 import com.vaultsurvival.plugin.updates.UpdateService;
+import com.vaultsurvival.plugin.security.StaffAlertService;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -53,6 +54,7 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
         if (args[0].equalsIgnoreCase("permissions")) return handlePermissions(sender);
         if (args[0].equalsIgnoreCase("configcheck")) return handleConfigCheck(sender);
         if (args[0].equalsIgnoreCase("debugbundle")) return handleDebugBundle(sender);
+        if (args[0].equalsIgnoreCase("audit")) return handleAudit(sender);
         return handleVersion(sender);
     }
 
@@ -89,6 +91,18 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
             Files.writeString(output.toPath(), body, StandardCharsets.UTF_8);
             sender.sendMessage(fmt.success("Debug bundle written: " + output.getName()));
         } catch (Exception e) { sender.sendMessage(fmt.error("Could not write debug bundle.")); }
+        return true;
+    }
+
+    private boolean handleAudit(CommandSender sender) {
+        if (!hasVsPermission(sender, "vs.admin.alerts")) { sender.sendMessage(fmt.permissionDenied()); return true; }
+        try {
+            StaffAlertService alerts = plugin.getServiceRegistry().get(StaffAlertService.class);
+            sender.sendMessage(fmt.header("Startup Audit"));
+            alerts.getStartupReport().forEach(line -> sender.sendMessage(fmt.info(line)));
+        } catch (RuntimeException unavailable) {
+            sender.sendMessage(fmt.error("Operational alert service is unavailable."));
+        }
         return true;
     }
 
@@ -225,7 +239,7 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("version", "modules", "debug", "reload", "update", "checklist", "debugbundle", "permissions", "configcheck").stream()
+            return List.of("version", "modules", "debug", "reload", "update", "checklist", "debugbundle", "permissions", "configcheck", "audit").stream()
                 .filter(s -> s.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("update")) {
