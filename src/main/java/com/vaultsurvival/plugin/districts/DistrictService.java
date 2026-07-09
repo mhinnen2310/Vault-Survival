@@ -88,6 +88,16 @@ public interface DistrictService {
 
     boolean canManageDevelopment(UUID playerUuid, DistrictData.District district);
 
+    /** MAYOR-only district entry/exit messages. */
+    boolean setDistrictMessage(DistrictData.District district, UUID actorUuid, boolean welcome, String message);
+    String getDistrictMessage(DistrictData.District district, boolean welcome);
+
+    /** MAYOR-only district chat style. */
+    boolean setDistrictChatPrefix(DistrictData.District district, UUID actorUuid, String prefix);
+    String getDistrictChatPrefix(DistrictData.District district);
+    boolean setDistrictRoleColor(DistrictData.District district, UUID actorUuid, DistrictData.DistrictRole role, String color);
+    String getDistrictRoleColor(DistrictData.District district, DistrictData.DistrictRole role);
+
     /**
      * Deposit cash into the district treasury.
      */

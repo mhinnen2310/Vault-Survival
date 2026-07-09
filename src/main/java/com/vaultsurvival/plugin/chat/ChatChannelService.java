@@ -86,8 +86,7 @@ public class ChatChannelService {
             return;
         }
 
-        String formatted = formatService.formatChat(player, channel.prefix() + " " + message);
-        Component component = fmt.deserialize(formatted);
+        Component component = formatService.formatChatComponent(player, channel.prefix() + " " + message);
         for (Player recipient : recipients) {
             recipient.sendMessage(component);
         }

@@ -56,6 +56,11 @@ public class ConfigManager {
             );
             config.setDefaults(defaults);
             config.options().copyDefaults(true);
+            String legacyChatFormat = config.getString("chat.format", "");
+            if (legacyChatFormat.equals("%staff_marker%%district_role% &8┃ %district_label% &8┃ %player_name% &8> &f%message%")
+                || legacyChatFormat.equals("%staff_marker%%district_role% &8â”ƒ %district_label% &8â”ƒ %player_name% &8> &f%message%")) {
+                config.set("chat.format", "%district_label% &8| %district_role% &8| %player_name%%staff_marker% &8> &f%message%");
+            }
             save();
         }
     }
@@ -126,6 +131,12 @@ public class ConfigManager {
         config.set("spawn.pitch", (double) pitch);
         save();
     }
+    public String getSpawnWelcomeMessage() { return config.getString("spawn.messages.welcome", "&eWelcome to Spawn City."); }
+    public String getSpawnLeaveMessage() { return config.getString("spawn.messages.leave", "&7You are leaving Spawn City."); }
+    public void setSpawnWelcomeMessage(String value) { config.set("spawn.messages.welcome", value); save(); }
+    public void setSpawnLeaveMessage(String value) { config.set("spawn.messages.leave", value); save(); }
+    public int getSpawnClaimMaxChunks() { return Math.max(1, config.getInt("spawn.chunkClaim.maxChunks", 256)); }
+    public String getSpawnClaimWandMaterial() { return config.getString("spawn.chunkClaim.wandMaterial", "GOLDEN_AXE"); }
 
     // Chat
     public boolean isChatEnabled() { return config.getBoolean("chat.enabled", true); }

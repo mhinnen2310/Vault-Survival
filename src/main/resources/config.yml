@@ -27,6 +27,12 @@ spawn:
   z: 0.0
   yaw: 0.0
   pitch: 0.0
+  messages:
+    welcome: "&eWelcome to Spawn City."
+    leave: "&7You are leaving Spawn City."
+  chunkClaim:
+    maxChunks: 256
+    wandMaterial: GOLDEN_AXE
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ DATABASE                                                                 │
@@ -41,7 +47,7 @@ database:
 chat:
   enabled: true
   # Format: staff marker + district role | district | player
-  format: "%staff_marker%%district_role% &8┃ %district_label% &8┃ %player_name% &8> &f%message%"
+  format: "%district_label% &8| %district_role% &8| %player_name%%staff_marker% &8> &f%message%"
   playerNameColor: "&c"
   noDistrictLabel: "&7OUTLANDS"
   # Rank labels mapped by access group name (lowercase)

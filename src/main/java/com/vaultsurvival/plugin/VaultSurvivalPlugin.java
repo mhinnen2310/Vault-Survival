@@ -2,6 +2,7 @@ package com.vaultsurvival.plugin;
 
 import com.vaultsurvival.plugin.access.AccessModule;
 import com.vaultsurvival.plugin.area.CurrentAreaService;
+import com.vaultsurvival.plugin.area.AreaGreetingListener;
 import com.vaultsurvival.plugin.area.WhereAmICommand;
 import com.vaultsurvival.plugin.breach.BreachModule;
 import com.vaultsurvival.plugin.chat.ChatListener;
@@ -228,6 +229,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         // --- Post-enable registrations (depend on services being registered) ---
         CurrentAreaService currentAreaService = new CurrentAreaService(this);
         serviceRegistry.register(CurrentAreaService.class, currentAreaService);
+        getServer().getPluginManager().registerEvents(new AreaGreetingListener(this, currentAreaService), this);
         ChatChannelService chatChannelService = new ChatChannelService(this);
         serviceRegistry.register(ChatChannelService.class, chatChannelService);
 

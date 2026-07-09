@@ -132,6 +132,17 @@ public final class DistrictSelectionService implements Listener {
         updateActionbar(player, selection);
     }
 
+    public void startSpawnCityClaim(Player player) {
+        if (!player.hasPermission("vaultsurvival.spawncity.admin")) { player.sendMessage(fmt.permissionDenied()); return; }
+        cancel(player, false);
+        Selection selection = new Selection("Spawn City", player.getWorld().getName(), false, null,
+            plugin.getConfigManager().getSpawnClaimMaxChunks(), null, null, -1, true);
+        selections.put(player.getUniqueId(), selection);
+        giveWand(player, plugin.getConfigManager().getSpawnClaimWandMaterial(), "&6&lSpawn City Claim Wand");
+        player.sendMessage(fmt.success("Spawn City chunk claim started. Select up to &e" + selection.limit + " chunks&a, then use &e/spawncity claim confirm&a."));
+        updateActionbar(player, selection);
+    }
+
     private void begin(Player player, String name, boolean expansion, DistrictData.ChunkClaim existing, int limit) {
         cancel(player, false);
         Selection selection = new Selection(name, player.getWorld().getName(), expansion, existing, limit);
@@ -160,7 +171,7 @@ public final class DistrictSelectionService implements Listener {
             player.sendMessage(fmt.error("Return to the selected world before confirming."));
             return;
         }
-        if ((!selection.isMarketZone() && !selection.isStationPlatform() && !selection.expansion && selection.chunks.size() != selection.limit)
+        if ((!selection.isMarketZone() && !selection.isStationPlatform() && !selection.isSpawnCityClaim() && !selection.expansion && selection.chunks.size() != selection.limit)
             || (selection.expansion && (selection.chunks.size() <= selection.existing.chunkCount() || selection.chunks.size() > selection.limit))) {
             player.sendMessage(fmt.error(selection.expansion
                 ? "Select more than " + selection.existing.chunkCount() + " and no more than " + selection.limit + " chunks."
@@ -173,7 +184,9 @@ public final class DistrictSelectionService implements Listener {
             return;
         }
         boolean completed;
-        if (selection.isStationPlatform()) {
+        if (selection.isSpawnCityClaim()) {
+            completed = setSpawnCityClaim(player, claim);
+        } else if (selection.isStationPlatform()) {
             completed = setStationPlatform(player, selection.stationId, claim);
         } else if (selection.isMarketZone()) {
             completed = createMarketZone(player, selection.marketDistrict, claim);
@@ -219,7 +232,7 @@ public final class DistrictSelectionService implements Listener {
         }
         player.sendMessage(fmt.header("District Chunk Selection"));
         player.sendMessage(fmt.info("District: &e" + selection.name + " &7| Selected: &e" + selection.chunks.size() + "/" + selection.limit));
-        player.sendMessage(fmt.info("Mode: &e" + (selection.isStationPlatform() ? "STATION PLATFORM" : selection.isMarketZone() ? "MARKET ZONE" : selection.expansion ? "EXPAND" : "CREATE") + " &7| Rectangle: " + (asRectangle(selection) == null ? "&cNo" : "&aYes")));
+        player.sendMessage(fmt.info("Mode: &e" + (selection.isSpawnCityClaim() ? "SPAWN CITY" : selection.isStationPlatform() ? "STATION PLATFORM" : selection.isMarketZone() ? "MARKET ZONE" : selection.expansion ? "EXPAND" : "CREATE") + " &7| Rectangle: " + (asRectangle(selection) == null ? "&cNo" : "&aYes")));
     }
 
     public void showDistrictBorders(Player player) {
@@ -322,13 +335,17 @@ public final class DistrictSelectionService implements Listener {
     @EventHandler public void onJoin(PlayerJoinEvent event) { removeWands(event.getPlayer()); }
 
     private void giveWand(Player player) {
+        giveWand(player, plugin.getConfigManager().getConfig().getString("districts.selection.wandMaterial", "GOLDEN_AXE"), "&b&lDistrict Selection Wand");
+    }
+
+    private void giveWand(Player player, String materialName, String displayName) {
         removeWands(player);
         Material material;
-        try { material = Material.valueOf(plugin.getConfigManager().getConfig().getString("districts.selection.wandMaterial", "GOLDEN_AXE").toUpperCase()); }
+        try { material = Material.valueOf(materialName.toUpperCase()); }
         catch (IllegalArgumentException ignored) { material = Material.GOLDEN_AXE; }
         ItemStack wand = new ItemStack(material);
         ItemMeta meta = wand.getItemMeta();
-        meta.displayName(fmt.deserialize("&b&lDistrict Selection Wand"));
+        meta.displayName(fmt.deserialize(displayName));
         meta.lore(java.util.List.of(fmt.deserialize("&7Click: add chunk"), fmt.deserialize("&7Sneak-click: remove chunk"), fmt.deserialize("&8/district confirm to finish")));
         meta.getPersistentDataContainer().set(wandKey, PersistentDataType.BYTE, (byte) 1);
         wand.setItemMeta(meta);
@@ -391,6 +408,25 @@ public final class DistrictSelectionService implements Listener {
         return false;
     }
 
+    private boolean setSpawnCityClaim(Player player, DistrictData.ChunkClaim claim) {
+        if (!player.hasPermission("vaultsurvival.spawncity.admin")) return false;
+        try {
+            RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
+            regions.getAllRegions().stream().filter(region -> region.getName().equalsIgnoreCase("spawn_city_claim"))
+                .map(RegionData.Region::getId).toList().forEach(regions::deleteRegion);
+            var world = player.getWorld();
+            var region = regions.createRegion("spawn_city_claim", RegionData.RegionType.SPAWN_PUBLIC, claim.worldName(),
+                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight(), claim.maxBlockZ(), 50);
+            if (region == null) return false;
+            plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "SPAWN_CITY_CHUNK_CLAIM_SET", "REGION", String.valueOf(region.getId()), "chunks=" + claim.chunkCount());
+            player.sendMessage(fmt.success("Spawn City claim set to &e" + claim.chunkCount() + " chunks&a."));
+            return true;
+        } catch (RuntimeException unavailable) {
+            player.sendMessage(fmt.error("Region service is unavailable; Spawn City claim was not changed."));
+            return false;
+        }
+    }
+
     private void updateActionbar(Player player, Selection selection) {
         player.sendActionBar(Component.text("District chunks: " + selection.chunks.size() + "/" + selection.limit + " | /district confirm"));
     }
@@ -431,6 +467,7 @@ public final class DistrictSelectionService implements Listener {
         private final DistrictData.District marketDistrict;
         private final DistrictData.District stationDistrict;
         private final int stationId;
+        private final boolean spawnCityClaim;
         private final LinkedHashSet<ChunkKey> chunks = new LinkedHashSet<>();
         private long lastTouched = System.currentTimeMillis();
 
@@ -444,6 +481,11 @@ public final class DistrictSelectionService implements Listener {
 
         private Selection(String name, String worldName, boolean expansion, DistrictData.ChunkClaim existing, int limit,
                           DistrictData.District marketDistrict, DistrictData.District stationDistrict, int stationId) {
+            this(name, worldName, expansion, existing, limit, marketDistrict, stationDistrict, stationId, false);
+        }
+
+        private Selection(String name, String worldName, boolean expansion, DistrictData.ChunkClaim existing, int limit,
+                          DistrictData.District marketDistrict, DistrictData.District stationDistrict, int stationId, boolean spawnCityClaim) {
             this.name = name;
             this.worldName = worldName;
             this.expansion = expansion;
@@ -452,10 +494,12 @@ public final class DistrictSelectionService implements Listener {
             this.marketDistrict = marketDistrict;
             this.stationDistrict = stationDistrict;
             this.stationId = stationId;
+            this.spawnCityClaim = spawnCityClaim;
         }
 
         private boolean isMarketZone() { return marketDistrict != null; }
         private boolean isStationPlatform() { return stationDistrict != null; }
+        private boolean isSpawnCityClaim() { return spawnCityClaim; }
         private DistrictData.District ownerDistrict() { return marketDistrict != null ? marketDistrict : stationDistrict; }
     }
 }

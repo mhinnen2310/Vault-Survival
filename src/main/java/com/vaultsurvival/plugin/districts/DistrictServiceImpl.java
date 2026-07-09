@@ -684,6 +684,59 @@ public class DistrictServiceImpl implements DistrictService {
             DistrictData.DistrictRole.CO_MAYOR, DistrictData.DistrictRole.BUILDER);
     }
 
+    @Override
+    public boolean setDistrictMessage(DistrictData.District district, UUID actorUuid, boolean welcome, String message) {
+        return setMayorSetting(district, actorUuid, welcome ? "message.welcome" : "message.leave", message);
+    }
+
+    @Override
+    public String getDistrictMessage(DistrictData.District district, boolean welcome) {
+        return getSetting(district, welcome ? "message.welcome" : "message.leave", "");
+    }
+
+    @Override
+    public boolean setDistrictChatPrefix(DistrictData.District district, UUID actorUuid, String prefix) {
+        return setMayorSetting(district, actorUuid, "chat.prefix", prefix);
+    }
+
+    @Override
+    public String getDistrictChatPrefix(DistrictData.District district) {
+        return getSetting(district, "chat.prefix", district == null ? "" : district.getName());
+    }
+
+    @Override
+    public boolean setDistrictRoleColor(DistrictData.District district, UUID actorUuid, DistrictData.DistrictRole role, String color) {
+        return role != null && setMayorSetting(district, actorUuid, "chat.role." + role.name(), color);
+    }
+
+    @Override
+    public String getDistrictRoleColor(DistrictData.District district, DistrictData.DistrictRole role) {
+        String fallback = role == null ? "&7" : switch (role) {
+            case MAYOR -> "&6"; case CO_MAYOR -> "&e"; case TREASURER -> "&a"; case MERCHANT -> "&2";
+            case POLICE, WARDEN -> "&9"; case BUILDER -> "&b"; case DIPLOMAT -> "&d"; case GUEST -> "&7";
+            case MEMBER -> "&f"; case VISITOR -> "&7";
+        };
+        return getSetting(district, "chat.role." + (role == null ? "VISITOR" : role.name()), fallback);
+    }
+
+    private boolean setMayorSetting(DistrictData.District district, UUID actorUuid, String key, String value) {
+        if (district == null || actorUuid == null || !district.isMayor(actorUuid) || value == null || value.length() > 96) return false;
+        try {
+            plugin.getDatabase().executeUpdate("INSERT INTO district_settings (district_id,setting_key,setting_value,updated_at) VALUES (?,?,?,datetime('now')) ON CONFLICT(district_id,setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=datetime('now')",
+                district.getId(), key, value);
+            audit.log(actorUuid, Bukkit.getOfflinePlayer(actorUuid).getName(), "DISTRICT_SETTING_UPDATE", "DISTRICT", String.valueOf(district.getId()), key);
+            return true;
+        } catch (SQLException error) { logger.log(Level.WARNING, "Failed to save district setting", error); return false; }
+    }
+
+    private String getSetting(DistrictData.District district, String key, String fallback) {
+        if (district == null) return fallback;
+        try (Connection connection = plugin.getDatabase().getConnection(); PreparedStatement statement = connection.prepareStatement("SELECT setting_value FROM district_settings WHERE district_id=? AND setting_key=?")) {
+            statement.setInt(1, district.getId()); statement.setString(2, key); ResultSet result = statement.executeQuery();
+            return result.next() ? result.getString(1) : fallback;
+        } catch (SQLException ignored) { return fallback; }
+    }
+
     private boolean hasAnyRole(UUID playerUuid, DistrictData.District district, DistrictData.DistrictRole... roles) {
         if (district == null) return false;
         Set<DistrictData.DistrictRole> playerRoles = district.getRoles(playerUuid);

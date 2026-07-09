@@ -4,6 +4,7 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditData;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditService;
+import com.vaultsurvival.plugin.districts.DistrictSelectionService;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -22,8 +23,10 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
     private final SpawnCityService service;
     private final VSWorldEditService vwe;
     private final MessageFormatter fmt;
+    private final VaultSurvivalPlugin plugin;
 
     public SpawnCityCommand(VaultSurvivalPlugin plugin) {
+        this.plugin = plugin;
         this.service = plugin.getServiceRegistry().get(SpawnCityService.class);
         this.vwe = plugin.getServiceRegistry().get(VSWorldEditService.class);
         this.fmt = plugin.getMessageFormatter();
@@ -42,6 +45,8 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
             case "setauctionhallregion" -> handleSetRegion(sender, "auction_hall");
             case "setmintregion" -> handleSetRegion(sender, "mint");
             case "regions" -> handleRegions(sender);
+            case "claim" -> handleClaim(sender, args);
+            case "message" -> handleMessage(sender, args);
             default -> { sendUsage(sender); yield true; }
         };
     }
@@ -146,6 +151,29 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private boolean handleClaim(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("vaultsurvival.spawncity.admin")) { sender.sendMessage(fmt.permissionDenied()); return true; }
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Only players can claim Spawn City chunks.")); return true; }
+        DistrictSelectionService selection = plugin.getServiceRegistry().get(DistrictSelectionService.class);
+        if (args.length >= 2 && args[1].equalsIgnoreCase("confirm")) selection.confirm(player);
+        else if (args.length >= 2 && args[1].equalsIgnoreCase("cancel")) selection.cancel(player);
+        else if (args.length >= 2 && args[1].equalsIgnoreCase("status")) selection.showStatus(player);
+        else selection.startSpawnCityClaim(player);
+        return true;
+    }
+
+    private boolean handleMessage(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("vaultsurvival.spawncity.admin")) { sender.sendMessage(fmt.permissionDenied()); return true; }
+        if (args.length < 3 || !(args[1].equalsIgnoreCase("welcome") || args[1].equalsIgnoreCase("leave"))) {
+            sender.sendMessage(fmt.error("Usage: /spawncity message <welcome|leave> <text>")); return true;
+        }
+        String message = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
+        if (args[1].equalsIgnoreCase("welcome")) plugin.getConfigManager().setSpawnWelcomeMessage(message);
+        else plugin.getConfigManager().setSpawnLeaveMessage(message);
+        sender.sendMessage(fmt.success("Spawn City " + args[1].toLowerCase() + " message updated."));
+        return true;
+    }
+
     private void sendUsage(CommandSender sender) {
         sender.sendMessage(fmt.header("Spawn City Commands"));
         sender.sendMessage(fmt.info("/spawncity info &8- Show city info"));
@@ -156,6 +184,8 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(fmt.info("/spawncity setcapitalregion &8- Save /vwe selection as capital"));
             sender.sendMessage(fmt.info("/spawncity setauctionhallregion &8- Save /vwe selection as AH"));
             sender.sendMessage(fmt.info("/spawncity setmintregion &8- Save /vwe selection as Mint"));
+            sender.sendMessage(fmt.info("/spawncity claim [confirm|cancel] &8- Claim Spawn City chunks"));
+            sender.sendMessage(fmt.info("/spawncity message <welcome|leave> <text> &8- Set area messages"));
         }
         sender.sendMessage(fmt.info("/spawncity regions &8- List all saved regions"));
     }
@@ -164,9 +194,11 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             return Stream.of("info","setname","setspawn","teleport","setcapitalregion",
-                "setauctionhallregion","setmintregion","regions")
+                "setauctionhallregion","setmintregion","regions","claim","message")
                 .filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
+        if (args.length == 2 && args[0].equalsIgnoreCase("claim")) return Stream.of("confirm", "cancel", "status").filter(s -> s.startsWith(args[1].toLowerCase())).toList();
+        if (args.length == 2 && args[0].equalsIgnoreCase("message")) return Stream.of("welcome", "leave").filter(s -> s.startsWith(args[1].toLowerCase())).toList();
         return List.of();
     }
 }

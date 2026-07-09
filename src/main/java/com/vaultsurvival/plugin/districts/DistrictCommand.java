@@ -66,6 +66,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "borders", "border" -> handleBorders(sender);
             case "marketzone", "market" -> handleMarketZone(sender, args);
             case "npcs", "npc" -> handleNpcs(sender, args);
+            case "message", "messages" -> handleDistrictMessage(sender, args);
+            case "chat" -> handleDistrictChat(sender, args);
             case "current" -> handleCurrent(sender);
             case "approve" -> handleApprove(sender, args);
             case "reject" -> handleReject(sender, args);
@@ -158,6 +160,42 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "activate", "unlock" -> npcPlanning.activate(player);
             default -> player.sendMessage(fmt.info("Usage: /district npcs <start|confirm|cancel|activate>"));
         }
+        return true;
+    }
+
+    private boolean handleDistrictMessage(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) return true;
+        if (args.length < 3 || !(args[1].equalsIgnoreCase("welcome") || args[1].equalsIgnoreCase("leave"))) {
+            player.sendMessage(fmt.error("Usage: /district message <welcome|leave> <text>")); return true;
+        }
+        DistrictData.District district = districtService.getPlayerDistrict(player.getUniqueId());
+        String text = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
+        if (districtService.setDistrictMessage(district, player.getUniqueId(), args[1].equalsIgnoreCase("welcome"), text)) player.sendMessage(fmt.success("District " + args[1].toLowerCase() + " message updated."));
+        else player.sendMessage(fmt.error("Only the MAYOR can change district messages."));
+        return true;
+    }
+
+    private boolean handleDistrictChat(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) return true;
+        DistrictData.District district = districtService.getPlayerDistrict(player.getUniqueId());
+        if (args.length < 2) { player.sendMessage(fmt.info("Usage: /district chat <prefix|rolecolor> ...")); return true; }
+        if (args[1].equalsIgnoreCase("prefix")) {
+            if (args.length < 3) { player.sendMessage(fmt.error("Usage: /district chat prefix <text>")); return true; }
+            String prefix = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
+            if (districtService.setDistrictChatPrefix(district, player.getUniqueId(), prefix)) player.sendMessage(fmt.success("District chat prefix updated."));
+            else player.sendMessage(fmt.error("Only the MAYOR can change the district prefix."));
+            return true;
+        }
+        if (args[1].equalsIgnoreCase("rolecolor")) {
+            if (args.length < 4) { player.sendMessage(fmt.error("Usage: /district chat rolecolor <role> <color>")); return true; }
+            DistrictData.DistrictRole role = parseRole(args[2]);
+            String color = legacyColor(args[3]);
+            if (role == null || color == null) { player.sendMessage(fmt.error("Use a valid role and color: red, gold, yellow, green, aqua, blue, purple, gray, white.")); return true; }
+            if (districtService.setDistrictRoleColor(district, player.getUniqueId(), role, color)) player.sendMessage(fmt.success(role.name() + " chat color updated."));
+            else player.sendMessage(fmt.error("Only the MAYOR can change role colors."));
+            return true;
+        }
+        player.sendMessage(fmt.info("Usage: /district chat <prefix|rolecolor> ..."));
         return true;
     }
 
@@ -742,6 +780,9 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("/district expand &8- Expand your level-gated district claim"));
         sender.sendMessage(fmt.info("/district marketzone [confirm|cancel] &8- Select the merchant market zone"));
         sender.sendMessage(fmt.info("/district npcs <start|confirm|cancel|activate> &8- Plan and unlock district NPCs"));
+        sender.sendMessage(fmt.info("/district message <welcome|leave> <text> &8- Mayor-only area messages"));
+        sender.sendMessage(fmt.info("/district chat prefix <text> &8- Mayor-only district chat prefix"));
+        sender.sendMessage(fmt.info("/district chat rolecolor <role> <color> &8- Mayor-only role color"));
         sender.sendMessage(fmt.info("/district info [id] &8- District info"));
         sender.sendMessage(fmt.info("/district station status &8- Station status"));
         sender.sendMessage(fmt.info("/district station request <name> &8- Request station"));
@@ -773,7 +814,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
-            return Arrays.asList("apply", "confirm", "cancel", "selection", "chunks", "expand", "borders", "marketzone", "npcs", "current", "approve", "reject", "info", "invite", "kick",
+            return Arrays.asList("apply", "confirm", "cancel", "selection", "chunks", "expand", "borders", "marketzone", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
                 "role", "permissions", "members", "deposit", "withdraw", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
@@ -806,6 +847,9 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("npcs")) {
             return List.of("start", "confirm", "cancel", "activate").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
+        if (args.length == 2 && args[0].equalsIgnoreCase("message")) return List.of("welcome", "leave").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+        if (args.length == 2 && args[0].equalsIgnoreCase("chat")) return List.of("prefix", "rolecolor").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+        if (args.length == 3 && args[0].equalsIgnoreCase("chat") && args[1].equalsIgnoreCase("rolecolor")) return Arrays.stream(DistrictData.DistrictRole.values()).map(Enum::name).filter(a -> a.startsWith(args[2].toUpperCase())).toList();
         if (args.length == 4 && args[0].equalsIgnoreCase("role")
             && (args[1].equalsIgnoreCase("set") || args[1].equalsIgnoreCase("remove"))) {
             return Arrays.stream(DistrictData.DistrictRole.values())
@@ -843,6 +887,16 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         } catch (IllegalArgumentException ignored) {
             return null;
         }
+    }
+
+    private String legacyColor(String raw) {
+        if (raw == null) return null;
+        if (raw.matches("&[0-9a-fA-F]")) return raw.toLowerCase(Locale.ROOT);
+        return switch (raw.toLowerCase(Locale.ROOT)) {
+            case "red" -> "&c"; case "gold", "orange" -> "&6"; case "yellow" -> "&e"; case "green" -> "&a";
+            case "darkgreen" -> "&2"; case "aqua", "cyan" -> "&b"; case "blue" -> "&9"; case "purple" -> "&d";
+            case "gray", "grey" -> "&7"; case "darkgray", "darkgrey" -> "&8"; case "white" -> "&f"; default -> null;
+        };
     }
 
     private DistrictData.LawKey parseLaw(String raw) {

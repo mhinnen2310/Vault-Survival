@@ -36,6 +36,7 @@ public class UpdateService {
     }
 
     public void check(CommandSender sender) {
+        send(sender, fmt.info("Checking GitHub for Vault Survival updates..."));
         plugin.getScheduler().runAsync(() -> {
             try {
                 ReleaseInfo latest = fetchLatestRelease();
@@ -59,11 +60,12 @@ public class UpdateService {
             try {
                 ReleaseInfo latest = cachedLatest != null ? cachedLatest : fetchLatestRelease();
                 cachedLatest = latest;
+                send(sender, fmt.info("Latest release: &e" + latest.tagName() + "&7. Downloading &e" + latest.assetName() + "&7..."));
                 Files.createDirectories(stagedDir());
                 Path stagedJar = stagedJarPath();
                 download(latest.assetDownloadUrl(), stagedJar);
                 send(sender,
-                    fmt.success("Downloaded &e" + latest.assetName() + " &ato staged updates."),
+                    fmt.success("Downloaded &e" + latest.assetName() + " &ato staged updates (&e" + Files.size(stagedJar) + " bytes&a)."),
                     fmt.info("Staged: &e" + stagedJar),
                     fmt.info("Use &e/vs update install &7to queue it for the next restart."));
             } catch (Exception e) {
@@ -73,6 +75,7 @@ public class UpdateService {
     }
 
     public void install(CommandSender sender) {
+        send(sender, fmt.info("Preparing staged update for Paper's next restart..."));
         plugin.getScheduler().runAsync(() -> {
             try {
                 Path stagedJar = stagedJarPath();
@@ -98,7 +101,7 @@ public class UpdateService {
         sender.sendMessage(fmt.info("Repo: &e" + repoSlug()));
         sender.sendMessage(fmt.info("Asset: &e" + plugin.getConfigManager().getUpdateAssetName()));
         sender.sendMessage(fmt.info("Current: &e" + currentVersion()));
-        sender.sendMessage(fmt.info("Staged jar: &e" + stagedJarPath()));
+        sender.sendMessage(fmt.info("Staged jar: " + (Files.exists(stagedJarPath()) ? "&aREADY &7" : "&eNOT STAGED &7") + stagedJarPath()));
         sender.sendMessage(fmt.info("Paper update folder: &e" + updateDir()));
     }
 

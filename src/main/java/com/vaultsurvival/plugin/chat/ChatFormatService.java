@@ -6,6 +6,8 @@ import com.vaultsurvival.plugin.core.ConfigManager;
 import com.vaultsurvival.plugin.districts.DistrictData;
 import com.vaultsurvival.plugin.districts.DistrictService;
 import org.bukkit.entity.Player;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.HoverEvent;
 
 /**
  * Builds the Vault Survival chat prefix from access rank and district data.
@@ -46,7 +48,7 @@ public class ChatFormatService {
             if (district == null || district.getName() == null || district.getName().isBlank()) {
                 return noDistrict;
             }
-            return config.getDistrictLabelFormat().replace("%district%", district.getName());
+            return config.getDistrictLabelFormat().replace("%district%", districtService.getDistrictChatPrefix(district));
         } catch (RuntimeException ignored) {
             return noDistrict;
         }
@@ -57,14 +59,15 @@ public class ChatFormatService {
             DistrictService districts = plugin.getServiceRegistry().get(DistrictService.class);
             DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
             if (district == null) return "&7VISITOR";
-            return "&b" + districts.getHighestDistrictRole(player.getUniqueId(), district).name();
+            DistrictData.DistrictRole role = districts.getHighestDistrictRole(player.getUniqueId(), district);
+            return districts.getDistrictRoleColor(district, role) + role.name();
         } catch (RuntimeException ignored) { return "&7VISITOR"; }
     }
 
-    private String getStaffMarker(Player player) {
+    public String getStaffMarker(Player player) {
         try {
             AccessService access = plugin.getServiceRegistry().get(AccessService.class);
-            return access.isStaff(player.getUniqueId()) ? "&c* &r" : "";
+            return access.isStaff(player.getUniqueId()) ? "&c*" : "";
         } catch (RuntimeException ignored) { return ""; }
     }
 
@@ -76,5 +79,40 @@ public class ChatFormatService {
             .replace("%district_label%", getDistrictLabel(player))
             .replace("%player_name%", config.getChatPlayerNameColor() + player.getName())
             .replace("%message%", message);
+    }
+
+    /** Builds a chat component with a hover card only on the username. */
+    public Component formatChatComponent(Player player, String message) {
+        String token = "__VS_PLAYER__";
+        String template = config.getChatFormat()
+            .replace("%staff_marker%", getStaffMarker(player))
+            .replace("%district_role%", getDistrictRoleLabel(player))
+            .replace("%rank_label%", getRankLabel(player))
+            .replace("%district_label%", getDistrictLabel(player))
+            .replace("%player_name%", token)
+            .replace("%message%", message);
+        int index = template.indexOf(token);
+        if (index < 0) return plugin.getMessageFormatter().deserialize(template);
+        Component before = plugin.getMessageFormatter().deserialize(template.substring(0, index));
+        Component username = plugin.getMessageFormatter().deserialize(config.getChatPlayerNameColor() + player.getName())
+            .hoverEvent(HoverEvent.showText(plugin.getMessageFormatter().deserialize(hoverText(player))));
+        Component after = plugin.getMessageFormatter().deserialize(template.substring(index + token.length()));
+        return before.append(username).append(after);
+    }
+
+    private String hoverText(Player player) {
+        String districtName = "None";
+        String role = "VISITOR";
+        try {
+            DistrictService districts = plugin.getServiceRegistry().get(DistrictService.class);
+            DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
+            if (district != null) {
+                districtName = district.getName();
+                role = districts.getHighestDistrictRole(player.getUniqueId(), district).name();
+            }
+        } catch (RuntimeException ignored) { }
+        return "&f" + player.getName() + "\n&7Rank: " + getRankLabel(player)
+            + "\n&7District: &e" + districtName + "\n&7District role: &f" + role
+            + (getStaffMarker(player).isEmpty() ? "" : "\n&cStaff");
     }
 }

@@ -730,6 +730,8 @@ public class DatabaseManager {
                 "created_at INTEGER NOT NULL" +
             ")",
 
+            "CREATE TABLE IF NOT EXISTS district_settings (district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE, setting_key TEXT NOT NULL, setting_value TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(district_id, setting_key))",
+
             "CREATE TABLE IF NOT EXISTS district_claims (" +
                 "district_id INTEGER PRIMARY KEY REFERENCES districts(id) ON DELETE CASCADE," +
                 "world TEXT NOT NULL," +
