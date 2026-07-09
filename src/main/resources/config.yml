@@ -139,6 +139,35 @@ districts:
   evidence:
     expireDays: 14
 
+districtDevelopment:
+  scaling:
+    enabled: true
+    useGlobalPopulationScaling: true
+    useDistrictPopulationScaling: true
+    activeWindowDays: 7
+    lowPopulation:
+      enabled: true
+      globalActivePlayersThreshold: 20
+      requirementMultiplier: 0.70
+      upkeepMultiplier: 0.60
+      downgradeDelayMultiplier: 2.0
+      maintenanceDecayMultiplier: 0.50
+    districtSizeBands:
+      tiny: { activeMembersMin: 1, activeMembersMax: 3, requirementMultiplier: 0.65, upkeepMultiplier: 0.60, maxLevelSoftCap: 3 }
+      small: { activeMembersMin: 4, activeMembersMax: 8, requirementMultiplier: 1.00, upkeepMultiplier: 1.00, maxLevelSoftCap: 4 }
+      medium: { activeMembersMin: 9, activeMembersMax: 15, requirementMultiplier: 1.35, upkeepMultiplier: 1.30, maxLevelSoftCap: 5 }
+      large: { activeMembersMin: 16, activeMembersMax: 999, requirementMultiplier: 1.75, upkeepMultiplier: 1.80, maxLevelSoftCap: 6 }
+    contributionCaps:
+      lowLevelsMaxSinglePlayerPercent: 70
+      midLevelsMaxSinglePlayerPercent: 50
+      highLevelsMaxSinglePlayerPercent: 35
+    dormantDistricts:
+      enabled: true
+      inactiveDaysBeforeDormant: 14
+      dormantUpkeepMultiplier: 0.25
+      dormantCanUpgrade: false
+      dormantDowngradePausedIfGlobalLowPop: true
+
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ RESTORATION                                                              │
 # └──────────────────────────────────────────────────────────────────────────┘
