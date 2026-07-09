@@ -9,8 +9,10 @@ import com.vaultsurvival.plugin.regions.RegionData;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.sql.*;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
@@ -28,6 +30,8 @@ public class DistrictServiceImpl implements DistrictService {
     private final MessageFormatter fmt;
     private final Logger logger;
     private final Map<Integer, DistrictData.District> districts = new ConcurrentHashMap<>();
+    private BukkitTask lawReloadTask;
+    private LocalDate lastLawReload = LocalDate.now();
 
     public DistrictServiceImpl(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
@@ -89,6 +93,9 @@ public class DistrictServiceImpl implements DistrictService {
                 // Persist the founder as first member
                 plugin.getDatabase().executeUpdate(
                     "INSERT INTO district_members (district_id, player_uuid, role) VALUES (?, ?, 'MAYOR')",
+                    id, founder.getUniqueId().toString());
+                plugin.getDatabase().executeUpdate(
+                    "INSERT OR IGNORE INTO district_member_roles (district_id, player_uuid, role) VALUES (?, ?, 'MAYOR')",
                     id, founder.getUniqueId().toString());
 
                 audit.log(founder.getUniqueId(), founder.getName(), "DISTRICT_APPLY", "DISTRICT",
@@ -172,7 +179,7 @@ public class DistrictServiceImpl implements DistrictService {
         if (d == null || d.getStatus() != DistrictData.DistrictStatus.ACTIVE) return false;
 
         // Only mayor or admin can disband
-        if (!d.isMayor(actorUuid)) {
+        if (!canManageRoles(actorUuid, d)) {
             var player = Bukkit.getPlayer(actorUuid);
             if (player != null && !player.hasPermission("vs.district.admin")) return false;
         }
@@ -194,13 +201,16 @@ public class DistrictServiceImpl implements DistrictService {
     public boolean inviteMember(int districtId, UUID actorUuid, UUID targetUuid) {
         DistrictData.District d = districts.get(districtId);
         if (d == null || d.getStatus() != DistrictData.DistrictStatus.ACTIVE) return false;
-        if (!d.isCouncil(actorUuid)) return false;
+        if (!canManageRoles(actorUuid, d)) return false;
         if (d.isMember(targetUuid)) return false;
 
-        d.addMember(targetUuid, DistrictData.DistrictRole.CITIZEN);
+        d.addMember(targetUuid, DistrictData.DistrictRole.MEMBER);
         try {
             plugin.getDatabase().executeUpdate(
-                "INSERT OR IGNORE INTO district_members (district_id, player_uuid, role) VALUES (?, ?, 'CITIZEN')",
+                "INSERT OR IGNORE INTO district_members (district_id, player_uuid, role) VALUES (?, ?, 'MEMBER')",
+                districtId, targetUuid.toString());
+            plugin.getDatabase().executeUpdate(
+                "INSERT OR IGNORE INTO district_member_roles (district_id, player_uuid, role) VALUES (?, ?, 'MEMBER')",
                 districtId, targetUuid.toString());
         } catch (SQLException e) {
             logger.log(Level.WARNING, "Failed to invite member", e);
@@ -212,7 +222,7 @@ public class DistrictServiceImpl implements DistrictService {
     public boolean kickMember(int districtId, UUID actorUuid, UUID targetUuid) {
         DistrictData.District d = districts.get(districtId);
         if (d == null) return false;
-        if (!d.isCouncil(actorUuid)) return false;
+        if (!canManageRoles(actorUuid, d)) return false;
         if (d.isMayor(targetUuid)) return false; // can't kick mayor
         if (!d.isMember(targetUuid)) return false;
 
@@ -231,16 +241,50 @@ public class DistrictServiceImpl implements DistrictService {
     public boolean setRole(int districtId, UUID actorUuid, UUID targetUuid, DistrictData.DistrictRole role) {
         DistrictData.District d = districts.get(districtId);
         if (d == null) return false;
-        if (!d.isMayor(actorUuid)) return false;
+        if (!canManageRoles(actorUuid, d)) return false;
         if (!d.isMember(targetUuid)) return false;
+        if (role == DistrictData.DistrictRole.VISITOR) return false;
+        if (role == DistrictData.DistrictRole.MAYOR && !d.isMayor(actorUuid)) return false;
 
         d.setRole(targetUuid, role);
         try {
             plugin.getDatabase().executeUpdate(
+                "INSERT OR IGNORE INTO district_member_roles (district_id, player_uuid, role) VALUES (?, ?, ?)",
+                districtId, targetUuid.toString(), role.name());
+            plugin.getDatabase().executeUpdate(
                 "UPDATE district_members SET role = ? WHERE district_id = ? AND player_uuid = ?",
-                role.name(), districtId, targetUuid.toString());
+                d.getHighestRole(targetUuid).name(), districtId, targetUuid.toString());
         } catch (SQLException e) {
             logger.log(Level.WARNING, "Failed to set role", e);
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean removeRole(int districtId, UUID actorUuid, UUID targetUuid, DistrictData.DistrictRole role) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null) return false;
+        if (!canManageRoles(actorUuid, d)) return false;
+        if (!d.isMember(targetUuid)) return false;
+        if (role == DistrictData.DistrictRole.MAYOR) return false;
+
+        d.removeRole(targetUuid, role);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "DELETE FROM district_member_roles WHERE district_id = ? AND player_uuid = ? AND role = ?",
+                districtId, targetUuid.toString(), role.name());
+            if (d.getDistrictRoleCount(targetUuid) == 0) {
+                plugin.getDatabase().executeUpdate(
+                    "INSERT OR IGNORE INTO district_member_roles (district_id, player_uuid, role) VALUES (?, ?, 'MEMBER')",
+                    districtId, targetUuid.toString());
+            }
+            plugin.getDatabase().executeUpdate(
+                "UPDATE district_members SET role = ? WHERE district_id = ? AND player_uuid = ?",
+                d.getHighestRole(targetUuid).name(), districtId, targetUuid.toString());
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to remove role", e);
+            return false;
         }
         return true;
     }
@@ -329,7 +373,7 @@ public class DistrictServiceImpl implements DistrictService {
     @Override
     public boolean withdrawTreasury(Player player, int districtId, long amount) {
         DistrictData.District d = districts.get(districtId);
-        if (d == null || !d.isTreasurer(player.getUniqueId())) {
+        if (d == null || !canManageTreasury(player.getUniqueId(), d)) {
             player.sendMessage(fmt.error("Only the mayor or treasurer can withdraw from the treasury."));
             return false;
         }
@@ -403,7 +447,7 @@ public class DistrictServiceImpl implements DistrictService {
     @Override
     public boolean setLaw(int districtId, UUID actorUuid, String lawName, boolean enabled) {
         DistrictData.District d = districts.get(districtId);
-        if (d == null || !d.isCouncil(actorUuid)) return false;
+        if (d == null || !canManageLaws(actorUuid, d)) return false;
 
         d.setLaw(lawName, enabled);
         try {
@@ -414,6 +458,179 @@ public class DistrictServiceImpl implements DistrictService {
             logger.log(Level.WARNING, "Failed to set law", e);
         }
         return true;
+    }
+
+    @Override
+    public boolean proposeLaw(int districtId, UUID actorUuid, DistrictData.LawKey lawKey, boolean enabled) {
+        DistrictData.District d = districts.get(districtId);
+        if (d == null || !canManageLaws(actorUuid, d)) return false;
+        int maxChanges = plugin.getConfigManager().getDistrictMaxLawChangesPerDay();
+        try (Connection conn = plugin.getDatabase().getConnection();
+             PreparedStatement count = conn.prepareStatement(
+                 "SELECT COUNT(*) FROM district_pending_laws WHERE district_id = ? AND applied = 0")) {
+            count.setInt(1, districtId);
+            ResultSet rs = count.executeQuery();
+            if (rs.next() && rs.getInt(1) >= maxChanges && !d.getPendingLaws().containsKey(lawKey.name())) {
+                return false;
+            }
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to count pending laws", e);
+            return false;
+        }
+
+        d.setPendingLaw(lawKey.name(), enabled);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "INSERT OR REPLACE INTO district_pending_laws (district_id, law_name, enabled, proposed_by, proposed_at, applied) " +
+                "VALUES (?, ?, ?, ?, datetime('now'), 0)",
+                districtId, lawKey.name(), enabled ? 1 : 0, actorUuid.toString());
+            audit.log(actorUuid, Bukkit.getOfflinePlayer(actorUuid).getName(), "DISTRICT_LAW_PROPOSE",
+                "DISTRICT", String.valueOf(districtId), "law=" + lawKey.name() + " enabled=" + enabled);
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to propose law", e);
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    public int applyPendingLaws() {
+        int applied = 0;
+        try (Connection conn = plugin.getDatabase().getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT district_id, law_name, enabled FROM district_pending_laws WHERE applied = 0");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                int districtId = rs.getInt("district_id");
+                String lawName = rs.getString("law_name");
+                boolean enabled = rs.getInt("enabled") == 1;
+                DistrictData.District d = districts.get(districtId);
+                if (d == null) continue;
+                d.setLaw(lawName, enabled);
+                d.clearPendingLaw(lawName);
+                plugin.getDatabase().executeUpdate(
+                    "INSERT OR REPLACE INTO district_laws (district_id, law_name, enabled) VALUES (?, ?, ?)",
+                    districtId, lawName, enabled ? 1 : 0);
+                plugin.getDatabase().executeUpdate(
+                    "UPDATE district_pending_laws SET applied = 1, applies_at = datetime('now') WHERE district_id = ? AND law_name = ?",
+                    districtId, lawName);
+                audit.logSystem("DISTRICT_LAW_APPLY", "DISTRICT", String.valueOf(districtId),
+                    "law=" + lawName + " enabled=" + enabled);
+                applied++;
+            }
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to apply pending laws", e);
+        }
+        return applied;
+    }
+
+    @Override
+    public boolean isLawActive(DistrictData.District district, DistrictData.LawKey lawKey) {
+        return district != null && Boolean.TRUE.equals(district.getLaws().get(lawKey.name()));
+    }
+
+    @Override
+    public boolean isLawPending(DistrictData.District district, DistrictData.LawKey lawKey) {
+        return district != null && district.getPendingLaws().containsKey(lawKey.name());
+    }
+
+    public void startLawReloadScheduler() {
+        if (lawReloadTask != null) return;
+        lawReloadTask = plugin.getScheduler().runRepeating(() -> {
+            LocalDate today = LocalDate.now();
+            if (!today.equals(lastLawReload)) {
+                lastLawReload = today;
+                int count = applyPendingLaws();
+                if (count > 0) {
+                    logger.info("Applied " + count + " pending district law changes");
+                }
+            }
+        }, 1200L, 1200L);
+    }
+
+    public void stopLawReloadScheduler() {
+        if (lawReloadTask != null) {
+            plugin.getScheduler().cancel(lawReloadTask);
+            lawReloadTask = null;
+        }
+    }
+
+    @Override
+    public boolean hasDistrictRole(UUID playerUuid, DistrictData.District district, DistrictData.DistrictRole role) {
+        return district != null && district.hasRole(playerUuid, role);
+    }
+
+    @Override
+    public Set<DistrictData.DistrictRole> getDistrictRoles(UUID playerUuid, DistrictData.District district) {
+        return district == null ? EnumSet.of(DistrictData.DistrictRole.VISITOR) : district.getRoles(playerUuid);
+    }
+
+    @Override
+    public DistrictData.DistrictRole getHighestDistrictRole(UUID playerUuid, DistrictData.District district) {
+        return district == null ? DistrictData.DistrictRole.VISITOR : district.getHighestRole(playerUuid);
+    }
+
+    @Override
+    public boolean canManageRoles(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR, DistrictData.DistrictRole.CO_MAYOR);
+    }
+
+    @Override
+    public boolean canManageLaws(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR, DistrictData.DistrictRole.CO_MAYOR);
+    }
+
+    @Override
+    public boolean canManageTreasury(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR,
+            DistrictData.DistrictRole.CO_MAYOR, DistrictData.DistrictRole.TREASURER);
+    }
+
+    @Override
+    public boolean canCreateMerchantNpc(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR,
+            DistrictData.DistrictRole.CO_MAYOR, DistrictData.DistrictRole.MERCHANT);
+    }
+
+    @Override
+    public boolean canCreateDistrictJob(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR,
+            DistrictData.DistrictRole.CO_MAYOR, DistrictData.DistrictRole.MERCHANT,
+            DistrictData.DistrictRole.TREASURER);
+    }
+
+    @Override
+    public boolean canApproveDistrictJob(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR,
+            DistrictData.DistrictRole.CO_MAYOR, DistrictData.DistrictRole.TREASURER);
+    }
+
+    @Override
+    public boolean canPolice(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR,
+            DistrictData.DistrictRole.CO_MAYOR, DistrictData.DistrictRole.POLICE,
+            DistrictData.DistrictRole.WARDEN);
+    }
+
+    @Override
+    public boolean canRequestStation(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR,
+            DistrictData.DistrictRole.CO_MAYOR, DistrictData.DistrictRole.DIPLOMAT);
+    }
+
+    @Override
+    public boolean canManageDevelopment(UUID playerUuid, DistrictData.District district) {
+        return hasAnyRole(playerUuid, district, DistrictData.DistrictRole.MAYOR,
+            DistrictData.DistrictRole.CO_MAYOR, DistrictData.DistrictRole.BUILDER);
+    }
+
+    private boolean hasAnyRole(UUID playerUuid, DistrictData.District district, DistrictData.DistrictRole... roles) {
+        if (district == null) return false;
+        Set<DistrictData.DistrictRole> playerRoles = district.getRoles(playerUuid);
+        for (DistrictData.DistrictRole role : roles) {
+            if (playerRoles.contains(role)) return true;
+        }
+        return false;
     }
 
     @Override
@@ -476,7 +693,7 @@ public class DistrictServiceImpl implements DistrictService {
                 }
             }
 
-            // Load members
+            // Load legacy/current members and their highest role column.
             String memSql = "SELECT * FROM district_members";
             try (PreparedStatement ps = conn.prepareStatement(memSql);
                  ResultSet rs = ps.executeQuery()) {
@@ -485,8 +702,29 @@ public class DistrictServiceImpl implements DistrictService {
                     DistrictData.District d = districts.get(districtId);
                     if (d != null) {
                         UUID uuid = UUID.fromString(rs.getString("player_uuid"));
-                        DistrictData.DistrictRole role = DistrictData.DistrictRole.valueOf(rs.getString("role"));
+                        DistrictData.DistrictRole role = parseRole(rs.getString("role"));
                         d.addMember(uuid, role);
+                        try (PreparedStatement migrate = conn.prepareStatement(
+                                "INSERT OR IGNORE INTO district_member_roles (district_id, player_uuid, role) VALUES (?, ?, ?)")) {
+                            migrate.setInt(1, districtId);
+                            migrate.setString(2, uuid.toString());
+                            migrate.setString(3, role.name());
+                            migrate.executeUpdate();
+                        }
+                    }
+                }
+            }
+
+            // Load full multi-role assignments.
+            String roleSql = "SELECT * FROM district_member_roles";
+            try (PreparedStatement ps = conn.prepareStatement(roleSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int districtId = rs.getInt("district_id");
+                    DistrictData.District d = districts.get(districtId);
+                    if (d != null) {
+                        UUID uuid = UUID.fromString(rs.getString("player_uuid"));
+                        d.setRole(uuid, parseRole(rs.getString("role")));
                     }
                 }
             }
@@ -504,10 +742,40 @@ public class DistrictServiceImpl implements DistrictService {
                 }
             }
 
+            String pendingLawSql = "SELECT * FROM district_pending_laws WHERE applied = 0";
+            try (PreparedStatement ps = conn.prepareStatement(pendingLawSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int districtId = rs.getInt("district_id");
+                    DistrictData.District d = districts.get(districtId);
+                    if (d != null) {
+                        d.setPendingLaw(rs.getString("law_name"), rs.getInt("enabled") == 1);
+                    }
+                }
+            }
+
             logger.info("Loaded " + districts.size() + " districts from database");
 
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Failed to load districts", e);
+        }
+    }
+
+    private DistrictData.DistrictRole parseRole(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return DistrictData.DistrictRole.MEMBER;
+        }
+        String normalized = raw.toUpperCase(Locale.ROOT);
+        if (normalized.equals("CITIZEN")) {
+            return DistrictData.DistrictRole.MEMBER;
+        }
+        if (normalized.equals("COUNCIL")) {
+            return DistrictData.DistrictRole.CO_MAYOR;
+        }
+        try {
+            return DistrictData.DistrictRole.valueOf(normalized);
+        } catch (IllegalArgumentException ignored) {
+            return DistrictData.DistrictRole.MEMBER;
         }
     }
 }

@@ -18,11 +18,15 @@ public class ChatListener implements Listener {
     private final ConfigManager config;
     private final MessageFormatter fmt;
     private final ChatFormatService chatFormatService;
+    private final ChatChannelService chatChannelService;
+    private final VaultSurvivalPlugin plugin;
 
     public ChatListener(VaultSurvivalPlugin plugin) {
+        this.plugin = plugin;
         this.config = plugin.getConfigManager();
         this.fmt = plugin.getMessageFormatter();
         this.chatFormatService = new ChatFormatService(plugin);
+        this.chatChannelService = plugin.getServiceRegistry().get(ChatChannelService.class);
     }
 
     @EventHandler(priority = EventPriority.HIGH)
@@ -31,12 +35,10 @@ public class ChatListener implements Listener {
             return;
         }
 
-        String message = LegacyComponentSerializer.legacySection()
-            .serialize(event.message());
-        String formatted = chatFormatService.formatChat(event.getPlayer(), message);
-
-        event.renderer((source, sourceDisplayName, msg, viewer) ->
-            fmt.deserialize(formatted)
+        String message = LegacyComponentSerializer.legacySection().serialize(event.message());
+        event.setCancelled(true);
+        plugin.getServer().getScheduler().runTask(plugin, () ->
+            chatChannelService.sendActive(event.getPlayer(), message)
         );
     }
 

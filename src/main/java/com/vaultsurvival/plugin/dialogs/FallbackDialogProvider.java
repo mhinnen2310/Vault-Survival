@@ -33,35 +33,47 @@ public class FallbackDialogProvider implements DialogProvider {
 
     @Override
     public boolean open(Player player, DialogMenuType menuType, List<DialogMenuItem> items) {
+        return open(player, menuType, menuType.title(), menuType.body(), items);
+    }
+
+    @Override
+    public boolean open(Player player, DialogMenuType menuType, String title, String body, List<DialogMenuItem> items) {
         if (plugin.getConfigManager().fallbackToInventoryGui()) {
-            openInventory(player, menuType, items);
+            openInventory(player, title, items);
         } else {
-            openClickableChat(player, menuType, items);
+            openClickableChat(player, title, body, items);
         }
         return true;
     }
 
-    private void openInventory(Player player, DialogMenuType menuType, List<DialogMenuItem> items) {
+    private void openInventory(Player player, String title, List<DialogMenuItem> items) {
         List<GUIFramework.GUIItem> guiItems = new ArrayList<>();
-        int[] slots = {10, 12, 14, 16, 19, 21, 23, 25};
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25};
         int index = 0;
         DialogMenuItem back = null;
+        DialogMenuItem home = null;
 
         for (DialogMenuItem item : items) {
             if (isBack(item)) {
                 back = item;
                 continue;
             }
+            if (isHome(item)) {
+                home = item;
+                continue;
+            }
+            if (isClose(item)) {
+                continue;
+            }
             if (index >= slots.length) {
                 break;
             }
-            boolean allowed = true;
+            boolean allowed = !item.locked();
             Material material = item.material();
             guiItems.add(GUIFramework.GUIItem.button(slots[index++], material,
-                "&6" + item.label(),
+                (allowed ? "&6" : "&8") + item.label(),
                 item.lore(allowed),
                 (p, e) -> {
-                    p.closeInventory();
                     dialogService.runItemCommand(p, item);
                 }));
         }
@@ -71,22 +83,30 @@ public class FallbackDialogProvider implements DialogProvider {
             guiItems.add(GUIFramework.GUIItem.button(27, backItem.material(), "&6" + backItem.label(),
                 backItem.lore(true),
                 (p, e) -> {
-                    p.closeInventory();
                     dialogService.runItemCommand(p, backItem);
                 }));
         }
+        if (home != null) {
+            DialogMenuItem homeItem = home;
+            guiItems.add(GUIFramework.GUIItem.button(31, homeItem.material(), "&6" + homeItem.label(),
+                homeItem.lore(true),
+                (p, e) -> {
+                    dialogService.runItemCommand(p, homeItem);
+                }));
+        }
         guiItems.add(GUIFramework.GUIItem.closeButton(35));
-        plugin.getGuiFramework().openGUI(player, "&6" + menuType.title(), 4, guiItems);
+        plugin.getGuiFramework().openGUI(player, "&6" + title, 4, guiItems);
     }
 
-    private void openClickableChat(Player player, DialogMenuType menuType, List<DialogMenuItem> items) {
+    private void openClickableChat(Player player, String title, String body, List<DialogMenuItem> items) {
         MessageFormatter fmt = plugin.getMessageFormatter();
-        player.sendMessage(fmt.header(menuType.title()));
-        player.sendMessage(fmt.info(menuType.body()));
+        player.sendMessage(fmt.header(title));
+        player.sendMessage(fmt.info(body));
         for (DialogMenuItem item : items) {
-            player.sendMessage(Component.text("- " + item.label())
+            String prefix = item.locked() ? "- [Locked] " : "- ";
+            player.sendMessage(Component.text(prefix + item.label())
                 .clickEvent(ClickEvent.runCommand("/" + item.command()))
-                .hoverEvent(Component.text(item.description())));
+                .hoverEvent(Component.text(item.locked() ? item.lockedExplanation() : item.description())));
         }
     }
 
@@ -102,6 +122,14 @@ public class FallbackDialogProvider implements DialogProvider {
     }
 
     private boolean isBack(DialogMenuItem item) {
-        return "Back".equalsIgnoreCase(item.label()) && "vsmenu".equalsIgnoreCase(item.command());
+        return "Back".equalsIgnoreCase(item.label());
+    }
+
+    private boolean isHome(DialogMenuItem item) {
+        return "Home".equalsIgnoreCase(item.label());
+    }
+
+    private boolean isClose(DialogMenuItem item) {
+        return "Close".equalsIgnoreCase(item.label());
     }
 }

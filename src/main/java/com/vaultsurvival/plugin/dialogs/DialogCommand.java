@@ -9,6 +9,7 @@ import org.bukkit.entity.Player;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 public class DialogCommand implements CommandExecutor, TabCompleter {
 
@@ -31,6 +32,20 @@ public class DialogCommand implements CommandExecutor, TabCompleter {
             && args.length >= 2
             && args[0].equalsIgnoreCase("input")) {
             dialogService.openInput(player, args[1]);
+            return true;
+        }
+
+        if (command.getName().equalsIgnoreCase("vsmenu")
+            && args.length >= 1
+            && args[0].equalsIgnoreCase("locked")) {
+            dialogService.showLocked(player, join(args, 1));
+            return true;
+        }
+
+        if (command.getName().equalsIgnoreCase("vsmenu")
+            && args.length >= 4
+            && args[0].equalsIgnoreCase("confirm")) {
+            dialogService.openConfirmation(player, args[1], args[2], join(args, 3), "main");
             return true;
         }
 
@@ -60,5 +75,12 @@ public class DialogCommand implements CommandExecutor, TabCompleter {
                 .toList();
         }
         return List.of();
+    }
+
+    private String join(String[] args, int start) {
+        if (args.length <= start) {
+            return "";
+        }
+        return String.join(" ", Arrays.copyOfRange(args, start, args.length)).trim();
     }
 }

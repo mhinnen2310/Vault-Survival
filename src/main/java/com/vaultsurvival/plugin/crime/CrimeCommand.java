@@ -42,11 +42,13 @@ public class CrimeCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         return switch (args[0].toLowerCase()) {
-            case "wanted" -> handleWanted(sender);
+            case "wanted" -> handleWanted(sender, args);
+            case "evidence" -> handleEvidence(sender, args);
             case "record" -> handleRecord(sender, args);
             case "bounty" -> handleBounty(sender, args);
             case "arrest" -> handleArrest(sender, args);
             case "fine" -> handleFine(sender, args);
+            case "dismiss" -> handleDismiss(sender, args);
             case "setjail" -> handleSetJail(sender);
             case "release" -> handleRelease(sender, args);
             case "jailed" -> handleJailed(sender);
@@ -55,6 +57,21 @@ public class CrimeCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleWanted(CommandSender sender) {
+        return handleWanted(sender, new String[0]);
+    }
+
+    private boolean handleWanted(CommandSender sender, String[] args) {
+        if (args.length >= 2 && sender instanceof Player player) {
+            int evidenceId = parseInt(args[1]);
+            if (evidenceId <= 0) {
+                sender.sendMessage(fmt.error("Usage: /crime wanted <evidenceId>"));
+                return true;
+            }
+            if (crimeService.markWantedFromEvidence(player.getUniqueId(), evidenceId)) {
+                sender.sendMessage(fmt.success("Marked evidence #" + evidenceId + " as wanted."));
+            }
+            return true;
+        }
         if (!(sender instanceof Player player)) {
             sender.sendMessage(fmt.error("Only players can use this command."));
             return true;
@@ -87,6 +104,50 @@ public class CrimeCommand implements CommandExecutor, TabCompleter {
                 ));
             }
         }
+        return true;
+    }
+
+    private boolean handleEvidence(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(fmt.error("Only players can inspect evidence."));
+            return true;
+        }
+        if (args.length >= 2) {
+            int id = parseInt(args[1]);
+            var evidence = crimeService.getEvidence(id);
+            if (evidence == null) {
+                sender.sendMessage(fmt.error("Evidence not found."));
+                return true;
+            }
+            sender.sendMessage(fmt.header("Evidence #" + evidence.getId()));
+            sender.sendMessage(fmt.info("District: &e#" + evidence.getDistrictId()));
+            sender.sendMessage(fmt.info("Player: &e" + nameOf(evidence.getPlayerUuid())));
+            sender.sendMessage(fmt.info("Law: &e" + evidence.getLawKey()));
+            sender.sendMessage(fmt.info("Action: &e" + evidence.getActionType()));
+            sender.sendMessage(fmt.info("Severity: &e" + evidence.getSeverity()));
+            sender.sendMessage(fmt.info("Status: &e" + evidence.getStatus()));
+            sender.sendMessage(fmt.info("Location: &e" + evidence.getLocation()));
+            sender.sendMessage(fmt.info("Details: &7" + evidence.getDetails()));
+            return true;
+        }
+
+        var districtService = plugin.getServiceRegistry().get(
+            com.vaultsurvival.plugin.districts.DistrictService.class);
+        var d = districtService.getPlayerDistrict(player.getUniqueId());
+        if (d == null) {
+            sender.sendMessage(fmt.error("You are not in a district."));
+            return true;
+        }
+        var evidence = crimeService.getDistrictEvidence(d.getId());
+        sender.sendMessage(fmt.header("Evidence: " + d.getName() + " (" + evidence.size() + ")"));
+        if (evidence.isEmpty()) {
+            sender.sendMessage(fmt.info("No evidence in this district."));
+            return true;
+        }
+        evidence.stream().limit(20).forEach(e -> sender.sendMessage(fmt.info(
+            "&e#" + e.getId() + " &7" + e.getLawKey() + " &8| &f" + nameOf(e.getPlayerUuid()) +
+            " &8| &c" + e.getSeverity() + " &8| &7" + e.getStatus()
+        )));
         return true;
     }
 
@@ -180,19 +241,37 @@ public class CrimeCommand implements CommandExecutor, TabCompleter {
     private boolean handleFine(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) return true;
         if (args.length < 3) {
-            sender.sendMessage(fmt.error("Usage: /crime fine <player> <amount>"));
+            sender.sendMessage(fmt.error("Usage: /crime fine <evidenceId> <amount>"));
             return true;
         }
-
-        Player target = Bukkit.getPlayer(args[1]);
-        if (target == null) {
-            sender.sendMessage(fmt.playerNotFound(args[1]));
-            return true;
-        }
+        int evidenceId = parseInt(args[1]);
         long amount = parseLong(args[2]);
         if (amount <= 0) { sender.sendMessage(fmt.error("Invalid amount.")); return true; }
 
-        crimeService.fine(player.getUniqueId(), target.getUniqueId(), amount);
+        if (evidenceId > 0) {
+            if (crimeService.fineEvidence(player.getUniqueId(), evidenceId, amount)) {
+                sender.sendMessage(fmt.success("Fine issued for evidence #" + evidenceId + "."));
+            }
+            return true;
+        }
+        sender.sendMessage(fmt.error("Fines now require evidence: /crime fine <evidenceId> <amount>"));
+        return true;
+    }
+
+    private boolean handleDismiss(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) return true;
+        if (args.length < 2) {
+            sender.sendMessage(fmt.error("Usage: /crime dismiss <evidenceId>"));
+            return true;
+        }
+        int evidenceId = parseInt(args[1]);
+        if (evidenceId <= 0) {
+            sender.sendMessage(fmt.error("Invalid evidence id."));
+            return true;
+        }
+        if (crimeService.dismissEvidence(player.getUniqueId(), evidenceId, CrimeData.EvidenceStatus.DISMISSED)) {
+            sender.sendMessage(fmt.success("Dismissed evidence #" + evidenceId + "."));
+        }
         return true;
     }
 
@@ -259,10 +338,13 @@ public class CrimeCommand implements CommandExecutor, TabCompleter {
     private void sendUsage(CommandSender sender) {
         sender.sendMessage(fmt.header("Crime & Police Commands"));
         sender.sendMessage(fmt.info("/crime wanted &8- Wanted players in your district"));
+        sender.sendMessage(fmt.info("/crime wanted <evidenceId> &8- Mark evidence target wanted"));
+        sender.sendMessage(fmt.info("/crime evidence [id] &8- List or inspect evidence"));
         sender.sendMessage(fmt.info("/crime record [player] &8- View crime history"));
         sender.sendMessage(fmt.info("/crime bounty <player> <amount> &8- Set bounty (police)"));
         sender.sendMessage(fmt.info("/crime arrest <player> &8- Arrest wanted player (police)"));
-        sender.sendMessage(fmt.info("/crime fine <player> <amount> &8- Fine wanted player (police)"));
+        sender.sendMessage(fmt.info("/crime fine <evidenceId> <amount> &8- Fine from evidence (police)"));
+        sender.sendMessage(fmt.info("/crime dismiss <evidenceId> &8- Dismiss active evidence"));
         sender.sendMessage(fmt.info("/crime setjail &8- Set jail location here (mayor)"));
         sender.sendMessage(fmt.info("/crime release <player> &8- Release jailed player (police)"));
         sender.sendMessage(fmt.info("/crime jailed &8- List jailed players in your district"));
@@ -271,7 +353,7 @@ public class CrimeCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
-            return Arrays.asList("wanted", "record", "bounty", "arrest", "fine", "setjail", "release", "jailed")
+            return Arrays.asList("wanted", "evidence", "record", "bounty", "arrest", "fine", "dismiss", "setjail", "release", "jailed")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("bounty") || args[0].equalsIgnoreCase("arrest")
@@ -284,5 +366,14 @@ public class CrimeCommand implements CommandExecutor, TabCompleter {
 
     private static long parseLong(String s) {
         try { return Long.parseLong(s); } catch (NumberFormatException e) { return -1; }
+    }
+
+    private static int parseInt(String s) {
+        try { return Integer.parseInt(s); } catch (NumberFormatException e) { return -1; }
+    }
+
+    private String nameOf(UUID uuid) {
+        String name = Bukkit.getOfflinePlayer(uuid).getName();
+        return name != null ? name : uuid.toString().substring(0, 8);
     }
 }

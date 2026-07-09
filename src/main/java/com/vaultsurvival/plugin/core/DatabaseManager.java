@@ -350,9 +350,18 @@ public class DatabaseManager {
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                 "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
                 "player_uuid TEXT NOT NULL," +
-                "role TEXT NOT NULL DEFAULT 'CITIZEN'," +
+                "role TEXT NOT NULL DEFAULT 'MEMBER'," +
                 "joined_at TEXT NOT NULL DEFAULT (datetime('now'))," +
                 "UNIQUE(district_id, player_uuid)" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS district_member_roles (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
+                "player_uuid TEXT NOT NULL," +
+                "role TEXT NOT NULL," +
+                "granted_at TEXT NOT NULL DEFAULT (datetime('now'))," +
+                "UNIQUE(district_id, player_uuid, role)" +
             ")",
 
             "CREATE TABLE IF NOT EXISTS district_laws (" +
@@ -360,6 +369,18 @@ public class DatabaseManager {
                 "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
                 "law_name TEXT NOT NULL," +
                 "enabled INTEGER NOT NULL DEFAULT 0," +
+                "UNIQUE(district_id, law_name)" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS district_pending_laws (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
+                "law_name TEXT NOT NULL," +
+                "enabled INTEGER NOT NULL DEFAULT 0," +
+                "proposed_by TEXT NOT NULL," +
+                "proposed_at TEXT NOT NULL DEFAULT (datetime('now'))," +
+                "applies_at TEXT," +
+                "applied INTEGER NOT NULL DEFAULT 0," +
                 "UNIQUE(district_id, law_name)" +
             ")",
 
@@ -420,6 +441,21 @@ public class DatabaseManager {
                 "z INTEGER NOT NULL" +
             ")",
 
+            "CREATE TABLE IF NOT EXISTS district_evidence (" +
+                "evidence_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
+                "player_uuid TEXT NOT NULL," +
+                "law_key TEXT NOT NULL," +
+                "action_type TEXT NOT NULL," +
+                "location TEXT NOT NULL," +
+                "timestamp INTEGER NOT NULL," +
+                "severity TEXT NOT NULL," +
+                "details TEXT," +
+                "status TEXT NOT NULL DEFAULT 'UNHANDLED'," +
+                "expires_at INTEGER NOT NULL," +
+                "handled_by TEXT" +
+            ")",
+
             // === Display Auction Hall tables (Phase 10) ===
             "CREATE TABLE IF NOT EXISTS display_slots (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -471,6 +507,118 @@ public class DatabaseManager {
                 "amount INTEGER NOT NULL DEFAULT 0," +
                 "deadline INTEGER NOT NULL DEFAULT 0," +
                 "status TEXT NOT NULL DEFAULT 'PENDING'" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS contract_escrows (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "contract_id INTEGER NOT NULL," +
+                "cash_uuid TEXT," +
+                "amount INTEGER NOT NULL," +
+                "source_type TEXT NOT NULL DEFAULT 'PLAYER_CASH'," +
+                "source_id TEXT," +
+                "status TEXT NOT NULL DEFAULT 'LOCKED'," +
+                "locked_by TEXT," +
+                "locked_at INTEGER NOT NULL," +
+                "released_at INTEGER NOT NULL DEFAULT 0" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS payout_lockers (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "player_uuid TEXT NOT NULL," +
+                "amount INTEGER NOT NULL," +
+                "source_type TEXT NOT NULL," +
+                "source_id TEXT," +
+                "details TEXT," +
+                "status TEXT NOT NULL DEFAULT 'PENDING'," +
+                "created_at INTEGER NOT NULL," +
+                "claimed_at INTEGER NOT NULL DEFAULT 0" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS contract_audit (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "contract_id INTEGER NOT NULL DEFAULT 0," +
+                "actor_uuid TEXT," +
+                "action TEXT NOT NULL," +
+                "amount INTEGER NOT NULL DEFAULT 0," +
+                "details TEXT," +
+                "created_at INTEGER NOT NULL" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS contract_disputes (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "contract_id INTEGER NOT NULL," +
+                "opened_by TEXT NOT NULL," +
+                "reason TEXT," +
+                "status TEXT NOT NULL DEFAULT 'OPEN'," +
+                "created_at INTEGER NOT NULL," +
+                "resolved_at INTEGER NOT NULL DEFAULT 0" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS district_jobs (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "district_id INTEGER NOT NULL," +
+                "creator_uuid TEXT NOT NULL," +
+                "type TEXT NOT NULL," +
+                "title TEXT NOT NULL," +
+                "description TEXT DEFAULT ''," +
+                "reward INTEGER NOT NULL," +
+                "deadline INTEGER NOT NULL DEFAULT 0," +
+                "required_item TEXT," +
+                "required_amount INTEGER NOT NULL DEFAULT 0," +
+                "origin TEXT," +
+                "destination TEXT," +
+                "checkpoint TEXT," +
+                "tracking_mode TEXT NOT NULL DEFAULT 'MANUAL'," +
+                "manual_approval INTEGER NOT NULL DEFAULT 1," +
+                "status TEXT NOT NULL DEFAULT 'DRAFT'," +
+                "created_at INTEGER NOT NULL" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS district_job_claims (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "job_id INTEGER NOT NULL," +
+                "player_uuid TEXT NOT NULL," +
+                "status TEXT NOT NULL DEFAULT 'CLAIMED'," +
+                "submitted_at INTEGER NOT NULL DEFAULT 0," +
+                "reviewed_by TEXT," +
+                "review_reason TEXT," +
+                "created_at INTEGER NOT NULL," +
+                "UNIQUE(job_id, player_uuid)" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS spawn_city_jobs (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "type TEXT NOT NULL," +
+                "title TEXT NOT NULL," +
+                "description TEXT DEFAULT ''," +
+                "reward INTEGER NOT NULL," +
+                "required_item TEXT," +
+                "required_amount INTEGER NOT NULL DEFAULT 0," +
+                "destination TEXT," +
+                "enabled INTEGER NOT NULL DEFAULT 1," +
+                "seed_key TEXT UNIQUE," +
+                "created_at INTEGER NOT NULL" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS player_spawn_jobs (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "job_id INTEGER NOT NULL," +
+                "player_uuid TEXT NOT NULL," +
+                "status TEXT NOT NULL DEFAULT 'ACTIVE'," +
+                "accepted_at INTEGER NOT NULL," +
+                "completed_at INTEGER NOT NULL DEFAULT 0," +
+                "cooldown_until INTEGER NOT NULL DEFAULT 0," +
+                "UNIQUE(job_id, player_uuid, status)" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS transport_packages (" +
+                "package_uuid TEXT PRIMARY KEY," +
+                "player_job_id INTEGER NOT NULL," +
+                "player_uuid TEXT NOT NULL," +
+                "destination TEXT NOT NULL," +
+                "status TEXT NOT NULL DEFAULT 'ACTIVE'," +
+                "created_at INTEGER NOT NULL," +
+                "expires_at INTEGER NOT NULL" +
             ")"
         };
 

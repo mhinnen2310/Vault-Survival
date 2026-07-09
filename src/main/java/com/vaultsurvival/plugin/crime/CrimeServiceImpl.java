@@ -27,6 +27,7 @@ public class CrimeServiceImpl implements CrimeService {
     private final Logger logger;
     private final MessageFormatter fmt;
     private final Map<Integer, CrimeData.CrimeRecord> crimes = new ConcurrentHashMap<>();
+    private final Map<Integer, CrimeData.EvidenceRecord> evidence = new ConcurrentHashMap<>();
     private final Map<String, CrimeData.WantedStatus> wanted = new ConcurrentHashMap<>(); // key: "districtId:criminalUuid"
     private final Map<Integer, CrimeData.JailInfo> jails = new ConcurrentHashMap<>();
     private BukkitTask jailTask = null;
@@ -75,6 +76,175 @@ public class CrimeServiceImpl implements CrimeService {
             logger.log(Level.WARNING, "Failed to log crime", e);
         }
         return null;
+    }
+
+    @Override
+    public CrimeData.EvidenceRecord createEvidence(UUID playerUuid, int districtId, String lawKey, String actionType,
+                                                   String location, CrimeData.CrimeSeverity severity, String details) {
+        long now = System.currentTimeMillis();
+        long expiresAt = now + plugin.getConfigManager().getEvidenceExpireDays() * 24L * 60L * 60L * 1000L;
+        String sql = "INSERT INTO district_evidence (district_id, player_uuid, law_key, action_type, location, timestamp, " +
+                     "severity, details, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)";
+        try (Connection conn = plugin.getDatabase().getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            ps.setInt(1, districtId);
+            ps.setString(2, playerUuid.toString());
+            ps.setString(3, lawKey);
+            ps.setString(4, actionType);
+            ps.setString(5, location);
+            ps.setLong(6, now);
+            ps.setString(7, severity.name());
+            ps.setString(8, details);
+            ps.setLong(9, expiresAt);
+            ps.executeUpdate();
+
+            ResultSet keys = ps.getGeneratedKeys();
+            if (keys.next()) {
+                int id = keys.getInt(1);
+                var record = new CrimeData.EvidenceRecord(id, districtId, playerUuid, lawKey, actionType,
+                    location, now, severity, details, CrimeData.EvidenceStatus.ACTIVE, expiresAt, null);
+                evidence.put(id, record);
+                plugin.getAuditLogger().log(playerUuid, Bukkit.getOfflinePlayer(playerUuid).getName(),
+                    "EVIDENCE_CREATE", "DISTRICT", String.valueOf(districtId),
+                    "evidence=" + id + " law=" + lawKey + " action=" + actionType);
+                alertEvidencePolice(districtId, record);
+                return record;
+            }
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to create evidence", e);
+        }
+        return null;
+    }
+
+    @Override
+    public List<CrimeData.EvidenceRecord> getDistrictEvidence(int districtId) {
+        expireEvidence();
+        return evidence.values().stream()
+            .filter(e -> e.getDistrictId() == districtId)
+            .sorted((a, b) -> Long.compare(b.getTimestamp(), a.getTimestamp()))
+            .toList();
+    }
+
+    @Override
+    public List<CrimeData.EvidenceRecord> getEvidenceForPlayer(UUID playerUuid) {
+        expireEvidence();
+        return evidence.values().stream()
+            .filter(e -> e.getPlayerUuid().equals(playerUuid))
+            .sorted((a, b) -> Long.compare(b.getTimestamp(), a.getTimestamp()))
+            .toList();
+    }
+
+    @Override
+    public CrimeData.EvidenceRecord getEvidence(int evidenceId) {
+        expireEvidence();
+        return evidence.get(evidenceId);
+    }
+
+    @Override
+    public boolean fineEvidence(UUID policeUuid, int evidenceId, long amount) {
+        CrimeData.EvidenceRecord record = getActionableEvidence(policeUuid, evidenceId);
+        if (record == null || amount <= 0) return false;
+        if (!transferCashToTreasury(record.getPlayerUuid(), record.getDistrictId(), amount)) {
+            Player police = Bukkit.getPlayer(policeUuid);
+            if (police != null) police.sendMessage(fmt.error("Target does not have enough active cash."));
+            return false;
+        }
+        Player target = Bukkit.getPlayer(record.getPlayerUuid());
+        if (target != null) {
+            removeInventoryCash(target, amount);
+            target.sendMessage(fmt.error("You were fined for evidence #" + evidenceId + ": " +
+                fmt.formatMoney(amount, plugin.getConfigManager().getCurrencyName(), plugin.getConfigManager().getCurrencyNamePlural())));
+        }
+        setEvidenceStatus(record, CrimeData.EvidenceStatus.HANDLED, policeUuid);
+        plugin.getAuditLogger().log(policeUuid, Bukkit.getOfflinePlayer(policeUuid).getName(),
+            "EVIDENCE_FINE", "EVIDENCE", String.valueOf(evidenceId), "amount=" + amount);
+        return true;
+    }
+
+    @Override
+    public boolean markWantedFromEvidence(UUID policeUuid, int evidenceId) {
+        CrimeData.EvidenceRecord record = getActionableEvidence(policeUuid, evidenceId);
+        if (record == null) return false;
+        upsertWanted(record.getPlayerUuid(), record.getDistrictId());
+        setEvidenceStatus(record, CrimeData.EvidenceStatus.HANDLED, policeUuid);
+        plugin.getAuditLogger().log(policeUuid, Bukkit.getOfflinePlayer(policeUuid).getName(),
+            "EVIDENCE_WANTED", "EVIDENCE", String.valueOf(evidenceId), "player=" + record.getPlayerUuid());
+        return true;
+    }
+
+    @Override
+    public boolean dismissEvidence(UUID policeUuid, int evidenceId, CrimeData.EvidenceStatus status) {
+        CrimeData.EvidenceRecord record = getActionableEvidence(policeUuid, evidenceId);
+        if (record == null) return false;
+        CrimeData.EvidenceStatus finalStatus = status == CrimeData.EvidenceStatus.INSUFFICIENT_EVIDENCE
+            ? CrimeData.EvidenceStatus.INSUFFICIENT_EVIDENCE
+            : CrimeData.EvidenceStatus.DISMISSED;
+        setEvidenceStatus(record, finalStatus, policeUuid);
+        plugin.getAuditLogger().log(policeUuid, Bukkit.getOfflinePlayer(policeUuid).getName(),
+            "EVIDENCE_DISMISS", "EVIDENCE", String.valueOf(evidenceId), "status=" + finalStatus);
+        return true;
+    }
+
+    private CrimeData.EvidenceRecord getActionableEvidence(UUID policeUuid, int evidenceId) {
+        CrimeData.EvidenceRecord record = evidence.get(evidenceId);
+        Player police = Bukkit.getPlayer(policeUuid);
+        if (record == null) {
+            if (police != null) police.sendMessage(fmt.error("Evidence not found."));
+            return null;
+        }
+        if (record.isExpired()) {
+            setEvidenceStatus(record, CrimeData.EvidenceStatus.EXPIRED, null);
+            if (police != null) police.sendMessage(fmt.error("Evidence has expired."));
+            return null;
+        }
+        if (record.getStatus() != CrimeData.EvidenceStatus.ACTIVE) {
+            if (police != null) police.sendMessage(fmt.error("Evidence is not active."));
+            return null;
+        }
+        var district = districts.getDistrict(record.getDistrictId());
+        if (district == null || !districts.canPolice(policeUuid, district)) {
+            if (police != null) police.sendMessage(fmt.error("You must have POLICE authority in that district."));
+            return null;
+        }
+        return record;
+    }
+
+    private void setEvidenceStatus(CrimeData.EvidenceRecord record, CrimeData.EvidenceStatus status, UUID handledBy) {
+        record.setStatus(status);
+        record.setHandledBy(handledBy);
+        try {
+            plugin.getDatabase().executeUpdate(
+                "UPDATE district_evidence SET status = ?, handled_by = ? WHERE evidence_id = ?",
+                status.name(), handledBy != null ? handledBy.toString() : null, record.getId());
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to update evidence status", e);
+        }
+    }
+
+    private void expireEvidence() {
+        long now = System.currentTimeMillis();
+        for (CrimeData.EvidenceRecord record : evidence.values()) {
+            if (record.getStatus() == CrimeData.EvidenceStatus.ACTIVE && record.getExpiresAt() <= now) {
+                setEvidenceStatus(record, CrimeData.EvidenceStatus.EXPIRED, null);
+            }
+        }
+    }
+
+    private void alertEvidencePolice(int districtId, CrimeData.EvidenceRecord record) {
+        var district = districts.getDistrict(districtId);
+        if (district == null) return;
+        String name = Bukkit.getOfflinePlayer(record.getPlayerUuid()).getName();
+        if (name == null) name = record.getPlayerUuid().toString().substring(0, 8);
+        String alert = fmt.info("&cEvidence #" + record.getId() + " &7" + record.getLawKey() +
+            " &8| &e" + name + " &8| &7" + record.getActionType());
+        for (UUID memberUuid : district.getMembers()) {
+            if (district.isPolice(memberUuid)) {
+                Player police = Bukkit.getPlayer(memberUuid);
+                if (police != null && police.isOnline()) {
+                    police.sendMessage(alert);
+                }
+            }
+        }
     }
 
     private void upsertWanted(UUID criminalUuid, int districtId) {
@@ -475,6 +645,7 @@ public class CrimeServiceImpl implements CrimeService {
     @Override
     public void loadAll() {
         crimes.clear();
+        evidence.clear();
         wanted.clear();
 
         // Load crimes
@@ -516,6 +687,31 @@ public class CrimeServiceImpl implements CrimeService {
             logger.log(Level.SEVERE, "Failed to load wanted players", e);
         }
 
+        try (Connection conn = plugin.getDatabase().getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM district_evidence ORDER BY timestamp DESC");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String handled = rs.getString("handled_by");
+                var record = new CrimeData.EvidenceRecord(
+                    rs.getInt("evidence_id"),
+                    rs.getInt("district_id"),
+                    UUID.fromString(rs.getString("player_uuid")),
+                    rs.getString("law_key"),
+                    rs.getString("action_type"),
+                    rs.getString("location"),
+                    rs.getLong("timestamp"),
+                    CrimeData.CrimeSeverity.valueOf(rs.getString("severity")),
+                    rs.getString("details"),
+                    CrimeData.EvidenceStatus.valueOf(rs.getString("status")),
+                    rs.getLong("expires_at"),
+                    handled != null ? UUID.fromString(handled) : null);
+                evidence.put(record.getId(), record);
+            }
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to load evidence", e);
+        }
+        expireEvidence();
+
         // Load jail locations
         try (Connection conn = plugin.getDatabase().getConnection();
              PreparedStatement ps = conn.prepareStatement("SELECT * FROM jail_locations");
@@ -534,7 +730,7 @@ public class CrimeServiceImpl implements CrimeService {
         // Release any expired jail sentences immediately
         int released = processJailReleases();
 
-        logger.info("Loaded " + crimes.size() + " crimes, " + wanted.size() + " wanted, " +
+        logger.info("Loaded " + crimes.size() + " crimes, " + evidence.size() + " evidence, " + wanted.size() + " wanted, " +
             jails.size() + " jails" + (released > 0 ? ", released " + released + " expired sentences" : ""));
     }
 }

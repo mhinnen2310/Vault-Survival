@@ -1,9 +1,12 @@
 package com.vaultsurvival.plugin;
 
 import com.vaultsurvival.plugin.access.AccessModule;
+import com.vaultsurvival.plugin.area.CurrentAreaService;
+import com.vaultsurvival.plugin.area.WhereAmICommand;
 import com.vaultsurvival.plugin.breach.BreachModule;
 import com.vaultsurvival.plugin.chat.ChatListener;
 import com.vaultsurvival.plugin.chat.ChatCommand;
+import com.vaultsurvival.plugin.chat.ChatChannelService;
 import com.vaultsurvival.plugin.commands.VSVersionCommand;
 import com.vaultsurvival.plugin.commands.VSGiveCommand;
 import com.vaultsurvival.plugin.core.*;
@@ -26,6 +29,7 @@ import com.vaultsurvival.plugin.npc.NpcModule;
 import com.vaultsurvival.plugin.regions.RegionModule;
 import com.vaultsurvival.plugin.staffmode.StaffmodeModule;
 import com.vaultsurvival.plugin.spawncity.SpawnCityModule;
+import com.vaultsurvival.plugin.spawnjobs.SpawnJobModule;
 import com.vaultsurvival.plugin.updates.UpdateService;
 import com.vaultsurvival.plugin.vaults.VaultModule;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditModule;
@@ -188,6 +192,8 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         moduleManager.registerModule(stationModule);
         ContractModule contractModule = new ContractModule(this);
         moduleManager.registerModule(contractModule);
+        SpawnJobModule spawnJobModule = new SpawnJobModule(this);
+        moduleManager.registerModule(spawnJobModule);
 
         // Phase 12: Polish (Monitor, Store, Resource Pack)
         MonitorModule monitorModule = new MonitorModule(this);
@@ -204,17 +210,28 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         moduleManager.enableAll();
 
         // --- Post-enable registrations (depend on services being registered) ---
+        CurrentAreaService currentAreaService = new CurrentAreaService(this);
+        serviceRegistry.register(CurrentAreaService.class, currentAreaService);
+        ChatChannelService chatChannelService = new ChatChannelService(this);
+        serviceRegistry.register(ChatChannelService.class, chatChannelService);
 
         // Register /vs version command
         var vsCmd = new VSVersionCommand(this);
         getCommand("vs").setExecutor(vsCmd);
         getCommand("vs").setTabCompleter(vsCmd);
 
-        // Register chat listener for rank prefixes (needs AccessService)
+        // Register chat listener and commands for rank prefixes and channels.
         getServer().getPluginManager().registerEvents(new ChatListener(this), this);
+        var chatCmd = new ChatCommand(this);
+        for (String commandName : java.util.List.of("chat", "g", "l", "dc", "ac", "pc", "mc", "sc", "helpchat", "chatsettings", "chatpreview")) {
+            if (getCommand(commandName) != null) {
+                getCommand(commandName).setExecutor(chatCmd);
+                getCommand(commandName).setTabCompleter(chatCmd);
+            }
+        }
 
-        // Register /chatpreview command
-        getCommand("chatpreview").setExecutor(new ChatCommand(this));
+        // Register current-area context command
+        getCommand("whereami").setExecutor(new WhereAmICommand(this, currentAreaService));
 
         // Register resource pack command
         var rpCmd = new ResourcePackCommand(this);

@@ -24,6 +24,66 @@ public class CrimeData {
         MAJOR        // 5 points
     }
 
+    public enum EvidenceStatus {
+        UNHANDLED,
+        ACTIVE,
+        HANDLED,
+        EXPIRED,
+        DISMISSED,
+        INSUFFICIENT_EVIDENCE
+    }
+
+    public static class EvidenceRecord {
+        private final int id;
+        private final int districtId;
+        private final UUID playerUuid;
+        private final String lawKey;
+        private final String actionType;
+        private final String location;
+        private final long timestamp;
+        private final CrimeSeverity severity;
+        private final String details;
+        private EvidenceStatus status;
+        private final long expiresAt;
+        private UUID handledBy;
+
+        public EvidenceRecord(int id, int districtId, UUID playerUuid, String lawKey, String actionType,
+                              String location, long timestamp, CrimeSeverity severity, String details,
+                              EvidenceStatus status, long expiresAt, UUID handledBy) {
+            this.id = id;
+            this.districtId = districtId;
+            this.playerUuid = playerUuid;
+            this.lawKey = lawKey;
+            this.actionType = actionType;
+            this.location = location;
+            this.timestamp = timestamp;
+            this.severity = severity;
+            this.details = details;
+            this.status = status;
+            this.expiresAt = expiresAt;
+            this.handledBy = handledBy;
+        }
+
+        public int getId() { return id; }
+        public int getDistrictId() { return districtId; }
+        public UUID getPlayerUuid() { return playerUuid; }
+        public String getLawKey() { return lawKey; }
+        public String getActionType() { return actionType; }
+        public String getLocation() { return location; }
+        public long getTimestamp() { return timestamp; }
+        public CrimeSeverity getSeverity() { return severity; }
+        public String getDetails() { return details; }
+        public EvidenceStatus getStatus() { return status; }
+        public void setStatus(EvidenceStatus status) { this.status = status; }
+        public long getExpiresAt() { return expiresAt; }
+        public UUID getHandledBy() { return handledBy; }
+        public void setHandledBy(UUID handledBy) { this.handledBy = handledBy; }
+        public boolean isExpired() { return expiresAt <= System.currentTimeMillis(); }
+        public boolean isActionable() {
+            return !isExpired() && (status == EvidenceStatus.UNHANDLED || status == EvidenceStatus.ACTIVE);
+        }
+    }
+
     /**
      * A single crime committed by a player in a district.
      */

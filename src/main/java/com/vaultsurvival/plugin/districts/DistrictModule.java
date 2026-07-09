@@ -37,6 +37,7 @@ public class DistrictModule extends Module {
     @Override
     public void onEnable() {
         districtService.loadAll();
+        districtService.startLawReloadScheduler();
 
         var cmd = new DistrictCommand(plugin);
         plugin.getCommand("district").setExecutor(cmd);
@@ -45,6 +46,7 @@ public class DistrictModule extends Module {
 
     @Override
     public void onDisable() {
+        districtService.stopLawReloadScheduler();
         plugin.getServiceRegistry().unregister(DistrictService.class);
     }
 

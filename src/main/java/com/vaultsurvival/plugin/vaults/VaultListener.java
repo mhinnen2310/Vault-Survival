@@ -7,6 +7,7 @@ import com.vaultsurvival.plugin.regions.RegionService;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.Container;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -17,7 +18,12 @@ import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 
 import java.util.Iterator;
 import java.util.UUID;
@@ -107,6 +113,35 @@ public class VaultListener implements Listener {
     }
 
     /**
+     * Vault barrels are only physical markers. Money is stored in cash records,
+     * so direct container storage must stay blocked even if another plugin opens it.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (!isVaultInventory(event.getInventory())) return;
+        event.setCancelled(true);
+        if (event.getWhoClicked() instanceof Player player) {
+            player.sendMessage(fmt.error("Vaults only accept physical cash through /vault deposit."));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (!isVaultInventory(event.getInventory())) return;
+        event.setCancelled(true);
+        if (event.getWhoClicked() instanceof Player player) {
+            player.sendMessage(fmt.error("Vaults only accept physical cash through /vault deposit."));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onInventoryMoveItem(InventoryMoveItemEvent event) {
+        if (isVaultInventory(event.getSource()) || isVaultInventory(event.getDestination())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
      * Prevent placing blocks where BLOCK_PLACE is disallowed by region rules.
      */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -179,5 +214,12 @@ public class VaultListener implements Listener {
                 return;
             }
         }
+    }
+
+    private boolean isVaultInventory(Inventory inventory) {
+        if (inventory == null) return false;
+        InventoryHolder holder = inventory.getHolder();
+        if (!(holder instanceof Container container)) return false;
+        return vaultService.isVaultBlock(container.getLocation());
     }
 }

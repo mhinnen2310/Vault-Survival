@@ -13,11 +13,14 @@ softdepend: []
 commands:
   vs:
     description: Vault Survival core commands
-    usage: /vs <version|reload|update>
+    usage: /vs <version|modules|debug|reload|update>
     aliases: []
   spawncity:
     description: Spawn City management
     usage: /spawncity <info|setname|setspawn|teleport>
+  spawnjobs:
+    description: Spawn City starter and transport jobs
+    usage: /spawnjobs [active|accept|turnin|abandon|admin]
   rank:
     description: Manage player ranks and permissions
     usage: /rank <player> <set|add|remove|info> [group]
@@ -80,7 +83,13 @@ commands:
     usage: /station <create|remove|list|travel>
   contract:
     description: Player contracts
-    usage: /contract <create|accept|complete|cancel|list>
+    usage: /contract <create|accept|complete|cancel|list|debug|audit>
+  escrow:
+    description: Contract escrow diagnostics
+    usage: /escrow debug
+  payouts:
+    description: Payout locker commands
+    usage: /payouts [claim]
   analytics:
     description: Server analytics dashboard
     usage: /analytics
@@ -103,6 +112,40 @@ commands:
   chatpreview:
     description: Preview your chat format with rank and district labels
     usage: /chatpreview [message]
+  chat:
+    description: Switch your active chat channel
+    usage: /chat <global|local|district|ally|police|merchant|staff|help>
+  g:
+    description: Send a global chat message
+    usage: /g <message>
+  l:
+    description: Send a local chat message
+    usage: /l <message>
+  dc:
+    description: Send a district chat message
+    usage: /dc <message>
+  ac:
+    description: Send an ally chat message
+    usage: /ac <message>
+  pc:
+    description: Send a police chat message
+    usage: /pc <message>
+  mc:
+    description: Send a merchant chat message
+    usage: /mc <message>
+  sc:
+    description: Send a staff chat message
+    usage: /sc <message>
+    permission: vs.staff.chat
+  helpchat:
+    description: Send a help chat message
+    usage: /helpchat <message>
+  chatsettings:
+    description: Show chat settings
+    usage: /chatsettings
+  whereami:
+    description: Show your current area, district, role, region flags, and risk context
+    usage: /whereami
   vsmenu:
     description: Open the Vault Survival menu
     usage: /vsmenu [districts|admin|staff|spawncity|vwe|auctionhall|vaults]
@@ -217,15 +260,15 @@ permissions:
   vaultsurvival.vwe.admin:
     description: Allows VWE admin commands
     default: op
-  vs.vault.place:
-    description: Allows placing vaults
-    default: false
   vs.friends:
     description: Allows using friend commands
     default: false
   vs.staff.chat:
     description: Allows using staff chat
     default: false
+  vs.staff.spy:
+    description: Allows staff chat spy visibility
+    default: op
   vs.police.use:
     description: Allows using police commands
     default: false
@@ -251,6 +294,7 @@ permissions:
       vs.vault.place: true
       vs.friends: true
       vs.staff.chat: true
+      vs.staff.spy: true
       vs.staffmode.use: true
       vs.staffmode.bypass: true
       vs.staffmode.bypass.grant: true

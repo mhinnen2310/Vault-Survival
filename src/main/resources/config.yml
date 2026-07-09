@@ -63,6 +63,15 @@ chat:
   tab_prefix: true
   # Show rank prefix in player name tags (above head)
   nametag_prefix: true
+  channels:
+    default: GLOBAL
+    rememberLastChannel: true
+    localRadius: 100
+    enableAliases: true
+    allowGuestDistrictChat: false
+  spy:
+    enabled: true
+    auditSpyToggle: true
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ CURRENCY                                                                 │
@@ -125,6 +134,10 @@ districts:
   min_distance_from_spawn: 1500
   # Minimum distance (in blocks) between district borders
   min_distance_between: 500
+  laws:
+    maxChangesPerDay: 5
+  evidence:
+    expireDays: 14
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ RESTORATION                                                              │

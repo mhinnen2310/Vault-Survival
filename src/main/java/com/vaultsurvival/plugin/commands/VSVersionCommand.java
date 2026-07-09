@@ -3,6 +3,8 @@ package com.vaultsurvival.plugin.commands;
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.access.AccessService;
 import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.core.Module;
+import com.vaultsurvival.plugin.dialogs.DialogService;
 import com.vaultsurvival.plugin.updates.UpdateService;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -10,6 +12,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
+import java.io.File;
 import java.util.List;
 
 /**
@@ -28,12 +31,25 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length >= 1 && args[0].equalsIgnoreCase("reload")) {
+        if (args.length == 0 || args[0].equalsIgnoreCase("version")) {
+            return handleVersion(sender);
+        }
+        if (args[0].equalsIgnoreCase("modules")) {
+            return handleModules(sender);
+        }
+        if (args[0].equalsIgnoreCase("debug")) {
+            return handleDebug(sender);
+        }
+        if (args[0].equalsIgnoreCase("reload")) {
             return handleReload(sender);
         }
-        if (args.length >= 1 && args[0].equalsIgnoreCase("update")) {
+        if (args[0].equalsIgnoreCase("update")) {
             return handleUpdate(sender, args);
         }
+        return handleVersion(sender);
+    }
+
+    private boolean handleVersion(CommandSender sender) {
         sender.sendMessage(fmt.header("Vault Survival"));
         sender.sendMessage(fmt.info("Version: &e" + plugin.getDescription().getVersion()));
         sender.sendMessage(fmt.info("API: &ePaper 26.1.2"));
@@ -45,6 +61,59 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("Spawn City: &e" + plugin.getConfigManager().getSpawnCityName()));
         sender.sendMessage(fmt.info("Commands: &e/help vaultsurvival"));
         return true;
+    }
+
+    private boolean handleModules(CommandSender sender) {
+        sender.sendMessage(fmt.header("Vault Survival Modules"));
+        for (String name : plugin.getModuleManager().getModuleNames()) {
+            Module module = plugin.getModuleManager().getModule(name);
+            boolean enabled = module != null && module.isEnabled();
+            sender.sendMessage(fmt.info((enabled ? "&aONLINE " : "&cOFFLINE") + " &e" + name));
+        }
+        return true;
+    }
+
+    private boolean handleDebug(CommandSender sender) {
+        if (!hasVsPermission(sender, "vs.admin")) {
+            sender.sendMessage(fmt.permissionDenied());
+            return true;
+        }
+
+        sender.sendMessage(fmt.header("Vault Survival Debug"));
+        sender.sendMessage(fmt.info("Plugin: &e" + plugin.getDescription().getFullName()));
+        sender.sendMessage(fmt.info("Server: &e" + plugin.getServer().getName() + " " + plugin.getServer().getVersion()));
+        sender.sendMessage(fmt.info("Java: &e" + System.getProperty("java.version")));
+        sender.sendMessage(fmt.info("Database: " + (plugin.getDatabase().isConnected() ? "&aConnected" : "&cDisconnected")));
+        sender.sendMessage(fmt.info("Data folder: &e" + plugin.getDataFolder().getPath()));
+        sender.sendMessage(fmt.info("Modules: &e" + plugin.getModuleManager().getModuleNames().size()
+            + " registered, " + enabledModuleCount() + " enabled"));
+        sender.sendMessage(fmt.info("Commands: &e" + plugin.getDescription().getCommands().keySet().size() + " declared"));
+
+        try {
+            DialogService dialogs = plugin.getServiceRegistry().get(DialogService.class);
+            sender.sendMessage(fmt.info("Dialogs: &e" + dialogs.getLastProviderName()
+                + " &7(native=" + dialogs.isNativeSupported() + ")"));
+        } catch (RuntimeException ignored) {
+            sender.sendMessage(fmt.info("Dialogs: &cservice unavailable"));
+        }
+
+        File jarFile = getPluginJarFile();
+        sender.sendMessage(fmt.info("Jar: &e" + jarFile.getName() + " &7(" + jarFile.length() + " bytes)"));
+        return true;
+    }
+
+    private long enabledModuleCount() {
+        return plugin.getModuleManager().getModuleNames().stream()
+            .filter(name -> plugin.getModuleManager().isEnabled(name))
+            .count();
+    }
+
+    private File getPluginJarFile() {
+        try {
+            return new File(plugin.getClass().getProtectionDomain().getCodeSource().getLocation().toURI());
+        } catch (Exception ignored) {
+            return new File("unknown");
+        }
     }
 
     private boolean handleReload(CommandSender sender) {
@@ -113,7 +182,7 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("reload", "update").stream()
+            return List.of("version", "modules", "debug", "reload", "update").stream()
                 .filter(s -> s.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("update")) {

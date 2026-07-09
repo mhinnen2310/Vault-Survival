@@ -17,6 +17,21 @@ public interface CrimeService {
     CrimeData.CrimeRecord logCrime(UUID criminalUuid, int districtId, CrimeData.CrimeType type,
                                     CrimeData.CrimeSeverity severity, String blockType, String location);
 
+    CrimeData.EvidenceRecord createEvidence(UUID playerUuid, int districtId, String lawKey, String actionType,
+                                            String location, CrimeData.CrimeSeverity severity, String details);
+
+    List<CrimeData.EvidenceRecord> getDistrictEvidence(int districtId);
+
+    List<CrimeData.EvidenceRecord> getEvidenceForPlayer(UUID playerUuid);
+
+    CrimeData.EvidenceRecord getEvidence(int evidenceId);
+
+    boolean fineEvidence(UUID policeUuid, int evidenceId, long amount);
+
+    boolean markWantedFromEvidence(UUID policeUuid, int evidenceId);
+
+    boolean dismissEvidence(UUID policeUuid, int evidenceId, CrimeData.EvidenceStatus status);
+
     /**
      * Get all wanted players in a district (not arrested).
      */

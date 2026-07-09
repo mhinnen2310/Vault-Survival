@@ -140,6 +140,13 @@ public class ConfigManager {
     public String getNoDistrictLabel() { return config.getString("chat.district.noDistrict", config.getString("chat.noDistrictLabel", "&7OUTLANDS")); }
     public boolean isChatTabPrefix() { return config.getBoolean("chat.tab_prefix", true); }
     public boolean isChatNametagPrefix() { return config.getBoolean("chat.nametag_prefix", true); }
+    public String getDefaultChatChannel() { return config.getString("chat.channels.default", "GLOBAL"); }
+    public boolean shouldRememberLastChatChannel() { return config.getBoolean("chat.channels.rememberLastChannel", true); }
+    public int getChatLocalRadius() { return config.getInt("chat.channels.localRadius", 100); }
+    public boolean areChatAliasesEnabled() { return config.getBoolean("chat.channels.enableAliases", true); }
+    public boolean allowGuestDistrictChat() { return config.getBoolean("chat.channels.allowGuestDistrictChat", false); }
+    public boolean isChatSpyEnabled() { return config.getBoolean("chat.spy.enabled", true); }
+    public boolean shouldAuditChatSpyToggle() { return config.getBoolean("chat.spy.auditSpyToggle", true); }
 
     // Currency
     public String getCurrencyName() { return config.getString("currency.name", "Coin"); }
@@ -167,6 +174,8 @@ public class ConfigManager {
     // Districts
     public int getDistrictMinDistanceFromSpawn() { return config.getInt("districts.min_distance_from_spawn", 1500); }
     public int getDistrictMinDistanceBetween() { return config.getInt("districts.min_distance_between", 500); }
+    public int getDistrictMaxLawChangesPerDay() { return config.getInt("districts.laws.maxChangesPerDay", 5); }
+    public int getEvidenceExpireDays() { return config.getInt("districts.evidence.expireDays", 14); }
 
     // Restoration
     public int getRestoreNormalDelayMinutes() { return config.getInt("restoration.normal_delay_minutes", 10); }

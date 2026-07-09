@@ -3,6 +3,7 @@ package com.vaultsurvival.plugin.districts;
 import org.bukkit.entity.Player;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -49,6 +50,32 @@ public interface DistrictService {
      */
     boolean setRole(int districtId, UUID actorUuid, UUID targetUuid, DistrictData.DistrictRole role);
 
+    boolean removeRole(int districtId, UUID actorUuid, UUID targetUuid, DistrictData.DistrictRole role);
+
+    boolean hasDistrictRole(UUID playerUuid, DistrictData.District district, DistrictData.DistrictRole role);
+
+    Set<DistrictData.DistrictRole> getDistrictRoles(UUID playerUuid, DistrictData.District district);
+
+    DistrictData.DistrictRole getHighestDistrictRole(UUID playerUuid, DistrictData.District district);
+
+    boolean canManageRoles(UUID playerUuid, DistrictData.District district);
+
+    boolean canManageLaws(UUID playerUuid, DistrictData.District district);
+
+    boolean canManageTreasury(UUID playerUuid, DistrictData.District district);
+
+    boolean canCreateMerchantNpc(UUID playerUuid, DistrictData.District district);
+
+    boolean canCreateDistrictJob(UUID playerUuid, DistrictData.District district);
+
+    boolean canApproveDistrictJob(UUID playerUuid, DistrictData.District district);
+
+    boolean canPolice(UUID playerUuid, DistrictData.District district);
+
+    boolean canRequestStation(UUID playerUuid, DistrictData.District district);
+
+    boolean canManageDevelopment(UUID playerUuid, DistrictData.District district);
+
     /**
      * Deposit cash into the district treasury.
      */
@@ -63,6 +90,14 @@ public interface DistrictService {
      * Toggle a local law for the district (council+ only).
      */
     boolean setLaw(int districtId, UUID actorUuid, String lawName, boolean enabled);
+
+    boolean proposeLaw(int districtId, UUID actorUuid, DistrictData.LawKey lawKey, boolean enabled);
+
+    int applyPendingLaws();
+
+    boolean isLawActive(DistrictData.District district, DistrictData.LawKey lawKey);
+
+    boolean isLawPending(DistrictData.District district, DistrictData.LawKey lawKey);
 
     /**
      * Get a district by ID.

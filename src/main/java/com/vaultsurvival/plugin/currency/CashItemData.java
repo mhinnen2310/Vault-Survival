@@ -24,6 +24,8 @@ public class CashItemData {
         IN_AUCTION_LOCKER,
         /** Cash is held in trade escrow */
         IN_TRADE_ESCROW,
+        /** Cash is held for a paid contract until completion/refund/dispute */
+        IN_CONTRACT_ESCROW,
         /** Cash is in a district treasury */
         IN_DISTRICT_TREASURY,
         /** Cash has been spent (no longer exists as physical money) */

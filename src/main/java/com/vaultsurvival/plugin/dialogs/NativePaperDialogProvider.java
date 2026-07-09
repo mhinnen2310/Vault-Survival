@@ -35,15 +35,28 @@ public class NativePaperDialogProvider implements DialogProvider {
 
     @Override
     public boolean open(Player player, DialogMenuType menuType, List<DialogMenuItem> items) {
+        return open(player, menuType, menuType.title(), menuType.body(), items);
+    }
+
+    @Override
+    public boolean open(Player player, DialogMenuType menuType, String title, String body, List<DialogMenuItem> items) {
         if (!available) {
             return false;
         }
 
         List<ActionButton> buttons = new ArrayList<>();
         DialogMenuItem back = null;
+        DialogMenuItem home = null;
         for (DialogMenuItem item : items) {
             if (isBack(item)) {
                 back = item;
+                continue;
+            }
+            if (isHome(item)) {
+                home = item;
+                continue;
+            }
+            if (isClose(item)) {
                 continue;
             }
             buttons.add(button(item));
@@ -53,6 +66,9 @@ public class NativePaperDialogProvider implements DialogProvider {
         }
         if (back != null) {
             buttons.add(button(back));
+            buttons.add(home != null ? button(home) : spacer());
+        } else if (home != null) {
+            buttons.add(button(home));
             buttons.add(spacer());
         }
 
@@ -62,11 +78,11 @@ public class NativePaperDialogProvider implements DialogProvider {
             .build();
 
         Dialog dialog = Dialog.create(builder -> builder.empty()
-            .base(DialogBase.builder(Component.text(menuType.title()))
-                .body(List.of(DialogBody.plainMessage(Component.text(menuType.body()), 300)))
+            .base(DialogBase.builder(Component.text(title))
+                .body(List.of(DialogBody.plainMessage(Component.text(body), 300)))
                 .canCloseWithEscape(true)
                 .pause(false)
-                .afterAction(DialogBase.DialogAfterAction.CLOSE)
+                .afterAction(DialogBase.DialogAfterAction.NONE)
                 .build())
             .type(DialogType.multiAction(buttons, exit, 2)));
 
@@ -75,8 +91,10 @@ public class NativePaperDialogProvider implements DialogProvider {
     }
 
     private ActionButton button(DialogMenuItem item) {
-        return ActionButton.builder(Component.text(item.label()))
-            .tooltip(Component.text(item.description()))
+        String label = item.locked() ? "[Locked] " + item.label() : item.label();
+        String tooltip = item.locked() ? item.lockedExplanation() : item.description();
+        return ActionButton.builder(Component.text(label))
+            .tooltip(Component.text(tooltip == null ? "" : tooltip))
             .width(200)
             .action(DialogAction.staticAction(ClickEvent.runCommand("/" + item.command())))
             .build();
@@ -90,7 +108,15 @@ public class NativePaperDialogProvider implements DialogProvider {
     }
 
     private boolean isBack(DialogMenuItem item) {
-        return "Back".equalsIgnoreCase(item.label()) && "vsmenu".equalsIgnoreCase(item.command());
+        return "Back".equalsIgnoreCase(item.label());
+    }
+
+    private boolean isHome(DialogMenuItem item) {
+        return "Home".equalsIgnoreCase(item.label());
+    }
+
+    private boolean isClose(DialogMenuItem item) {
+        return "Close".equalsIgnoreCase(item.label());
     }
 
     @Override
