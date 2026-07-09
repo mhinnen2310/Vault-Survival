@@ -1,5 +1,5 @@
 name: VaultSurvival
-version: 1.0.11
+version: 1.0.12
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -13,7 +13,7 @@ softdepend: []
 commands:
   vs:
     description: Vault Survival core commands
-    usage: /vs <version|modules|debug|reload|update>
+    usage: /vs <version|modules|debug|reload|update|checklist|debugbundle|permissions|configcheck>
     aliases: []
   spawncity:
     description: Spawn City management

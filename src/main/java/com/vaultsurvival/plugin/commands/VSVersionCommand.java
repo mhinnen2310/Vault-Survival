@@ -13,6 +13,9 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -46,7 +49,47 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
         if (args[0].equalsIgnoreCase("update")) {
             return handleUpdate(sender, args);
         }
+        if (args[0].equalsIgnoreCase("checklist")) return handleChecklist(sender);
+        if (args[0].equalsIgnoreCase("permissions")) return handlePermissions(sender);
+        if (args[0].equalsIgnoreCase("configcheck")) return handleConfigCheck(sender);
+        if (args[0].equalsIgnoreCase("debugbundle")) return handleDebugBundle(sender);
         return handleVersion(sender);
+    }
+
+    private boolean handleChecklist(CommandSender sender) {
+        sender.sendMessage(fmt.header("Final Gameplay Checklist"));
+        for (String item : List.of("New player: Spawn Job Board and starter payout", "Current area and district join/create", "District roles, laws, jobs, merchant orders", "Station request, ticket, and train journey", "Staff profile and economy/security dashboards")) sender.sendMessage(fmt.info("&7[ ] " + item));
+        sender.sendMessage(fmt.info("Run this list on a staging server with two players before production."));
+        return true;
+    }
+
+    private boolean handlePermissions(CommandSender sender) {
+        sender.sendMessage(fmt.header("Vault Survival Permissions"));
+        sender.sendMessage(fmt.info("Player: vs.menu, vs.vault.use, vs.market.buy, vs.breach.use"));
+        sender.sendMessage(fmt.info("District: roles are checked server-side; no menu button bypass."));
+        sender.sendMessage(fmt.info("Staff: vs.staffmode.use + active staffmode; vs.staffinspect; vs.cash.admin; vs.vault.admin.inspect"));
+        sender.sendMessage(fmt.info("Admin: vs.admin, vs.admin.reload, vs.update"));
+        return true;
+    }
+
+    private boolean handleConfigCheck(CommandSender sender) {
+        List<String> missing = new java.util.ArrayList<>();
+        for (String key : List.of("currency.material", "vaults.vault_material", "chat.channels.default", "districtDevelopment.scaling.enabled", "updates.githubOwner", "dialogs.enabled")) if (!plugin.getConfigManager().getConfig().contains(key)) missing.add(key);
+        sender.sendMessage(fmt.header("Config Check"));
+        sender.sendMessage(missing.isEmpty() ? fmt.success("Configuration is complete.") : fmt.error("Missing config keys: " + String.join(", ", missing)));
+        return true;
+    }
+
+    private boolean handleDebugBundle(CommandSender sender) {
+        if (!hasVsPermission(sender, "vs.admin")) { sender.sendMessage(fmt.permissionDenied()); return true; }
+        try {
+            File folder = new File(plugin.getDataFolder(), "debug-bundles"); folder.mkdirs();
+            File output = new File(folder, "vs-debug-" + System.currentTimeMillis() + ".txt");
+            String body = "Generated: " + Instant.now() + "\nVersion: " + plugin.getDescription().getVersion() + "\nDatabase: " + plugin.getDatabase().isConnected() + "\nModules:\n" + String.join("\n", plugin.getModuleManager().getModuleNames()) + "\nConfig check: run /vs configcheck\nKnown limits: report/alert scoring hooks remain placeholders.\n";
+            Files.writeString(output.toPath(), body, StandardCharsets.UTF_8);
+            sender.sendMessage(fmt.success("Debug bundle written: " + output.getName()));
+        } catch (Exception e) { sender.sendMessage(fmt.error("Could not write debug bundle.")); }
+        return true;
     }
 
     private boolean handleVersion(CommandSender sender) {
@@ -182,7 +225,7 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("version", "modules", "debug", "reload", "update").stream()
+            return List.of("version", "modules", "debug", "reload", "update", "checklist", "debugbundle", "permissions", "configcheck").stream()
                 .filter(s -> s.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("update")) {
