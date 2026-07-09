@@ -10,6 +10,8 @@ import com.vaultsurvival.plugin.districts.DistrictData;
 import com.vaultsurvival.plugin.npc.NpcData;
 import com.vaultsurvival.plugin.npc.NpcService;
 import com.vaultsurvival.plugin.social.PayoutLockerService;
+import com.vaultsurvival.plugin.regions.RegionData;
+import com.vaultsurvival.plugin.regions.RegionService;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -79,6 +81,21 @@ public class MerchantShopServiceImpl implements MerchantShopService {
         if (!districtService.canCreateMerchantNpc(merchant.getUniqueId(), district)) {
             merchant.sendMessage(fmt.error("You need the MERCHANT, CO_MAYOR, or MAYOR role in your district."));
             return null;
+        }
+
+        if (plugin.getConfigManager().getConfig().getBoolean("districtMarket.requireMarketZone", true)) {
+            try {
+                RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
+                boolean market = regions.getRegionsAt(merchant.getLocation()).stream().anyMatch(region ->
+                    region.getType() == RegionData.RegionType.DISTRICT_PUBLIC || region.getType() == RegionData.RegionType.AUCTION_HALL);
+                if (!market) {
+                    merchant.sendMessage(fmt.error("This district requires merchant NPCs to be placed inside a market zone."));
+                    return null;
+                }
+            } catch (RuntimeException e) {
+                merchant.sendMessage(fmt.error("Market-zone service is unavailable; shop creation is blocked safely."));
+                return null;
+            }
         }
 
         // Check limits - per merchant
