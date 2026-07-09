@@ -1,5 +1,5 @@
 name: VaultSurvival
-version: 1.0.5
+version: 1.0.6
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -36,6 +36,10 @@ commands:
   staffmode:
     description: Toggle staff mode with inventory separation and abuse protection
     usage: /staffmode [* [player]]
+  staffinspect:
+    description: Staff player search, profiles, and audited actions
+    usage: /staffinspect <player|search|online|recent|wanted|frozen|freeze|unfreeze>
+    permission: vs.staffinspect
   breach:
     description: Vault breaching commands
     usage: /breach <kit|start|cancel|log|logplayer|escapecooldown>
@@ -178,6 +182,12 @@ permissions:
     default: op
   vs.staffmode.use:
     description: Allows using staff mode
+    default: op
+  vs.staffinspect:
+    description: Allows opening staff player profiles and searches
+    default: op
+  vs.staffinspect.freeze:
+    description: Allows freezing and unfreezing players
     default: op
   vs.staffmode.bypass:
     description: Allows bypassing staff mode restrictions (testing only)

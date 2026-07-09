@@ -30,6 +30,7 @@ import com.vaultsurvival.plugin.market.MarketModule;
 import com.vaultsurvival.plugin.npc.NpcModule;
 import com.vaultsurvival.plugin.regions.RegionModule;
 import com.vaultsurvival.plugin.staffmode.StaffmodeModule;
+import com.vaultsurvival.plugin.staff.StaffInspectCommand;
 import com.vaultsurvival.plugin.spawncity.SpawnCityModule;
 import com.vaultsurvival.plugin.spawnjobs.SpawnJobModule;
 import com.vaultsurvival.plugin.updates.UpdateService;
@@ -242,6 +243,12 @@ public class VaultSurvivalPlugin extends JavaPlugin {
 
         // Register current-area context command
         getCommand("whereami").setExecutor(new WhereAmICommand(this, currentAreaService));
+
+        // Staff player dashboard command and its freeze listener.
+        var staffInspect = new StaffInspectCommand(this);
+        getCommand("staffinspect").setExecutor(staffInspect);
+        getCommand("staffinspect").setTabCompleter(staffInspect);
+        getServer().getPluginManager().registerEvents(staffInspect, this);
 
         // Register resource pack command
         var rpCmd = new ResourcePackCommand(this);
