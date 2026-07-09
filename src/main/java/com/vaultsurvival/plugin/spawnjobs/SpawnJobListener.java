@@ -6,6 +6,7 @@ import org.bukkit.block.Container;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerDropItemEvent;
 
@@ -23,7 +24,11 @@ public class SpawnJobListener implements Listener {
         if (name.contains("job board") || action.contains("spawnjobs")) {
             event.getPlayer().performCommand("spawnjobs");
         } else if (name.contains("conductor") || name.contains("builder") || name.contains("mason") || name.contains("smith") || name.contains("mint")) {
-            event.getPlayer().sendMessage("Use /spawnjobs active and /spawnjobs turnin <id> to turn in related jobs here.");
+            for (var active : service.getActiveJobs(event.getPlayer())) {
+                var job = service.getJob(active.getJobId());
+                if (job != null && job.getDestination().toLowerCase().contains(name.contains("conductor") ? "conductor" : name.contains("mint") ? "mint" : name)) service.turnIn(event.getPlayer(), job.getId());
+            }
+            event.getPlayer().performCommand("spawnjobs active");
         }
     }
 
@@ -40,6 +45,17 @@ public class SpawnJobListener implements Listener {
     public void onMove(InventoryMoveItemEvent event) {
         if (service.isPackage(event.getItem())) {
             event.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    public void onContainerClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof org.bukkit.entity.Player)) return;
+        boolean normalContainer = event.getView().getTopInventory().getType() != InventoryType.CRAFTING && event.getView().getTopInventory().getType() != InventoryType.PLAYER;
+        if (!normalContainer) return;
+        if (service.isPackage(event.getCurrentItem()) || service.isPackage(event.getCursor())) {
+            event.setCancelled(true);
+            event.getWhoClicked().sendMessage("Transport packages cannot be stored in containers.");
         }
     }
 }

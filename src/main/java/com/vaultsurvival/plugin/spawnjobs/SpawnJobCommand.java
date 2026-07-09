@@ -4,15 +4,21 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
+import org.bukkit.Material;
+import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
+import com.vaultsurvival.plugin.dialogs.DialogService;
+import java.util.ArrayList;
 
 import java.util.Arrays;
 import java.util.List;
 
 public class SpawnJobCommand implements CommandExecutor, TabCompleter {
     private final SpawnJobService service;
+    private final VaultSurvivalPlugin plugin;
     private final MessageFormatter fmt;
 
     public SpawnJobCommand(VaultSurvivalPlugin plugin) {
+        this.plugin = plugin;
         this.service = plugin.getServiceRegistry().get(SpawnJobService.class);
         this.fmt = plugin.getMessageFormatter();
     }
@@ -38,6 +44,14 @@ public class SpawnJobCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean board(Player player) {
+        DialogService dialogs = dialogs();
+        if (dialogs != null) {
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var job : service.getJobs()) items.add(DialogMenuItem.item("#" + job.getId() + " " + job.getTitle(), job.getType() + " | Reward " + job.getReward(), "spawnjobs accept " + job.getId(), null, job.getType() == SpawnJobData.JobType.TRANSPORT_PACKAGE ? Material.PAPER : Material.CHEST));
+            items.add(DialogMenuItem.item("My Active Jobs", "View and turn in active jobs.", "spawnjobs active", null, Material.MAP));
+            dialogs.openResult(player, "Spawn Job Board", "Starter jobs pay physical cash. Transport packages are unique and cannot be stored.", items);
+            return true;
+        }
         player.sendMessage(fmt.header("Spawn Job Board"));
         player.sendMessage(fmt.info("Starter Jobs / Transport Jobs / Delivery Jobs / Exploration Jobs"));
         for (var job : service.getJobs()) {
@@ -50,6 +64,14 @@ public class SpawnJobCommand implements CommandExecutor, TabCompleter {
 
     private boolean active(Player player) {
         var active = service.getActiveJobs(player);
+        DialogService dialogs = dialogs();
+        if (dialogs != null) {
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var pj : active) { var job = service.getJob(pj.getJobId()); if (job != null) items.add(DialogMenuItem.item("#" + job.getId() + " " + job.getTitle(), "Turn in when requirements are met.", "spawnjobs turnin " + job.getId(), null, Material.CHEST)); }
+            items.add(DialogMenuItem.item("Job Board", "Return to starter jobs.", "spawnjobs", null, Material.BELL));
+            dialogs.openResult(player, "My Active Spawn Jobs", active.isEmpty() ? "No active jobs." : "Select a job to turn it in.", items);
+            return true;
+        }
         player.sendMessage(fmt.header("My Active Spawn Jobs (" + active.size() + ")"));
         for (var pj : active) {
             var job = service.getJob(pj.getJobId());
@@ -93,4 +115,5 @@ public class SpawnJobCommand implements CommandExecutor, TabCompleter {
     private SpawnJobData.JobType parseType(String raw) { try { return SpawnJobData.JobType.valueOf(raw.toUpperCase()); } catch (Exception ignored) { return null; } }
     private int parseInt(String raw) { try { return Integer.parseInt(raw); } catch (Exception ignored) { return -1; } }
     private long parseLong(String raw) { try { return Long.parseLong(raw); } catch (Exception ignored) { return -1; } }
+    private DialogService dialogs() { try { return plugin.getServiceRegistry().get(DialogService.class); } catch (RuntimeException ignored) { return null; } }
 }
