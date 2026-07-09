@@ -37,11 +37,13 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     private final VaultSurvivalPlugin plugin;
     private final DistrictService districtService;
     private final MessageFormatter fmt;
+    private final DistrictDevelopmentService development;
 
     public DistrictCommand(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
         this.districtService = plugin.getServiceRegistry().get(DistrictService.class);
         this.fmt = plugin.getMessageFormatter();
+        this.development = new DistrictDevelopmentService(plugin);
     }
 
     @Override
@@ -72,8 +74,14 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "disband" -> handleDisband(sender);
             case "applications" -> handleApplications(sender);
             case "station" -> handleStation(sender, args);
+            case "development", "projects", "project", "maintenance", "contributors" -> handleDevelopment(sender, args);
             default -> { sendUsage(sender); yield true; }
         };
+    }
+
+    private boolean handleDevelopment(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        return development.handle(player, args[0].toLowerCase(), args);
     }
 
     private boolean handleApply(CommandSender sender, String[] args) {

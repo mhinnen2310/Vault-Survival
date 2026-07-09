@@ -186,7 +186,14 @@ public class DialogService {
             case DISTRICT_STATION -> districtStationMenu(player);
             case DISTRICT_DIPLOMACY -> placeholderMenu("Diplomacy", "Diplomacy is planned for a later sprint.", "district");
             case DISTRICT_JOBS -> districtJobsMenu(player);
-            case DISTRICT_DEVELOPMENT -> placeholderMenu("Development", "Development projects are planned for a later sprint.", "district");
+            case DISTRICT_DEVELOPMENT -> List.of(
+                DialogMenuItem.item("Development Report", "View level and category progress.", "district development", null, Material.NETHER_STAR),
+                DialogMenuItem.item("Project Board", "View active district projects.", "district projects", null, Material.WRITABLE_BOOK),
+                DialogMenuItem.item("Maintenance", "View district maintenance state.", "district maintenance", null, Material.ANVIL),
+                DialogMenuItem.item("Contributors", "View district contributors.", "district contributors", null, Material.PLAYER_HEAD),
+                DialogMenuItem.item("Create Project", "Create a project with cash and material requirements.", "vsmenu input district_project_create", null, Material.EMERALD_BLOCK),
+                DialogMenuItem.item("Contribute", "Contribute physical cash or held materials.", "vsmenu input district_project_contribute", null, Material.HOPPER),
+                backItem("district"), homeItem(), closeItem());
             case MERCHANT_HOME -> merchantMenu();
             case MERCHANT_SHOPS -> merchantShopsMenu(player);
             case MERCHANT_ORDERS -> merchantOrdersMenu(player);
@@ -1203,6 +1210,8 @@ public class DialogService {
             input("district_deposit", "Deposit Treasury", "Enter physical cash amount to deposit.", "Amount", "district deposit $(value)", null, false),
             input("district_withdraw", "Withdraw Treasury", "Enter physical cash amount to withdraw.", "Amount", "district withdraw $(value)", null, true),
             input("district_job_create", "Create District Job", "Enter: TYPE reward hours item|none amount manual:true|false title. Example: DELIVERY 100 24 stone 32 false Bring stone.", "TYPE reward hours item amount manual title", "district job create $(value)", null, true),
+            input("district_project_create", "Create District Project", "Enter: type cashRequired itemRequired. Example: BUILD_MARKET 5000 128", "type cash items", "district project create $(value)", null, true),
+            input("district_project_contribute", "Contribute To Project", "Enter: projectId cash|items amount. Hold materials for item contributions.", "id cash|items amount", "district project contribute $(value)", null, false),
             input("district_job_deliver", "Deliver Job Items", "Enter job id. Required items are matched by job config.", "Job id", "district job deliver $(value)", null, false),
             input("district_job_submit", "Submit Manual Job", "Enter job id.", "Job id", "district job submit $(value)", null, false),
             input("district_job_approve", "Approve Job Claim", "Enter claim id.", "Claim id", "district job approve $(value)", null, true),
