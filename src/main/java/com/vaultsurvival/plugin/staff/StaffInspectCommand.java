@@ -135,6 +135,11 @@ public final class StaffInspectCommand implements CommandExecutor, TabCompleter,
         String action = args[0].toLowerCase(Locale.ROOT);
         if (target == null) { sender.sendMessage(fmt.error("That action requires the player to be online.")); return; }
         if (!staff.hasPermission("vs.staffinspect." + action) && !staff.hasPermission("vs.admin")) { sender.sendMessage(fmt.permissionDenied()); return; }
+        if ((action.equals("tp") || action.equals("bring") || action.equals("spectate"))
+            && (args.length < 3 || !args[2].equalsIgnoreCase("confirmed"))) {
+            DialogService dialogs = dialogs();
+            if (dialogs != null) { dialogs.openConfirmation(staff, "Confirm " + action, "Confirm action for " + target.getName() + ".", "staffinspect " + action + " " + target.getName() + " confirmed", "players"); return; }
+        }
         switch (action) {
             case "tp" -> staff.teleport(target.getLocation());
             case "bring" -> target.teleport(staff.getLocation());
@@ -157,6 +162,10 @@ public final class StaffInspectCommand implements CommandExecutor, TabCompleter,
         Player target = args.length >= 2 ? Bukkit.getPlayerExact(args[1]) : nearestPlayer((Player) sender);
         if (target == null) { sender.sendMessage(fmt.error("Player must be online.")); return; }
         boolean enable = args[0].equalsIgnoreCase("freeze");
+        if ((args.length < 3 || !args[2].equalsIgnoreCase("confirmed")) && sender instanceof Player staff && dialogs() != null) {
+            dialogs().openConfirmation(staff, enable ? "Confirm Freeze" : "Confirm Unfreeze", "Confirm action for " + target.getName() + ".", "staffinspect " + args[0] + " " + target.getName() + " confirmed", "players");
+            return;
+        }
         if (enable) frozen.add(target.getUniqueId()); else frozen.remove(target.getUniqueId());
         plugin.getAuditLogger().log(sender instanceof Player p ? p.getUniqueId() : null, sender.getName(), enable ? "STAFF_FREEZE" : "STAFF_UNFREEZE", "PLAYER", target.getUniqueId().toString(), "target=" + target.getName());
         target.sendMessage(fmt.warn(enable ? "You have been frozen by staff." : "You have been unfrozen."));
