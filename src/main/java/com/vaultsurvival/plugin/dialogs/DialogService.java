@@ -354,10 +354,10 @@ public class DialogService {
         items.add(DialogMenuItem.locked("Risk Summary", "Current risk state.",
             context.riskSummary(), Material.CROSSBOW));
 
-        items.add(DialogMenuItem.locked("View Active Laws", "Open active district laws.",
-            "Locked: dedicated law service is not ready. Existing law map is summarized above.", Material.LECTERN));
-        items.add(DialogMenuItem.locked("View Pending Laws", "Open pending district laws.",
-            "Locked: pending law workflow is planned for a later sprint.", Material.PAPER));
+        if (context.hasDistrict()) {
+            items.add(DialogMenuItem.item("View Active Laws", "Illegal actions remain possible; active laws create evidence.", "vsmenu district.laws", null, Material.LECTERN));
+            items.add(DialogMenuItem.item("View Pending Laws", "View law changes queued for daily activation.", "vsmenu district.pending_laws", null, Material.PAPER));
+        }
 
         if (context.hasDistrict()) {
             items.add(DialogMenuItem.item("District Info", "Show the current district details.",
@@ -416,6 +416,7 @@ public class DialogService {
 
     private List<DialogMenuItem> activeLawsMenu(Player player) {
         DistrictData.District district = getDistrict(player);
+        if (district == null) district = getCurrentArea(player).district();
         if (district == null) {
             return placeholderMenu("Active Laws", "You are not a member of a district.", "district");
         }
@@ -435,6 +436,7 @@ public class DialogService {
 
     private List<DialogMenuItem> pendingLawsMenu(Player player) {
         DistrictData.District district = getDistrict(player);
+        if (district == null) district = getCurrentArea(player).district();
         if (district == null) {
             return placeholderMenu("Pending Laws", "You are not a member of a district.", "district");
         }
