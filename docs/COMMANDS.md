@@ -111,8 +111,12 @@ This reference follows the plugin modules. Permission-protected commands use the
 | Command | Purpose |
 | --- | --- |
 | `//wand`, `//pos1`, `//pos2`, `//selection`, `//clearselection` | Selection controls. |
-| `//set <blocks> [weights]` | Fill selection. Example: `//set oak_planks,birch_planks 50,50`. |
-| `//replace <from> <to>` | Replace matching blocks. |
+| `//set <material|pattern>` | Fill selection. Supports `air`, `0`, equal random lists, percentages, and `grid:`. |
+| `//setgrid <materials>` | Deterministic coordinate grid; example: `//setgrid stone,cobblestone`. |
+| `//replace <from> <material|pattern>` | Replace matching blocks, including with `air` or `0`. |
+| `//replacegrid <from> <materials>` | Replace matching blocks with a deterministic grid. |
+| `/vwe pattern <pattern>` | Validate and preview parsed syntax without editing blocks. |
+| `/vwe operation` | Open the VWE operation, pattern preview, confirm, and cancel dialog. |
 | `//walls`, `//outline`, `//floor`, `//ceiling`, `//hollow` | Cuboid editing tools. |
 | `//cylinder`, `//hcylinder` | Solid or hollow vertical cylinders. |
 | `//circle`, `//hcircle` | Solid or hollow flat circles. |

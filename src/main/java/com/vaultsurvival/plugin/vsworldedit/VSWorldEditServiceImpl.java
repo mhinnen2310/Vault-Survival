@@ -2,6 +2,9 @@ package com.vaultsurvival.plugin.vsworldedit;
 
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.regions.RegionData;
+import com.vaultsurvival.plugin.regions.RegionVisualizationService;
+import com.vaultsurvival.plugin.regions.RegionVisualizationSession;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -23,6 +26,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
 
     private final VaultSurvivalPlugin plugin;
     private final MessageFormatter fmt;
+    private final RegionVisualizationService visualization;
 
     // Per-player selection state
     private final Map<UUID, Location> pos1Map = new ConcurrentHashMap<>();
@@ -34,9 +38,11 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     // Pending confirmation: player must /vwe confirm
     private final Map<UUID, VSWorldEditData.ActiveOperation> pendingOps = new ConcurrentHashMap<>();
     private final Map<UUID, List<VSWorldEditData.BlockPlacement>> pendingPlacementOps = new ConcurrentHashMap<>();
+    private final Map<UUID, PendingPatternOperation> pendingPatternOps = new ConcurrentHashMap<>();
     private final Map<UUID, PendingPositionOperation> pendingPositionOps = new ConcurrentHashMap<>();
     // Currently running operations
     private final Map<UUID, VSWorldEditData.ActiveOperation> activeOps = new ConcurrentHashMap<>();
+    private final Set<UUID> undoing = ConcurrentHashMap.newKeySet();
 
     // Wand key
     private final NamespacedKey wandKey;
@@ -44,6 +50,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     public VSWorldEditServiceImpl(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
         this.fmt = plugin.getMessageFormatter();
+        this.visualization = plugin.getServiceRegistry().get(RegionVisualizationService.class);
         this.wandKey = new NamespacedKey(plugin, VSWorldEditData.WAND_KEY);
     }
 
@@ -108,6 +115,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     public void clearSelection(Player player) {
         pos1Map.remove(player.getUniqueId());
         pos2Map.remove(player.getUniqueId());
+        visualization.hide(player.getUniqueId());
         player.sendMessage(fmt.info("Selection cleared."));
     }
 
@@ -117,6 +125,10 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             player.sendMessage(fmt.info("Selection: &e" +
                 sel.getWidth() + "x" + sel.getHeight() + "x" + sel.getDepth() +
                 " &7(" + sel.getVolume() + " blocks)"));
+            visualization.showBounds(player, new RegionVisualizationSession.Bounds(player.getWorld(),
+                sel.getX1(), sel.getY1(), sel.getZ1(), sel.getX2(), sel.getY2(), sel.getZ2()),
+                RegionData.RegionType.PROJECT_REGION, "VWE selection",
+                RegionVisualizationSession.Mode.WHILE_EDITING, false);
         }
     }
 
@@ -130,9 +142,23 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     }
 
     @Override
-    public boolean fillPattern(Player player, List<VSWorldEditData.WeightedMaterial> pattern) {
+    public boolean fillPattern(Player player, BlockPattern pattern) {
+        return startPatternOperation(player, VSWorldEditData.OperationType.PATTERN_FILL, null, pattern);
+    }
+
+    @Override
+    public boolean replacePattern(Player player, Material from, BlockPattern pattern) {
+        if (from == null || (!from.isBlock() && !from.isAir())) {
+            player.sendMessage(fmt.error("Invalid source material."));
+            return false;
+        }
+        return startPatternOperation(player, VSWorldEditData.OperationType.PATTERN_REPLACE, from, pattern);
+    }
+
+    private boolean startPatternOperation(Player player, VSWorldEditData.OperationType type,
+                                          Material from, BlockPattern pattern) {
         UUID uuid = player.getUniqueId();
-        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid)) {
+        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid) || undoing.contains(uuid)) {
             player.sendMessage(fmt.error("An operation is already pending or running."));
             return false;
         }
@@ -145,29 +171,24 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             player.sendMessage(fmt.error("Selection too large: " + selection.getVolume() + " blocks (max: " + getMaxBlocksPerOperation() + ")"));
             return false;
         }
-        if (pattern == null || pattern.isEmpty() || pattern.stream().anyMatch(entry -> entry.material() == null
-            || !entry.material().isBlock() || entry.material().isAir() || entry.weight() <= 0)) {
+        if (pattern == null || pattern.entries().isEmpty() || pattern.entries().stream().anyMatch(entry ->
+            entry.material() == null || (!entry.material().isBlock() && !entry.material().isAir()) || entry.weight() <= 0)) {
             player.sendMessage(fmt.error("Invalid block pattern."));
             return false;
         }
-        List<VSWorldEditData.BlockPlacement> placements = new ArrayList<>();
-        Random random = new Random(uuid.getMostSignificantBits() ^ uuid.getLeastSignificantBits() ^ selection.getVolume());
-        for (int y = selection.getY1(); y <= selection.getY2(); y++) {
-            for (int z = selection.getZ1(); z <= selection.getZ2(); z++) {
-                for (int x = selection.getX1(); x <= selection.getX2(); x++) {
-                    placements.add(new VSWorldEditData.BlockPlacement(x, y, z, choosePatternMaterial(pattern, random)));
-                }
-            }
-        }
-        var operation = new VSWorldEditData.ActiveOperation(uuid, VSWorldEditData.OperationType.FILL, selection, pattern.getFirst().material(), null);
-        operation.setTotalBlocks(placements.size());
-        if (placements.size() > getRequireConfirmationAbove()) {
+        var operation = new VSWorldEditData.ActiveOperation(uuid, type, selection,
+            pattern.entries().getFirst().material(), from);
+        operation.setTotalBlocks(selection.getVolume());
+        boolean airConfirmation = pattern.containsAir() && requireConfirmationForAirOperations();
+        if (selection.getVolume() > getRequireConfirmationAbove() || airConfirmation) {
             pendingOps.put(uuid, operation);
-            pendingPlacementOps.put(uuid, placements);
-            player.sendMessage(fmt.warn("Pattern set: &e" + placements.size() + " blocks. Type &e/vwe confirm&e to proceed."));
+            pendingPatternOps.put(uuid, new PendingPatternOperation(pattern, from));
+            player.sendMessage(fmt.warn("Pattern operation: &e" + pattern.describe() + "&e over " + selection.getVolume() + " blocks."));
+            if (airConfirmation) player.sendMessage(fmt.warn("Air operations always require confirmation."));
+            player.sendMessage(fmt.warn("Type &e/vwe confirm&e to proceed, or &e/vwe cancel&e to abort."));
             return false;
         }
-        executeOperationWithPlacements(operation, player, placements);
+        executePatternOperation(operation, player, pattern, from);
         return true;
     }
 
@@ -199,7 +220,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     @Override
     public boolean hollow(Player player, Material wallBlock, Material airBlock) {
         UUID uuid = player.getUniqueId();
-        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid)) {
+        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid) || undoing.contains(uuid)) {
             player.sendMessage(fmt.error("An operation is already pending or running."));
             return false;
         }
@@ -224,7 +245,8 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         var op = new VSWorldEditData.ActiveOperation(uuid, VSWorldEditData.OperationType.HOLLOW, sel, wallBlock, airBlock);
         op.setTotalBlocks(total);
 
-        if (total > getRequireConfirmationAbove()) {
+        if (total > getRequireConfirmationAbove()
+            || ((wallBlock.isAir() || airBlock.isAir()) && requireConfirmationForAirOperations())) {
             pendingOps.put(uuid, op);
             pendingPlacementOps.put(uuid, placements);
             player.sendMessage(fmt.warn("Operation: &eHOLLOW &e" + total + " blocks (" + wallBlock.name() + " / " + airBlock.name() + ")"));
@@ -298,7 +320,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     @Override
     public boolean line(Player player, Material material) {
         UUID uuid = player.getUniqueId();
-        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid)) {
+        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid) || undoing.contains(uuid)) {
             player.sendMessage(fmt.error("An operation is already pending or running."));
             return false;
         }
@@ -321,7 +343,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         UUID uuid = player.getUniqueId();
 
         // Check no active operation
-        if (activeOps.containsKey(uuid)) {
+        if (activeOps.containsKey(uuid) || undoing.contains(uuid)) {
             player.sendMessage(fmt.error("An operation is already running. Wait or /vwe cancel."));
             return false;
         }
@@ -349,7 +371,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         }
 
         // Validate material
-        if (primary == null || !primary.isBlock() || primary.isAir()) {
+        if (primary == null || (!primary.isBlock() && !primary.isAir())) {
             player.sendMessage(fmt.error("Invalid block type: " + (primary != null ? primary.name() : "null")));
             return false;
         }
@@ -357,7 +379,8 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         var op = new VSWorldEditData.ActiveOperation(uuid, type, sel, primary, secondary);
 
         // Require confirmation for large operations
-        if (sel.getVolume() > getRequireConfirmationAbove()) {
+        if (sel.getVolume() > getRequireConfirmationAbove()
+            || (primary.isAir() && requireConfirmationForAirOperations())) {
             pendingOps.put(uuid, op);
             player.sendMessage(fmt.warn("Operation: &e" + type.name() + "&e " + sel.getVolume() +
                 " blocks with " + primary.name()));
@@ -378,7 +401,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     private boolean startPositionOp(Player player, VSWorldEditData.OperationType type,
                                      Material material, List<int[]> positions) {
         UUID uuid = player.getUniqueId();
-        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid)) {
+        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid) || undoing.contains(uuid)) {
             player.sendMessage(fmt.error("An operation is already pending or running."));
             return false;
         }
@@ -391,7 +414,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             player.sendMessage(fmt.error("Too many blocks: " + total + " (max: " + getMaxBlocksPerOperation() + ")"));
             return false;
         }
-        if (material == null || !material.isBlock() || material.isAir()) {
+        if (material == null || (!material.isBlock() && !material.isAir())) {
             player.sendMessage(fmt.error("Invalid block type."));
             return false;
         }
@@ -404,7 +427,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         var op = new VSWorldEditData.ActiveOperation(uuid, type, sel, material, null);
         op.setTotalBlocks(total);
 
-        if (total > getRequireConfirmationAbove()) {
+        if (total > getRequireConfirmationAbove() || (material.isAir() && requireConfirmationForAirOperations())) {
             pendingOps.put(uuid, op);
             pendingPositionOps.put(uuid, new PendingPositionOperation(positions, material));
             player.sendMessage(fmt.warn("Operation: &e" + type.name() + " " + total + " blocks with " + material.name()));
@@ -450,17 +473,6 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             }
         }
         return positions;
-    }
-
-    private Material choosePatternMaterial(List<VSWorldEditData.WeightedMaterial> pattern, Random random) {
-        int total = pattern.stream().mapToInt(VSWorldEditData.WeightedMaterial::weight).sum();
-        int target = random.nextInt(total);
-        int running = 0;
-        for (VSWorldEditData.WeightedMaterial entry : pattern) {
-            running += entry.weight();
-            if (target < running) return entry.material();
-        }
-        return pattern.getLast().material();
     }
 
     private List<int[]> computeSpherePositions(Player player, int radius, boolean hollow) {
@@ -615,6 +627,108 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         plugin.getLogger().info("[VWE] " + player.getName() + " " + op.getType().name() + " " + placedCount + " blocks");
     }
 
+    /** Resolves patterns lazily inside the existing batched engine; no million-entry placement list. */
+    private void executePatternOperation(VSWorldEditData.ActiveOperation op, Player player,
+                                         BlockPattern pattern, Material replaceFrom) {
+        UUID uuid = player.getUniqueId();
+        activeOps.put(uuid, op);
+        VSWorldEditData.Selection selection = op.getSelection();
+        World world = Bukkit.getWorld(selection.getWorldName());
+        if (world == null) {
+            activeOps.remove(uuid);
+            player.sendMessage(fmt.error("World not found."));
+            return;
+        }
+        int blocksPerTick = getBlocksPerTick();
+        Random random = new Random(uuid.getMostSignificantBits() ^ uuid.getLeastSignificantBits()
+            ^ selection.getVolume() ^ pattern.describe().hashCode());
+        player.sendMessage(fmt.info("Started &e" + op.getType().name() + "&7: " + selection.getVolume()
+            + " blocks using " + pattern.mode() + "."));
+
+        new BukkitRunnable() {
+            int x = selection.getX1(), y = selection.getY1(), z = selection.getZ1();
+            int iterated = 0, changed = 0, lastPct = -1;
+
+            @Override public void run() {
+                if (!player.isOnline() || op.isCancelled()) {
+                    rollbackPartial(player, op, changed);
+                    cancel();
+                    return;
+                }
+                int processed = 0;
+                while (processed < blocksPerTick && y <= selection.getY2()) {
+                    var block = world.getBlockAt(x, y, z);
+                    if (replaceFrom == null || block.getType() == replaceFrom) {
+                        Material target = pattern.materialAt(x, y, z, random);
+                        if (block.getType() != target) {
+                            op.getUndoEntry().addSnapshot(new VSWorldEditData.BlockSnapshot(block.getLocation(), block.getType().name()));
+                            block.setType(target, false);
+                            changed++;
+                        }
+                    }
+                    iterated++;
+                    processed++;
+                    x++;
+                    if (x > selection.getX2()) { x = selection.getX1(); z++; }
+                    if (z > selection.getZ2()) { z = selection.getZ1(); y++; }
+                }
+                if (y > selection.getY2()) {
+                    activeOps.remove(uuid);
+                    if (changed > 0) pushUndo(player, op.getUndoEntry());
+                    player.sendMessage(fmt.success(pattern.mode() + " operation complete: &e" + changed + "&a blocks changed."));
+                    plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_" + op.getType().name(),
+                        selection.getWorldName(), "changed=" + changed + " pattern=" + pattern.describe());
+                    cancel();
+                    return;
+                }
+                int pct = selection.getVolume() == 0 ? 100 : iterated * 100 / selection.getVolume();
+                if (pct >= lastPct + 10) {
+                    lastPct = pct - pct % 10;
+                    player.sendMessage(fmt.info(pattern.mode() + " progress: &e" + pct + "%&7 (" + changed + " changed)"));
+                }
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
+    }
+
+    /** A cancelled pattern operation restores every already changed block in reverse order. */
+    private void rollbackPartial(Player player, VSWorldEditData.ActiveOperation op, int changed) {
+        List<VSWorldEditData.BlockSnapshot> snapshots = op.getUndoEntry().getSnapshots();
+        if (snapshots.isEmpty()) {
+            activeOps.remove(op.getPlayerUuid());
+            if (player.isOnline()) player.sendMessage(fmt.info("Operation cancelled before any block changed."));
+            return;
+        }
+        if (player.isOnline()) player.sendMessage(fmt.warn("Cancelling: rolling back &e" + changed + "&7 changed blocks..."));
+        new BukkitRunnable() {
+            int index = snapshots.size() - 1;
+            @Override public void run() {
+                int processed = 0;
+                while (processed++ < getBlocksPerTick() && index >= 0) restoreSnapshot(snapshots.get(index--));
+                if (index < 0) {
+                    activeOps.remove(op.getPlayerUuid());
+                    if (player.isOnline()) player.sendMessage(fmt.success("Cancelled operation was fully rolled back."));
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
+    }
+
+    private void restoreSnapshot(VSWorldEditData.BlockSnapshot snapshot) {
+        World world = Bukkit.getWorld(snapshot.worldName);
+        if (world == null) return;
+        try {
+            if (snapshot.previousTileState != null) {
+                snapshot.previousTileState.update(true, false);
+                return;
+            }
+            world.getBlockAt(snapshot.x, snapshot.y, snapshot.z)
+                .setBlockData(Bukkit.createBlockData(snapshot.previousBlockData), false);
+        } catch (IllegalArgumentException invalidData) {
+            Material fallback = Material.matchMaterial(snapshot.previousType);
+            if (fallback != null) world.getBlockAt(snapshot.x, snapshot.y, snapshot.z).setType(fallback, false);
+        }
+    }
+
     // ========================================================================
     // Batched execution with position list (single material)
     // ========================================================================
@@ -672,9 +786,14 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             return false;
         }
         player.sendMessage(fmt.success("Confirmed. Starting " + op.getType().name() + "..."));
+        plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_CONFIRM",
+            op.getType().name(), "blocks=" + op.getTotalBlocks());
         List<VSWorldEditData.BlockPlacement> placements = pendingPlacementOps.remove(uuid);
+        PendingPatternOperation patternOperation = pendingPatternOps.remove(uuid);
         PendingPositionOperation positionOperation = pendingPositionOps.remove(uuid);
-        if (placements != null) {
+        if (patternOperation != null) {
+            executePatternOperation(op, player, patternOperation.pattern(), patternOperation.replaceFrom());
+        } else if (placements != null) {
             executeOperationWithPlacements(op, player, placements);
         } else if (positionOperation != null) {
             executeOpWithPositions(op, player, positionOperation.positions(), positionOperation.material());
@@ -692,8 +811,11 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         var pending = pendingOps.remove(uuid);
         if (pending != null) {
             pendingPlacementOps.remove(uuid);
+            pendingPatternOps.remove(uuid);
             pendingPositionOps.remove(uuid);
             player.sendMessage(fmt.info("Pending operation cancelled."));
+            plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_CANCEL_PENDING",
+                pending.getType().name(), "blocks=" + pending.getTotalBlocks());
             return true;
         }
 
@@ -702,6 +824,8 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         if (active != null) {
             active.cancel();
             player.sendMessage(fmt.info("Cancelling operation..."));
+            plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_CANCEL_ACTIVE",
+                active.getType().name(), "processed=" + active.getUndoEntry().getSize());
             return true;
         }
 
@@ -716,13 +840,17 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
 
     @Override
     public boolean hasActiveOperation(Player player) {
-        return activeOps.containsKey(player.getUniqueId());
+        return activeOps.containsKey(player.getUniqueId()) || undoing.contains(player.getUniqueId());
     }
 
     @Override
     public String getPendingDescription(Player player) {
         var op = pendingOps.get(player.getUniqueId());
         if (op == null) return null;
+        PendingPatternOperation pattern = pendingPatternOps.get(player.getUniqueId());
+        if (pattern != null) {
+            return op.getType().name() + " " + op.getTotalBlocks() + " blocks using " + pattern.pattern().describe();
+        }
         return op.getType().name() + " " + op.getTotalBlocks() + " blocks with " +
             op.getPrimaryMaterial().name();
     }
@@ -810,6 +938,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
                     boolean shouldPlace = switch (op.getType()) {
                         case FILL -> true;
                         case REPLACE -> loc.getBlock().getType() == op.getSecondaryMaterial();
+                        case PATTERN_FILL, PATTERN_REPLACE -> true; // Executed by executePatternOperation.
                         case WALLS, OUTLINE, FLOOR, CEILING -> true; // Pre-filtered positions
                         case HOLLOW, CYLINDER, CIRCLE, SPHERE, HSPHERE, LINE -> true; // Not reached via this path
                     };
@@ -902,15 +1031,16 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         UUID uuid = player.getUniqueId();
         pos1Map.remove(uuid);
         pos2Map.remove(uuid);
-        undoStacks.remove(uuid);
         pendingOps.remove(uuid);
         pendingPlacementOps.remove(uuid);
+        pendingPatternOps.remove(uuid);
         pendingPositionOps.remove(uuid);
-        var active = activeOps.remove(uuid);
+        var active = activeOps.get(uuid);
         if (active != null) active.cancel();
     }
 
     private record PendingPositionOperation(List<int[]> positions, Material material) {}
+    private record PendingPatternOperation(BlockPattern pattern, Material replaceFrom) {}
 
     // ========================================================================
     // Undo
@@ -927,6 +1057,11 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
 
     @Override
     public int undo(Player player) {
+        UUID uuid = player.getUniqueId();
+        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid) || undoing.contains(uuid)) {
+            player.sendMessage(fmt.error("Wait for the current operation, confirmation, or undo to finish."));
+            return -1;
+        }
         Deque<VSWorldEditData.UndoEntry> stack = undoStacks.get(player.getUniqueId());
         if (stack == null || stack.isEmpty()) {
             player.sendMessage(fmt.info("Nothing to undo."));
@@ -934,19 +1069,28 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         }
 
         var entry = stack.pop();
-        int reverted = 0;
-        for (var snap : entry.getSnapshots()) {
-            World world = Bukkit.getWorld(snap.worldName);
-            if (world == null) continue;
-            Material mat = Material.matchMaterial(snap.previousType);
-            if (mat != null) {
-                new Location(world, snap.x, snap.y, snap.z).getBlock().setType(mat);
-                reverted++;
+        List<VSWorldEditData.BlockSnapshot> snapshots = entry.getSnapshots();
+        undoing.add(uuid);
+        player.sendMessage(fmt.info("Undo started: &e" + snapshots.size() + "&7 blocks. Processing in batches..."));
+        new BukkitRunnable() {
+            int index = snapshots.size() - 1;
+            int reverted = 0;
+            @Override public void run() {
+                int processed = 0;
+                while (processed++ < getBlocksPerTick() && index >= 0) {
+                    restoreSnapshot(snapshots.get(index--));
+                    reverted++;
+                }
+                if (index < 0) {
+                    undoing.remove(uuid);
+                    if (player.isOnline()) player.sendMessage(fmt.success("Undo: &e" + reverted + "&a blocks reverted. &7(" + entry.getDescription() + ")"));
+                    plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_UNDO",
+                        entry.getDescription(), "reverted=" + reverted);
+                    cancel();
+                }
             }
-        }
-        player.sendMessage(fmt.success("Undo: &e" + reverted + "&a blocks reverted. &7(" +
-            entry.getDescription() + ")"));
-        return reverted;
+        }.runTaskTimer(plugin, 1L, 1L);
+        return snapshots.size();
     }
 
     // ========================================================================
@@ -961,4 +1105,10 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         return plugin.getConfigManager().getVweMaxUndo(); }
     @Override public int getRequireConfirmationAbove() {
         return plugin.getConfigManager().getVweRequireConfirmAbove(); }
+
+    private boolean requireConfirmationForAirOperations() {
+        var config = plugin.getConfigManager().getConfig();
+        return config.getBoolean("vsWorldEdit.safety.requireConfirmationForAirOperations",
+            config.getBoolean("vsworldedit.safety.requireConfirmationForAirOperations", true));
+    }
 }

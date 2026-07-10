@@ -26,10 +26,12 @@ public interface VSWorldEditService {
     // --- Operations (batched) ---
     /** Start a batched fill operation. Returns true if queued/started. */
     boolean fill(Player player, Material material);
-    /** Fill the selection using a weighted material pattern. */
-    boolean fillPattern(Player player, List<VSWorldEditData.WeightedMaterial> pattern);
+    /** Fill the selection using a validated single/random/weighted/grid pattern. */
+    boolean fillPattern(Player player, BlockPattern pattern);
     /** Start a batched replace operation. */
     boolean replace(Player player, Material from, Material to);
+    /** Replace matching blocks using a validated pattern. */
+    boolean replacePattern(Player player, Material from, BlockPattern pattern);
     /** Start a batched walls operation. */
     boolean walls(Player player, Material material);
     /** Start a batched outline operation. */

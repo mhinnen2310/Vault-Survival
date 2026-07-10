@@ -114,13 +114,14 @@ public class CurrentAreaService {
                 case MINT -> {
                     return CurrentAreaContext.AreaType.MINT;
                 }
-                case DISTRICT_STATION, STATION_ROUTE -> {
+                case DISTRICT_STATION, STATION_ROUTE, STATION_PLATFORM, STATION_ARRIVAL, TRAIN_INTERIOR -> {
                     return CurrentAreaContext.AreaType.STATION;
                 }
-                case DISTRICT_PUBLIC -> {
+                case DISTRICT_PUBLIC, DISTRICT_MARKET, BLACK_MARKET -> {
                     return CurrentAreaContext.AreaType.MARKET_ZONE;
                 }
-                case SPAWN_PUBLIC -> {
+                case SPAWN_PUBLIC, SPAWN_CITY, TOWN_HALL, JAIL, POLICE_STATION, TREASURY,
+                     VAULT_ZONE, REPAIR_ZONE, JOB_BOARD -> {
                     return CurrentAreaContext.AreaType.SPAWN_CITY;
                 }
                 default -> {

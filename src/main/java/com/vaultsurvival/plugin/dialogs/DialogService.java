@@ -572,6 +572,22 @@ public class DialogService {
             backItem("merchant"), homeItem(), closeItem());
     }
 
+    public void openVweOperation(Player player, String status, int blockCount, List<DialogMenuItem> fallbackItems) {
+        boolean opened = false;
+        if (preferNative(player) && nativeProvider.isAvailable()) {
+            try {
+                opened = nativeProvider.openVweOperation(player, status, blockCount);
+                if (opened) lastProviderName = nativeProvider.getName();
+            } catch (Throwable throwable) {
+                plugin.getLogger().warning("Native VWE operation dialog failed, using fallback: " + throwable.getMessage());
+            }
+        }
+        if (!opened) {
+            openCustomMenu(player, "VS-WorldEdit Operation",
+                status + "\nBlock Count: " + blockCount, fallbackItems);
+        }
+    }
+
     private List<DialogMenuItem> merchantShopsMenu(Player player) {
         try {
             com.vaultsurvival.plugin.merchant.shop.MerchantShopService shopService =
@@ -857,9 +873,11 @@ public class DialogService {
 
     private List<DialogMenuItem> adminRegionsMenu() {
         return List.of(
+            DialogMenuItem.adminItem("Selection Dashboard", "Open selection, visualization, grids, duration, and create controls.", "region", "vs.region.admin", Material.ENDER_EYE),
             DialogMenuItem.adminItem("Wand", "Get the region wand.", "region wand", "vs.region.admin", Material.WOODEN_AXE),
             DialogMenuItem.adminItem("List", "List regions.", "region list", "vs.region.admin", Material.FILLED_MAP),
             DialogMenuItem.adminItem("Here", "Show regions at your location.", "region here", "vs.region.admin", Material.COMPASS),
+            DialogMenuItem.adminItem("Show Saved Region", "Render a saved region by id.", "vsmenu input region_show", "vs.region.admin", Material.SPYGLASS),
             DialogMenuItem.adminItem("Create", "Create a region from selection.", "vsmenu input region_create", "vs.region.admin", Material.EMERALD_BLOCK),
             DialogMenuItem.adminItem("Delete", "Delete a region.", "vsmenu input region_delete", "vs.region.admin", Material.TNT),
             DialogMenuItem.adminItem("Flag", "Set a region flag.", "vsmenu input region_flag", "vs.region.admin", Material.LEVER),
@@ -1215,10 +1233,13 @@ public class DialogService {
 
     private List<DialogMenuItem> vweMenu() {
         return List.of(
+            DialogMenuItem.adminItem("Operation", "Open the validated set, replace, grid, preview, confirm, and cancel workflow.", "vwe operation", "vaultsurvival.vwe.use", Material.COMMAND_BLOCK),
             DialogMenuItem.adminItem("Wand", "Get the VS-WorldEdit wand.", "vwe wand", "vaultsurvival.vwe.use", Material.WOODEN_AXE),
             DialogMenuItem.adminItem("Set Pos 1", "Set selection position 1 here.", "vwe pos1", "vaultsurvival.vwe.use", Material.LIME_WOOL),
             DialogMenuItem.adminItem("Set Pos 2", "Set selection position 2 here.", "vwe pos2", "vaultsurvival.vwe.use", Material.RED_WOOL),
             DialogMenuItem.adminItem("Selection", "Show current selection.", "vwe selection", "vaultsurvival.vwe.use", Material.SPYGLASS),
+            DialogMenuItem.adminItem("Visualize", "Show dense 3D selection borders.", "vwe visualize", "vaultsurvival.vwe.use", Material.ENDER_EYE),
+            DialogMenuItem.adminItem("Hide Borders", "Stop the VWE border visualization.", "vwe hide", "vaultsurvival.vwe.use", Material.INK_SAC),
             DialogMenuItem.adminItem("Fill", "Fill selection with a block.", "vsmenu input vwe_fill", "vaultsurvival.vwe.use", Material.BRICKS),
             DialogMenuItem.adminItem("Replace", "Replace blocks in selection.", "vsmenu input vwe_replace", "vaultsurvival.vwe.use", Material.STONECUTTER),
             DialogMenuItem.adminItem("Walls", "Build walls with a block.", "vsmenu input vwe_walls", "vaultsurvival.vwe.use", Material.COBBLESTONE_WALL),
@@ -1482,7 +1503,9 @@ public class DialogService {
             input("npc_movehere", "Move NPC Here", "Enter NPC id to move to you.", "NPC id", "npc movehere $(value)", "vs.npc.admin", true),
             input("npc_skin", "NPC Skin", "Enter NPC id and skin username.", "id skinUsername", "npc skin $(value)", "vs.npc.admin", true),
             input("npc_command", "NPC Command", "Enter NPC id and command without slash.", "id command", "npc command $(value)", "vs.npc.admin", true),
-            input("region_create", "Create Region", "Enter region id/name.", "Region id", "region create $(value)", "vs.region.admin", true),
+            input("region_create", "Create Region", "Enter name, region type, and optional priority. Example: central_market DISTRICT_MARKET 30.", "name type [priority]", "region create $(value)", "vs.region.admin", true),
+            input("region_type", "Region Type", "Enter a configured region type such as DISTRICT, DISTRICT_MARKET, STATION_PLATFORM, TOWN_HALL, or JAIL.", "Region type", "region type $(value)", "vs.region.admin", true),
+            input("region_show", "Show Region", "Enter the saved numeric region id.", "Region id", "region show $(value)", "vs.region.admin", true),
             input("region_delete", "Delete Region", "Enter region id/name.", "Region id", "region delete $(value)", "vs.region.admin", true),
             input("region_flag", "Set Region Flag", "Enter region, flag, and true/false.", "region flag true|false", "region flag $(value)", "vs.region.admin", true),
             input("damage_restore", "Restore Damage", "Enter damage id to restore.", "Damage id", "damage restore $(value)", "vs.damage.admin", true),
@@ -1490,6 +1513,10 @@ public class DialogService {
             input("displays_remove", "Remove Display", "Enter display id/name to remove.", "Display id", "displays remove $(value)", "vs.display.admin", true),
             input("spawncity_setname", "Rename Spawn City", "Enter the new Spawn City name.", "City name", "spawncity setname $(value)", "vaultsurvival.spawncity.admin", true),
             input("vwe_fill", "VWE Fill", "Enter block id for fill.", "Block", "vwe fill $(value)", "vaultsurvival.vwe.use", true),
+            input("vwe_pattern_set", "VWE Set Pattern", "Enter one material, comma-separated random materials, or percentages such as 50%stone,50%cobblestone.", "Material / pattern", "vwe set $(value)", "vaultsurvival.vwe.use", true),
+            input("vwe_pattern_grid", "VWE Grid Pattern", "Enter comma-separated materials. Coordinates deterministically cycle through them.", "Grid materials", "vwe setgrid $(value)", "vaultsurvival.vwe.use", true),
+            input("vwe_pattern_replace", "VWE Replace Pattern", "Enter source material followed by target material or pattern.", "from target/pattern", "vwe replace $(value)", "vaultsurvival.vwe.use", true),
+            input("vwe_pattern_preview", "Preview Parsed Pattern", "Validate a pattern without changing blocks.", "Material / pattern", "vwe pattern $(value)", "vaultsurvival.vwe.use", true),
             input("vwe_replace", "VWE Replace", "Enter from-block and to-block.", "fromBlock toBlock", "vwe replace $(value)", "vaultsurvival.vwe.use", true),
             input("vwe_walls", "VWE Walls", "Enter block id for walls.", "Block", "vwe walls $(value)", "vaultsurvival.vwe.use", true),
             input("vwe_outline", "VWE Outline", "Enter block id for outline.", "Block", "vwe outline $(value)", "vaultsurvival.vwe.use", true),

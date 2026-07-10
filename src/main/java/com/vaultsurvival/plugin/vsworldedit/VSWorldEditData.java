@@ -2,6 +2,8 @@ package com.vaultsurvival.plugin.vsworldedit;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.block.BlockState;
+import org.bukkit.block.TileState;
 
 import java.util.*;
 
@@ -29,7 +31,7 @@ public class VSWorldEditData {
 
     /** Operation types for audit and undo descriptions */
     public enum OperationType {
-        FILL, REPLACE, WALLS, OUTLINE,
+        FILL, REPLACE, PATTERN_FILL, PATTERN_REPLACE, WALLS, OUTLINE,
         FLOOR, CEILING, HOLLOW,
         CYLINDER, CIRCLE, SPHERE, HSPHERE, LINE
     }
@@ -81,7 +83,10 @@ public class VSWorldEditData {
         public int getWidth() { return x2 - x1 + 1; }
         public int getHeight() { return y2 - y1 + 1; }
         public int getDepth() { return z2 - z1 + 1; }
-        public int getVolume() { return getWidth() * getHeight() * getDepth(); }
+        public int getVolume() {
+            long volume = (long) getWidth() * getHeight() * getDepth();
+            return (int) Math.min(Integer.MAX_VALUE, Math.max(0L, volume));
+        }
 
         public boolean isWallBlock(int x, int y, int z) {
             return x == x1 || x == x2 || y == y1 || y == y2 || z == z1 || z == z2;
@@ -109,6 +114,8 @@ public class VSWorldEditData {
         public final String worldName;
         public final int x, y, z;
         public final String previousType;
+        public final String previousBlockData;
+        public final BlockState previousTileState;
 
         public BlockSnapshot(Location loc, String previousType) {
             this.worldName = loc.getWorld().getName();
@@ -116,6 +123,9 @@ public class VSWorldEditData {
             this.y = loc.getBlockY();
             this.z = loc.getBlockZ();
             this.previousType = previousType;
+            this.previousBlockData = loc.getBlock().getBlockData().getAsString();
+            BlockState state = loc.getBlock().getState();
+            this.previousTileState = state instanceof TileState ? state : null;
         }
     }
 

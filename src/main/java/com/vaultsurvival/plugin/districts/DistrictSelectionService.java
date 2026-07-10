@@ -4,15 +4,17 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.regions.RegionData;
 import com.vaultsurvival.plugin.regions.RegionService;
+import com.vaultsurvival.plugin.regions.RegionVisualizationService;
+import com.vaultsurvival.plugin.regions.RegionVisualizationSession;
+import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
+import com.vaultsurvival.plugin.dialogs.DialogService;
 import com.vaultsurvival.plugin.rail.RailService;
 import com.vaultsurvival.plugin.rail.RailServiceImpl;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
-import org.bukkit.Color;
 import org.bukkit.Chunk;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -43,6 +45,7 @@ public final class DistrictSelectionService implements Listener {
     private final DistrictService districts;
     private final MessageFormatter fmt;
     private final NamespacedKey wandKey;
+    private final RegionVisualizationService visualization;
     private final Map<UUID, Selection> selections = new ConcurrentHashMap<>();
     private BukkitTask overlayTask;
 
@@ -51,6 +54,7 @@ public final class DistrictSelectionService implements Listener {
         this.districts = districts;
         this.fmt = plugin.getMessageFormatter();
         this.wandKey = new NamespacedKey(plugin, "district_selection_wand");
+        this.visualization = plugin.getServiceRegistry().get(RegionVisualizationService.class);
     }
 
     public void start(String name, Player player) {
@@ -108,6 +112,7 @@ public final class DistrictSelectionService implements Listener {
         player.sendMessage(fmt.success("Market-zone selection started for &e" + district.getName() + "&a."));
         player.sendMessage(fmt.info("Select up to &e" + limit + " chunks&7 inside your district, then use &e/district marketzone confirm&7."));
         updateActionbar(player, selection);
+        refreshSelection(player, selection);
     }
 
     public void startStationPlatform(Player player, int stationId) {
@@ -133,6 +138,7 @@ public final class DistrictSelectionService implements Listener {
         giveWand(player);
         player.sendMessage(fmt.success("Station-platform selection started. Select up to &e" + limit + " chunks&a, then use &e/district station confirm&a."));
         updateActionbar(player, selection);
+        refreshSelection(player, selection);
     }
 
     public void startSpawnCityClaim(Player player) {
@@ -144,6 +150,7 @@ public final class DistrictSelectionService implements Listener {
         giveWand(player, plugin.getConfigManager().getSpawnClaimWandMaterial(), "&6&lSpawn City Claim Wand");
         player.sendMessage(fmt.success("Spawn City chunk claim started. Select up to &e" + selection.limit + " chunks&a, then use &e/spawncity claim confirm&a."));
         updateActionbar(player, selection);
+        refreshSelection(player, selection);
     }
 
     private void begin(Player player, String name, boolean expansion, DistrictData.ChunkClaim existing, int limit) {
@@ -160,6 +167,7 @@ public final class DistrictSelectionService implements Listener {
         player.sendMessage(fmt.info("Use the District Selection Wand: click a chunk to add it, sneak-click to remove it."));
         player.sendMessage(fmt.info("Select " + (expansion ? "up to" : "exactly") + " &e" + limit + " chunks&7, then use &e/district confirm&7. Use &e/district cancel&7 to abort."));
         updateActionbar(player, selection);
+        refreshSelection(player, selection);
         plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), expansion ? "DISTRICT_CLAIM_EXPAND_START" : "DISTRICT_CLAIM_START",
             "DISTRICT", name, "chunkLimit=" + limit);
     }
@@ -225,6 +233,7 @@ public final class DistrictSelectionService implements Listener {
             plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "DISTRICT_CLAIM_CANCEL", "DISTRICT", previous.name,
                 "selected=" + previous.chunks.size());
         }
+        visualization.hide(player.getUniqueId());
     }
 
     public void showStatus(Player player) {
@@ -254,8 +263,10 @@ public final class DistrictSelectionService implements Listener {
             return;
         }
         DistrictData.ChunkClaim claim = districts.getClaim(district.getId());
-        drawRectangle(player, claim, Color.YELLOW, 2);
-        player.sendMessage(fmt.info("Showing &e" + district.getName() + "&7 borders: &e" + claim.chunkCount() + " chunks &7(" + claim.minBlockX() + ", " + claim.minBlockZ() + " to " + claim.maxBlockX() + ", " + claim.maxBlockZ() + ")."));
+        visualizeClaim(player, claim, RegionData.RegionType.DISTRICT, district.getName(), RegionVisualizationSession.Mode.THIRTY_SECONDS);
+        openBorderDialog(player, district.getName() + " borders",
+            claim.chunkCount() + " chunks | " + claim.minBlockX() + ", " + claim.minBlockZ() + " to " + claim.maxBlockX() + ", " + claim.maxBlockZ(),
+            "district borders");
     }
 
     public void showMarketZoneBorders(Player player) {
@@ -278,13 +289,9 @@ public final class DistrictSelectionService implements Listener {
                 player.sendMessage(fmt.error("Travel to &e" + zone.getWorldName() + "&c to view this market zone."));
                 return;
             }
-            DistrictData.ChunkClaim claim = new DistrictData.ChunkClaim(zone.getWorldName(),
-                Math.floorDiv(Math.min(zone.getX1(), zone.getX2()), 16),
-                Math.floorDiv(Math.min(zone.getZ1(), zone.getZ2()), 16),
-                Math.floorDiv(Math.max(zone.getX1(), zone.getX2()), 16),
-                Math.floorDiv(Math.max(zone.getZ1(), zone.getZ2()), 16));
-            drawRectangle(player, claim, Color.LIME, 2);
-            player.sendMessage(fmt.info("Showing &a" + district.getName() + " market-zone&7 borders: &e" + claim.chunkCount() + " chunks&7."));
+            visualization.showRegion(player, zone, RegionVisualizationSession.Mode.THIRTY_SECONDS, false);
+            openBorderDialog(player, district.getName() + " market zone",
+                "Dense 3D market-zone border is visible for 30 seconds.", "district marketzone borders");
         } catch (RuntimeException error) {
             player.sendMessage(fmt.error("Market-zone borders are unavailable right now."));
         }
@@ -300,23 +307,23 @@ public final class DistrictSelectionService implements Listener {
                 if (player == null || now - selection.lastTouched > plugin.getConfigManager().getDistrictSelectionTimeoutMinutes() * 60_000L) {
                     if (player != null) {
                         removeWands(player);
+                        visualization.hide(player.getUniqueId());
                         player.sendMessage(fmt.warn("District chunk selection expired and its wand was removed."));
                     }
                     selections.remove(entry.getKey());
                     continue;
                 }
-                if (plugin.getConfigManager().isDistrictSelectionOverlayEnabled()) {
-                    DistrictData.ChunkClaim rectangle = asRectangle(selection);
-                    if (rectangle != null) drawRectangle(player, rectangle, Color.AQUA, 4);
-                    else drawChunkMarkers(player, selection);
-                }
+                // The shared visualization service owns the cached repeating render.
             }
         }, 20L, 20L);
     }
 
     public void shutdown() {
         if (overlayTask != null) overlayTask.cancel();
-        for (Player player : Bukkit.getOnlinePlayers()) removeWands(player);
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            removeWands(player);
+            if (selections.containsKey(player.getUniqueId())) visualization.hide(player.getUniqueId());
+        }
         selections.clear();
     }
 
@@ -364,6 +371,7 @@ public final class DistrictSelectionService implements Listener {
         selection.lastTouched = System.currentTimeMillis();
         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.5f, remove ? 0.7f : 1.3f);
         updateActionbar(player, selection);
+        refreshSelection(player, selection);
     }
 
     @EventHandler public void onQuit(PlayerQuitEvent event) { cancel(event.getPlayer(), true); }
@@ -434,8 +442,8 @@ public final class DistrictSelectionService implements Listener {
                 .filter(region -> region.getName().equalsIgnoreCase(regionName))
                 .map(RegionData.Region::getId).toList().forEach(regions::deleteRegion);
             var world = player.getWorld();
-            var region = regions.createRegion(regionName, RegionData.RegionType.DISTRICT_PUBLIC, claim.worldName(),
-                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight(), claim.maxBlockZ(), 30);
+            var region = regions.createRegion(regionName, RegionData.RegionType.DISTRICT_MARKET, claim.worldName(),
+                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight() - 1, claim.maxBlockZ(), 30);
             if (region == null) return false;
             plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "DISTRICT_MARKET_ZONE_SET", "DISTRICT",
                 String.valueOf(district.getId()), "chunks=" + claim.chunkCount());
@@ -462,8 +470,8 @@ public final class DistrictSelectionService implements Listener {
             regions.getAllRegions().stream().filter(region -> region.getName().equalsIgnoreCase("spawn_city_claim"))
                 .map(RegionData.Region::getId).toList().forEach(regions::deleteRegion);
             var world = player.getWorld();
-            var region = regions.createRegion("spawn_city_claim", RegionData.RegionType.SPAWN_PUBLIC, claim.worldName(),
-                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight(), claim.maxBlockZ(), 50);
+            var region = regions.createRegion("spawn_city_claim", RegionData.RegionType.SPAWN_CITY, claim.worldName(),
+                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight() - 1, claim.maxBlockZ(), 50);
             if (region == null) return false;
             plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "SPAWN_CITY_CHUNK_CLAIM_SET", "REGION", String.valueOf(region.getId()), "chunks=" + claim.chunkCount());
             player.sendMessage(fmt.success("Spawn City claim set to &e" + claim.chunkCount() + " chunks&a."));
@@ -479,47 +487,65 @@ public final class DistrictSelectionService implements Listener {
             + " | " + (asRectangle(selection) == null ? "fill rectangle" : "rectangle ready") + " | confirm"));
     }
 
-    private void drawChunkMarkers(Player player, Selection selection) {
-        int previewLimit = Math.max(1, plugin.getConfigManager().getConfig().getInt("districts.selection.overlay.maxPreviewChunks", 64));
-        int shown = 0;
-        for (ChunkKey key : selection.chunks) {
-            if (shown++ >= previewLimit) break;
-            int x = (key.x << 4) + 8;
-            int z = (key.z << 4) + 8;
-            int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
-            Particle.DustOptions dust = new Particle.DustOptions(Color.AQUA, 1.8f);
-            player.spawnParticle(Particle.DUST, x + .5, y + .5, z + .5, 5, .5, .3, .5, 0, dust);
-            drawVerticalMarker(player, (key.x << 4), (key.z << 4), dust);
-            drawVerticalMarker(player, (key.x << 4) + 15, (key.z << 4) + 15, dust);
+    public boolean updateVisualization(Player player, String mode, Boolean sideGrid, Boolean floorGrid) {
+        if (mode != null) {
+            RegionVisualizationSession.Mode parsed = RegionVisualizationSession.Mode.parse(mode);
+            if (parsed == null || !visualization.setMode(player.getUniqueId(), parsed)) return false;
         }
+        if (sideGrid != null && !visualization.setSideGrid(player.getUniqueId(), sideGrid)) return false;
+        if (floorGrid != null && !visualization.setFloorGrid(player.getUniqueId(), floorGrid)) return false;
+        return true;
     }
 
-    private void drawRectangle(Player player, DistrictData.ChunkClaim claim, Color color, int step) {
-        Particle.DustOptions dust = new Particle.DustOptions(color, 1.8f);
-        for (int x = claim.minBlockX(); x <= claim.maxBlockX(); x += step) {
-            particleAtSurface(player, x, claim.minBlockZ(), dust);
-            particleAtSurface(player, x, claim.maxBlockZ(), dust);
-        }
-        for (int z = claim.minBlockZ(); z <= claim.maxBlockZ(); z += step) {
-            particleAtSurface(player, claim.minBlockX(), z, dust);
-            particleAtSurface(player, claim.maxBlockX(), z, dust);
-        }
-        drawVerticalMarker(player, claim.minBlockX(), claim.minBlockZ(), dust);
-        drawVerticalMarker(player, claim.minBlockX(), claim.maxBlockZ(), dust);
-        drawVerticalMarker(player, claim.maxBlockX(), claim.minBlockZ(), dust);
-        drawVerticalMarker(player, claim.maxBlockX(), claim.maxBlockZ(), dust);
+    public void hideVisualization(Player player) { visualization.hide(player.getUniqueId()); }
+
+    public void showVisualizationControls(Player player, String status) {
+        openBorderDialog(player, "District Border Controls", status, "district borders");
     }
 
-    private void particleAtSurface(Player player, int x, int z, Particle.DustOptions dust) {
-        int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
-        player.spawnParticle(Particle.DUST, x + .5, y + .5, z + .5, 2, .05, .05, .05, 0, dust);
+    private void refreshSelection(Player player, Selection selection) {
+        if (!plugin.getConfigManager().isDistrictSelectionOverlayEnabled() || selection.chunks.isEmpty()) return;
+        DistrictData.ChunkClaim bounds = boundingRectangle(selection);
+        visualizeClaim(player, bounds, selectionType(selection), selection.name,
+            RegionVisualizationSession.Mode.WHILE_EDITING);
     }
 
-    private void drawVerticalMarker(Player player, int x, int z, Particle.DustOptions dust) {
-        int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
-        for (int height = 0; height <= 8; height += 2) {
-            player.spawnParticle(Particle.DUST, x + .5, y + height + .5, z + .5, 2, .08, .08, .08, 0, dust);
+    private DistrictData.ChunkClaim boundingRectangle(Selection selection) {
+        int minX = selection.chunks.stream().mapToInt(ChunkKey::x).min().orElseThrow();
+        int maxX = selection.chunks.stream().mapToInt(ChunkKey::x).max().orElseThrow();
+        int minZ = selection.chunks.stream().mapToInt(ChunkKey::z).min().orElseThrow();
+        int maxZ = selection.chunks.stream().mapToInt(ChunkKey::z).max().orElseThrow();
+        return new DistrictData.ChunkClaim(selection.worldName, minX, minZ, maxX, maxZ);
+    }
+
+    private RegionData.RegionType selectionType(Selection selection) {
+        if (selection.isSpawnCityClaim()) return RegionData.RegionType.SPAWN_CITY;
+        if (selection.isStationPlatform()) return RegionData.RegionType.STATION_PLATFORM;
+        if (selection.isMarketZone()) return RegionData.RegionType.DISTRICT_MARKET;
+        return RegionData.RegionType.DISTRICT;
+    }
+
+    private void visualizeClaim(Player player, DistrictData.ChunkClaim claim, RegionData.RegionType type,
+                                String name, RegionVisualizationSession.Mode mode) {
+        visualization.showBounds(player, new RegionVisualizationSession.Bounds(player.getWorld(),
+            claim.minBlockX(), player.getWorld().getMinHeight(), claim.minBlockZ(),
+            claim.maxBlockX(), player.getWorld().getMaxHeight() - 1, claim.maxBlockZ()),
+            type, name, mode, false);
+    }
+
+    private void openBorderDialog(Player player, String title, String body, String reopenCommand) {
+        if (!plugin.getServiceRegistry().has(DialogService.class)) {
+            player.sendMessage(fmt.info(body));
+            return;
         }
+        plugin.getServiceRegistry().get(DialogService.class).openResult(player, title, body, java.util.List.of(
+            DialogMenuItem.item("10 seconds", "Keep this border visible for 10 seconds.", "district borders showtime 10", null, Material.CLOCK),
+            DialogMenuItem.item("30 seconds", "Keep this border visible for 30 seconds.", "district borders showtime 30", null, Material.CLOCK),
+            DialogMenuItem.item("Persistent", "Keep this border visible until hidden.", "district borders showtime persistent", null, Material.RECOVERY_COMPASS),
+            DialogMenuItem.item("Side grid ON", "Enable wall grid lines.", "district borders grid on", null, Material.IRON_BARS),
+            DialogMenuItem.item("Floor grid ON", "Enable floor grid lines.", "district borders floorgrid on", null, Material.IRON_TRAPDOOR),
+            DialogMenuItem.item("Hide", "Stop the border visualization.", "district borders hide", null, Material.INK_SAC),
+            DialogMenuItem.item("Refresh", "Render this border again.", reopenCommand, null, Material.ENDER_EYE)));
     }
 
     private record ChunkKey(int x, int z) { }

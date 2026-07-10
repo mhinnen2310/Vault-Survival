@@ -21,10 +21,12 @@ public class RegionListener implements Listener {
 
     private final VaultSurvivalPlugin plugin;
     private final RegionCommand regionCmd;
+    private final RegionSelectionService selections;
 
-    public RegionListener(VaultSurvivalPlugin plugin, RegionCommand regionCmd) {
+    public RegionListener(VaultSurvivalPlugin plugin, RegionCommand regionCmd, RegionSelectionService selections) {
         this.plugin = plugin;
         this.regionCmd = regionCmd;
+        this.selections = selections;
     }
 
     @EventHandler
@@ -38,23 +40,21 @@ public class RegionListener implements Listener {
         if (event.getAction() == Action.LEFT_CLICK_BLOCK) {
             event.setCancelled(true);
             var loc = event.getClickedBlock().getLocation();
-            regionCmd.setSelection(player.getUniqueId(), loc, true);
+            selections.setPoint(player, loc, true);
+            plugin.getAuditLogger().logAdminAction(player.getUniqueId(), player.getName(), "REGION_SELECTION_POS1",
+                player.getWorld().getName(), "x=" + loc.getBlockX() + " y=" + loc.getBlockY() + " z=" + loc.getBlockZ());
             player.sendMessage(plugin.getMessageFormatter().success(
                 "Position 1 set: &e" + loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ()));
             player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.5f, 1.5f);
-            spawnParticle(player, loc, Particle.END_ROD);
         } else if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
             event.setCancelled(true);
             var loc = event.getClickedBlock().getLocation();
-            regionCmd.setSelection(player.getUniqueId(), loc, false);
+            selections.setPoint(player, loc, false);
+            plugin.getAuditLogger().logAdminAction(player.getUniqueId(), player.getName(), "REGION_SELECTION_POS2",
+                player.getWorld().getName(), "x=" + loc.getBlockX() + " y=" + loc.getBlockY() + " z=" + loc.getBlockZ());
             player.sendMessage(plugin.getMessageFormatter().success(
                 "Position 2 set: &e" + loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ()));
             player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.5f, 0.5f);
-            spawnParticle(player, loc, Particle.END_ROD);
         }
-    }
-
-    private void spawnParticle(Player player, org.bukkit.Location loc, Particle particle) {
-        player.spawnParticle(particle, loc.clone().add(0.5, 0.5, 0.5), 5, 0.2, 0.2, 0.2, 0);
     }
 }

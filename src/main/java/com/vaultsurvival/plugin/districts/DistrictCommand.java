@@ -71,7 +71,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "cancel" -> handleSelectionCancel(sender);
             case "selection", "chunks" -> handleSelectionStatus(sender);
             case "expand" -> handleExpansion(sender);
-            case "borders", "border" -> handleBorders(sender);
+            case "borders", "border" -> handleBorders(sender, args);
             case "marketzone", "market" -> handleMarketZone(sender, args);
             case "teleport", "tp" -> handleTeleport(sender, args);
             case "npcs", "npc" -> handleNpcs(sender, args);
@@ -144,9 +144,21 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private boolean handleBorders(CommandSender sender) {
-        if (sender instanceof Player player) selection.showDistrictBorders(player);
-        else sender.sendMessage(fmt.error("Players only."));
+    private boolean handleBorders(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        if (args.length < 2 || args[1].equalsIgnoreCase("show")) {
+            selection.showDistrictBorders(player);
+            return true;
+        }
+        String action = args[1].toLowerCase();
+        boolean changed = switch (action) {
+            case "hide" -> { selection.hideVisualization(player); yield true; }
+            case "showtime" -> selection.updateVisualization(player, args.length >= 3 ? args[2] : null, null, null);
+            case "grid" -> selection.updateVisualization(player, null, args.length >= 3 ? args[2].equalsIgnoreCase("on") : null, null);
+            case "floorgrid" -> selection.updateVisualization(player, null, null, args.length >= 3 ? args[2].equalsIgnoreCase("on") : null);
+            default -> false;
+        };
+        selection.showVisualizationControls(player, changed ? "Visualization updated." : "No active visualization or invalid option.");
         return true;
     }
 

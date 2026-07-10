@@ -36,6 +36,12 @@ public class VSWorldEditModule extends Module {
 
     @Override
     public void onEnable() {
+        PatternParserDiagnostics.Result diagnostics = PatternParserDiagnostics.runDefaults();
+        if (!diagnostics.passed()) {
+            throw new IllegalStateException("VWE pattern parser self-test failed: " + String.join(", ", diagnostics.failures()));
+        }
+        plugin.getLogger().info("VWE pattern parser self-test passed (" + diagnostics.checks() + " checks)");
+
         // Register wand listener
         listener = new VSWorldEditListener(plugin);
         plugin.getServer().getPluginManager().registerEvents(listener, plugin);

@@ -333,14 +333,55 @@ breach:
   dial_max_attempts: 5
 
 # VS-WorldEdit
+regions:
+  visualization:
+    enabled: true
+    defaultDurationSeconds: 30
+    defaultMode: WHILE_EDITING
+    particles:
+      perimeterSpacing: 0.5
+      verticalSpacing: 0.5
+      cornerDensityMultiplier: 2.0
+      maxParticlesPerTickPerPlayer: 2500
+      renderIntervalTicks: 5
+    grid:
+      sideGridEnabled: true
+      sideGridSpacing: 4
+      floorGridEnabled: true
+      floorGridSpacing: 4
+      topPerimeterEnabled: true
+    scaling:
+      dynamicSpacingEnabled: true
+      largeRegionVolumeThreshold: 100000
+      veryLargeRegionVolumeThreshold: 1000000
+      largeRegionSpacingMultiplier: 2.0
+      veryLargeRegionSpacingMultiplier: 4.0
+    labels:
+      enabled: true
+      showPos1: true
+      showPos2: true
+      showRegionType: true
+      showDimensions: true
+      showVolume: true
+
+# VS-WorldEdit
 vsworldedit:
-  maxBlocksPerOperation: 50000
+  maxBlocksPerOperation: 1000000
   blocksPerTick: 500
   maxUndoOperations: 10
   requireConfirmationAboveBlocks: 10000
+
+vsWorldEdit:
   patterns:
-    maxEntries: 8
-    maxWeight: 10000
+    allowNumericAirAlias: true
+    normalizePercentages: true
+    maxPatternEntries: 32
+    defaultMode: RANDOM
+    allowLegacyCommaWeights: true
+  safety:
+    confirmationThresholdBlocks: 10000
+    maxBlocksPerOperation: 1000000
+    requireConfirmationForAirOperations: true
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ RESOURCE PACK                                                            │

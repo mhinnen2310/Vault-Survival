@@ -53,6 +53,22 @@ public class ConfigManager {
 
         config = YamlConfiguration.loadConfiguration(configFile);
 
+        // Preserve customized values from the historical lowercase section.
+        if (!config.isConfigurationSection("vsWorldEdit") && config.isConfigurationSection("vsworldedit")) {
+            config.set("vsWorldEdit.safety.maxBlocksPerOperation",
+                config.getInt("vsworldedit.maxBlocksPerOperation", 1000000));
+            config.set("vsWorldEdit.safety.confirmationThresholdBlocks",
+                config.getInt("vsworldedit.requireConfirmationAboveBlocks", 10000));
+            config.set("vsWorldEdit.safety.requireConfirmationForAirOperations", true);
+            config.set("vsWorldEdit.patterns.allowNumericAirAlias", true);
+            config.set("vsWorldEdit.patterns.normalizePercentages", true);
+            config.set("vsWorldEdit.patterns.maxPatternEntries",
+                config.getInt("vsworldedit.patterns.maxPatternEntries",
+                    config.getInt("vsworldedit.patterns.maxEntries", 32)));
+            config.set("vsWorldEdit.patterns.defaultMode", "RANDOM");
+            config.set("vsWorldEdit.patterns.allowLegacyCommaWeights", true);
+        }
+
         if (defaultConfigStream != null) {
             YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
                 new InputStreamReader(defaultConfigStream, StandardCharsets.UTF_8)
@@ -131,6 +147,14 @@ public class ConfigManager {
         config.set("vsworldedit.requireConfirmationAboveBlocks", Integer.MAX_VALUE);
         config.set("vsworldedit.patterns.maxEntries", Integer.MAX_VALUE);
         config.set("vsworldedit.patterns.maxWeight", Integer.MAX_VALUE);
+        config.set("vsworldedit.patterns.maxPatternEntries", Integer.MAX_VALUE);
+        config.set("vsworldedit.safety.maxBlocksPerOperation", Integer.MAX_VALUE);
+        config.set("vsworldedit.safety.confirmationThresholdBlocks", Integer.MAX_VALUE);
+        config.set("vsworldedit.safety.requireConfirmationForAirOperations", false);
+        config.set("vsWorldEdit.patterns.maxPatternEntries", Integer.MAX_VALUE);
+        config.set("vsWorldEdit.safety.maxBlocksPerOperation", Integer.MAX_VALUE);
+        config.set("vsWorldEdit.safety.confirmationThresholdBlocks", Integer.MAX_VALUE);
+        config.set("vsWorldEdit.safety.requireConfirmationForAirOperations", false);
         config.set("updates.enabled", false);
         logger.warning("STAFF SANDBOX MODE ACTIVE: isolated database and unlimited test overrides enabled.");
     }
@@ -343,10 +367,14 @@ public class ConfigManager {
     public boolean shouldInstallQuickActionsDatapack() { return config.getBoolean("dialogs.quickActions.installDatapackToWorld", true); }
 
     // VS-WorldEdit
-    public int getVweMaxBlocks() { return config.getInt("vsworldedit.maxBlocksPerOperation", 50000); }
+    public int getVweMaxBlocks() { return config.getInt("vsWorldEdit.safety.maxBlocksPerOperation",
+        config.getInt("vsworldedit.safety.maxBlocksPerOperation",
+            config.getInt("vsworldedit.maxBlocksPerOperation", 1000000))); }
     public int getVweBlocksPerTick() { return config.getInt("vsworldedit.blocksPerTick", 500); }
     public int getVweMaxUndo() { return config.getInt("vsworldedit.maxUndoOperations", 10); }
-    public int getVweRequireConfirmAbove() { return config.getInt("vsworldedit.requireConfirmationAboveBlocks", 10000); }
+    public int getVweRequireConfirmAbove() { return config.getInt("vsWorldEdit.safety.confirmationThresholdBlocks",
+        config.getInt("vsworldedit.safety.confirmationThresholdBlocks",
+            config.getInt("vsworldedit.requireConfirmationAboveBlocks", 10000))); }
 
     // Spawn City Regions (saved cuboids from VWE selections)
     public void setRegion(String type, String world, int x1, int y1, int z1, int x2, int y2, int z2) {

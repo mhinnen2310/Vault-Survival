@@ -6,6 +6,7 @@ import io.papermc.paper.registry.data.dialog.DialogBase;
 import io.papermc.paper.registry.data.dialog.action.DialogAction;
 import io.papermc.paper.registry.data.dialog.body.DialogBody;
 import io.papermc.paper.registry.data.dialog.input.DialogInput;
+import io.papermc.paper.registry.data.dialog.input.SingleOptionDialogInput;
 import io.papermc.paper.registry.data.dialog.type.DialogType;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -144,6 +145,51 @@ public class NativePaperDialogProvider implements DialogProvider {
                 .build())
             .type(DialogType.notice(submit)));
 
+        player.showDialog(dialog);
+        return true;
+    }
+
+    @Override
+    public boolean openVweOperation(Player player, String status, int blockCount) {
+        if (!available) return false;
+        var operationEntries = List.of(
+            SingleOptionDialogInput.OptionEntry.create("SET", Component.text("Set selection"), true),
+            SingleOptionDialogInput.OptionEntry.create("REPLACE", Component.text("Replace matching blocks"), false));
+        var modeEntries = List.of(
+            SingleOptionDialogInput.OptionEntry.create("SINGLE", Component.text("Single material"), true),
+            SingleOptionDialogInput.OptionEntry.create("RANDOM", Component.text("Equal random"), false),
+            SingleOptionDialogInput.OptionEntry.create("WEIGHTED_RANDOM", Component.text("Weighted random"), false),
+            SingleOptionDialogInput.OptionEntry.create("GRID", Component.text("Deterministic grid"), false));
+        List<DialogInput> inputs = List.of(
+            DialogInput.singleOption("operation", Component.text("Operation Type"), operationEntries).width(300).build(),
+            DialogInput.singleOption("mode", Component.text("Pattern Mode"), modeEntries).width(300).build(),
+            DialogInput.text("pattern", Component.text("Material / Pattern")).width(300).maxLength(256).build());
+
+        ActionButton preview = ActionButton.builder(Component.text("Preview Parsed Pattern"))
+            .tooltip(Component.text("Validate without changing blocks"))
+            .width(200)
+            .action(DialogAction.commandTemplate("vwe operation-preview $(operation) $(mode) $(pattern)"))
+            .build();
+        ActionButton confirm = ActionButton.builder(Component.text("Confirm"))
+            .tooltip(Component.text("Validate and start; dangerous operations open confirmation"))
+            .width(200)
+            .action(DialogAction.commandTemplate("vwe operation-submit $(operation) $(mode) $(pattern)"))
+            .build();
+        ActionButton cancel = ActionButton.builder(Component.text("Cancel"))
+            .tooltip(Component.text("Cancel pending or active VWE work"))
+            .width(200)
+            .action(DialogAction.staticAction(ClickEvent.runCommand("/vwe cancel")))
+            .build();
+
+        Dialog dialog = Dialog.create(builder -> builder.empty()
+            .base(DialogBase.builder(Component.text("VS-WorldEdit Operation"))
+                .body(List.of(DialogBody.plainMessage(Component.text(status + "\nBlock Count: " + blockCount), 300)))
+                .inputs(inputs)
+                .canCloseWithEscape(true)
+                .pause(false)
+                .afterAction(DialogBase.DialogAfterAction.NONE)
+                .build())
+            .type(DialogType.multiAction(List.of(preview, confirm), cancel, 2)));
         player.showDialog(dialog);
         return true;
     }
