@@ -141,9 +141,9 @@ public final class StaffInspectCommand implements CommandExecutor, TabCompleter,
             if (dialogs != null) { dialogs.openConfirmation(staff, "Confirm " + action, "Confirm action for " + target.getName() + ".", "staffinspect " + action + " " + target.getName() + " confirmed", "players"); return; }
         }
         switch (action) {
-            case "tp" -> staff.teleport(target.getLocation());
+            case "tp" -> { pushReturn(staff); staff.teleport(target.getLocation()); }
             case "bring" -> target.teleport(staff.getLocation());
-            case "spectate" -> { staff.setGameMode(GameMode.SPECTATOR); staff.setSpectatorTarget(target); }
+            case "spectate" -> { pushReturn(staff); staff.setGameMode(GameMode.SPECTATOR); staff.setSpectatorTarget(target); }
             case "inventory" -> staff.openInventory(target.getInventory());
             case "ender" -> staff.openInventory(target.getEnderChest());
             case "cash" -> staff.performCommand("cash inspect " + target.getName());
@@ -187,5 +187,6 @@ public final class StaffInspectCommand implements CommandExecutor, TabCompleter,
     private Player nearestPlayer(Player staff) { return Bukkit.getOnlinePlayers().stream().filter(p -> !p.equals(staff) && p.getWorld().equals(staff.getWorld())).min(Comparator.comparingDouble(p -> p.getLocation().distanceSquared(staff.getLocation()))).orElse(null); }
     private <T> T service(Class<T> type) { try { return plugin.getServiceRegistry().get(type); } catch (RuntimeException ignored) { return null; } }
     private DialogService dialogs() { return service(DialogService.class); }
+    private void pushReturn(Player staff) { var alerts=service(com.vaultsurvival.plugin.security.StaffAlertService.class); if(alerts!=null) alerts.pushReturn(staff); }
     @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) { if(args.length==1) return List.of("search","online","recent","wanted","frozen","freeze","unfreeze","tp","bring","spectate","inventory","ender","cash","vaults","roles"); if(args.length==2) return Bukkit.getOnlinePlayers().stream().map(Player::getName).filter(n->n.toLowerCase(Locale.ROOT).startsWith(args[1].toLowerCase(Locale.ROOT))).toList(); return List.of(); }
 }

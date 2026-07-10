@@ -11,6 +11,7 @@ import com.vaultsurvival.plugin.currency.CurrencyService;
 import com.vaultsurvival.plugin.currency.CurrencyStats;
 import com.vaultsurvival.plugin.districts.DistrictData;
 import com.vaultsurvival.plugin.districts.DistrictService;
+import com.vaultsurvival.plugin.workflow.CivicWorkflowService;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -63,7 +64,7 @@ public class DialogService {
 
         List<DialogMenuItem> items = resolveLockedItems(player, buildItems(player, menuType));
         boolean opened = false;
-        if (plugin.getConfigManager().preferNativeDialogs() && nativeProvider.isAvailable()) {
+        if (preferNative(player) && nativeProvider.isAvailable()) {
             try {
                 opened = nativeProvider.open(player, menuType, items);
                 if (opened) {
@@ -113,7 +114,7 @@ public class DialogService {
         DialogMenuType shell = DialogMenuType.MAIN;
         List<DialogMenuItem> resolved = resolveLockedItems(player, items);
         boolean opened = false;
-        if (plugin.getConfigManager().preferNativeDialogs() && nativeProvider.isAvailable()) {
+        if (preferNative(player) && nativeProvider.isAvailable()) {
             try {
                 opened = nativeProvider.open(player, shell, title, body, resolved);
                 if (opened) {
@@ -145,7 +146,7 @@ public class DialogService {
         }
 
         boolean opened = false;
-        if (plugin.getConfigManager().preferNativeDialogs() && nativeProvider.isAvailable()) {
+        if (preferNative(player) && nativeProvider.isAvailable()) {
             try {
                 opened = nativeProvider.openInput(player, input);
                 if (opened) {
@@ -170,21 +171,21 @@ public class DialogService {
             case MAIN -> mainMenu(player);
             case CURRENT_AREA -> currentAreaMenu(player);
             case SETTINGS -> settingsMenu(player);
-            case GUIDES -> guidesMenu();
+            case GUIDES -> guidesMenu(player);
             case PLAYER_JOBS -> playerJobsMenu(player);
-            case PLAYER_ORDERS -> placeholderMenu("Orders", "Player orders are not active yet.", "main");
-            case PLAYER_RISK -> placeholderMenu("Risk", "Risk scoring is not active yet.", "main");
+            case PLAYER_ORDERS -> playerOrdersMenu(player);
+            case PLAYER_RISK -> playerRiskMenu(player);
             case DISTRICTS -> districtMenu(player);
-            case DISTRICT_CURRENT -> placeholderMenu("Current District", "Current district detection is a placeholder.", "district");
+            case DISTRICT_CURRENT -> currentDistrictMenu(player);
             case DISTRICT_LAWS -> activeLawsMenu(player);
             case DISTRICT_PENDING_LAWS -> pendingLawsMenu(player);
             case DISTRICT_ROLES -> lawEditorMenu(player);
-            case DISTRICT_MARKET -> placeholderMenu("District Market", "District market integration is planned.", "district");
-            case DISTRICT_MERCHANT -> placeholderMenu("District Merchant", "District merchant integration is planned.", "district");
-            case DISTRICT_TREASURY -> placeholderMenu("District Treasury", "Treasury shortcuts are available when your district role allows them.", "district");
+            case DISTRICT_MARKET -> districtMarketMenu(player);
+            case DISTRICT_MERCHANT -> merchantMenu();
+            case DISTRICT_TREASURY -> districtTreasuryMenu(player);
             case DISTRICT_POLICE -> policeDeskMenu(player);
             case DISTRICT_STATION -> districtStationMenu(player);
-            case DISTRICT_DIPLOMACY -> placeholderMenu("Diplomacy", "Diplomacy is planned for a later sprint.", "district");
+            case DISTRICT_DIPLOMACY -> diplomacyMenu(player);
             case DISTRICT_JOBS -> districtJobsMenu(player);
             case DISTRICT_DEVELOPMENT -> List.of(
                 DialogMenuItem.item("Development Report", "View level and category progress.", "district development", null, Material.NETHER_STAR),
@@ -193,16 +194,17 @@ public class DialogService {
                 DialogMenuItem.item("Contributors", "View district contributors.", "district contributors", null, Material.PLAYER_HEAD),
                 DialogMenuItem.item("Create Project", "Create a project with cash and material requirements.", "vsmenu input district_project_create", null, Material.EMERALD_BLOCK),
                 DialogMenuItem.item("Contribute", "Contribute physical cash or held materials.", "vsmenu input district_project_contribute", null, Material.HOPPER),
+                DialogMenuItem.item("Kingdom Support", "Request or track staff-assigned development support.", "civic support list", null, Material.BELL),
                 backItem("district"), homeItem(), closeItem());
             case MERCHANT_HOME -> merchantMenu();
             case MERCHANT_SHOPS -> merchantShopsMenu(player);
             case MERCHANT_ORDERS -> merchantOrdersMenu(player);
-            case MERCHANT_CREATE_ORDER -> placeholderMenu("Create Order", "Use &e/merchant order create <price> <quantity> [partial]&7 with the item in your hand.", "merchant");
+            case MERCHANT_CREATE_ORDER -> merchantCreateOrderMenu(player);
             case MERCHANT_EARNINGS -> merchantEarningsMenu(player);
             case RAIL_HOME -> railMenu();
-            case RAIL_STATION -> placeholderMenu("Station", "Use /rail stations to see all stations.", "rail");
-            case RAIL_ROUTES -> placeholderMenu("Routes", "Use /rail routes to see all routes.", "rail");
-            case RAIL_TICKET -> placeholderMenu("Ticket", "Stand on a platform and use /rail travel <routeId>.", "rail");
+            case RAIL_STATION -> railStationMenu(player);
+            case RAIL_ROUTES -> railRoutesMenu(player, false);
+            case RAIL_TICKET -> railRoutesMenu(player, true);
             case RAIL_JOURNEY -> journeyMenu(player);
             case ADMIN -> adminMenu(player);
             case ADMIN_RANKS -> adminRanksMenu();
@@ -215,17 +217,17 @@ public class DialogService {
             case STAFF -> staffMenu(player);
             case STAFF_QUICK -> staffQuickMenu();
             case STAFF_PLAYERS -> staffPlayersMenu();
-            case STAFF_PLAYER_SEARCH -> placeholderMenu("Player Search", "Player search dialog is planned.", "staff");
-            case STAFF_PLAYER_LIST -> placeholderMenu("Player List", "Player list dialog is planned.", "staff");
-            case STAFF_PLAYER_PROFILE -> placeholderMenu("Player Profile", "Player profile dialog is planned.", "staff");
-            case STAFF_REPORTS -> placeholderMenu("Reports", "Reports are planned for a later sprint.", "staff");
+            case STAFF_PLAYER_SEARCH -> staffPlayerSearchMenu();
+            case STAFF_PLAYER_LIST -> staffPlayerListMenu();
+            case STAFF_PLAYER_PROFILE -> staffPlayerProfileMenu();
+            case STAFF_REPORTS -> staffReportsMenu();
             case STAFF_SECURITY -> staffSecurityMenu(player);
             case STAFF_ECONOMY -> staffEconomyMenu(player);
-            case STAFF_CASH_TRACE -> placeholderMenu("Cash Trace", "Cash trace tooling is planned.", "economy");
+            case STAFF_CASH_TRACE -> staffCashTraceMenu();
             case STAFF_VAULTS -> vaultMenu(player);
             case STAFF_CONTRACTS -> staffContractsMenu(player);
-            case STAFF_DISTRICTS -> placeholderMenu("Districts", "District moderation shortcuts are planned.", "staff");
-            case STAFF_POLICE_ABUSE -> placeholderMenu("Police Abuse", "Police abuse review is planned.", "security");
+            case STAFF_DISTRICTS -> staffDistrictsMenu();
+            case STAFF_POLICE_ABUSE -> staffPoliceAbuseMenu();
             case STAFF_RAIL -> staffRailMenu();
             case STAFF_REGION_DEBUG -> staffRegionDebugMenu();
             case STAFF_SYSTEM -> staffSystemMenu();
@@ -239,9 +241,9 @@ public class DialogService {
     private List<DialogMenuItem> mainMenu(Player player) {
         List<DialogMenuItem> items = new ArrayList<>(List.of(
             DialogMenuItem.item("Current Area", "Show current area information.", "vsmenu current", null, Material.COMPASS),
-            DialogMenuItem.item("Rail", "Open rail placeholders.", "vsmenu rail", null, Material.RAIL),
-            DialogMenuItem.item("Jobs", "Open job placeholders.", "vsmenu jobs", null, Material.IRON_PICKAXE),
-            DialogMenuItem.item("Orders", "Open order placeholders.", "vsmenu orders", null, Material.WRITABLE_BOOK),
+            DialogMenuItem.item("Rail", "Browse stations, routes, tickets, and journeys.", "vsmenu rail", null, Material.RAIL),
+            DialogMenuItem.item("Jobs", "Browse Spawn City and district jobs.", "vsmenu jobs", null, Material.IRON_PICKAXE),
+            DialogMenuItem.item("Orders", "Browse merchant orders and Auction Hall listings.", "vsmenu orders", null, Material.WRITABLE_BOOK),
             DialogMenuItem.item("Settings", "Open player settings.", "vsmenu settings", null, Material.COMPARATOR),
             DialogMenuItem.item("Guides", "Open guides.", "vsmenu guides", null, Material.BOOK),
             DialogMenuItem.item("Vaults", "Open vault management shortcuts.", "vsmenu vaults", "vs.vault.use", Material.BARREL)
@@ -277,7 +279,7 @@ public class DialogService {
                 DialogMenuItem.item("Join District", "Browse official districts and ask for an invite.", "district list", null, Material.FILLED_MAP),
                 backItem(), homeItem(), closeItem());
         }
-        items.add(DialogMenuItem.item("Current", "Show current district placeholder.", "vsmenu district.current", null, Material.COMPASS));
+        items.add(DialogMenuItem.item("Current", "Show live district, law, market, job, and station context.", "vsmenu district.current", null, Material.COMPASS));
         items.add(DialogMenuItem.item("My District", "Show your district information.", "district info", null, Material.OAK_SIGN));
         items.add(DialogMenuItem.item("Member Overview", "List district members and roles.", "district members", null, Material.PLAYER_HEAD));
         if (districtService != null && districtService.canManageLaws(player.getUniqueId(), district)) {
@@ -293,6 +295,8 @@ public class DialogService {
             items.add(DialogMenuItem.item("Station", "Manage your district station application.", "vsmenu district.station", null, Material.RAIL));
         }
         if (districtService != null && districtService.canManageDevelopment(player.getUniqueId(), district)) items.add(DialogMenuItem.item("Builder Tools", "Development planning.", "vsmenu district.development", null, Material.BRICKS));
+        items.add(DialogMenuItem.item("District Market", "Open the market-zone, shop, and order dashboard.", "vsmenu district.market", null, Material.EMERALD_BLOCK));
+        items.add(DialogMenuItem.item("Diplomacy", "View alliances, requests, hostility, and ally chat.", "vsmenu district.diplomacy", null, Material.WHITE_BANNER));
         if (districtService != null && districtService.canCreateMerchantNpc(player.getUniqueId(), district)) items.add(DialogMenuItem.item("Merchant Tools", "Merchant NPC and market tools.", "vsmenu merchant", null, Material.EMERALD));
         if (districtService != null && districtService.canCreateDistrictJob(player.getUniqueId(), district)) items.add(DialogMenuItem.item("District Jobs", "Create and manage district jobs.", "vsmenu district.jobs", null, Material.IRON_PICKAXE));
         items.add(DialogMenuItem.item("District Chat", "Switch to your district member channel.", "chat district", null, Material.WRITABLE_BOOK));
@@ -330,13 +334,6 @@ public class DialogService {
         return items;
     }
 
-    private List<DialogMenuItem> currentAreaMenu() {
-        return List.of(
-            DialogMenuItem.placeholder("Loading", "Open /whereami if this route was reached without player context.", Material.COMPASS),
-            backItem(), homeItem(), closeItem()
-        );
-    }
-
     private List<DialogMenuItem> currentAreaMenu(Player player) {
         CurrentAreaContext context = getCurrentArea(player);
         String districtName = context.hasDistrict() ? context.district().getName() : "None";
@@ -353,6 +350,12 @@ public class DialogService {
             context.lawSummary(), Material.LECTERN));
         items.add(DialogMenuItem.locked("Risk Summary", "Current risk state.",
             context.riskSummary(), Material.CROSSBOW));
+        items.add(DialogMenuItem.locked("Market Summary", "Current trade context.",
+            context.marketSummary(), Material.EMERALD));
+        items.add(DialogMenuItem.locked("Job Summary", "Current local and Spawn City work.",
+            context.jobSummary(), Material.IRON_PICKAXE));
+        items.add(DialogMenuItem.locked("Station Summary", "Current rail service context.",
+            context.stationSummary(), Material.RAIL));
 
         if (context.hasDistrict()) {
             items.add(DialogMenuItem.item("View Active Laws", "Illegal actions remain possible; active laws create evidence.", "vsmenu district.laws", null, Material.LECTERN));
@@ -362,8 +365,8 @@ public class DialogService {
         if (context.hasDistrict()) {
             items.add(DialogMenuItem.item("District Info", "Show the current district details.",
                 "district info " + context.district().getId(), null, Material.OAK_SIGN));
-            items.add(DialogMenuItem.item("Request Join", "Ask for membership using current district commands.",
-                "vsmenu locked Ask a mayor or council member for an invite. Automated join requests are planned.", null, Material.WRITABLE_BOOK));
+            items.add(DialogMenuItem.item("Request Join", "Send a persistent request to this district's council.",
+                "civic join " + context.district().getId(), null, Material.WRITABLE_BOOK));
         } else {
             items.add(DialogMenuItem.locked("District Info", "Show current district details.",
                 "No district applies here.", Material.OAK_SIGN));
@@ -371,8 +374,8 @@ public class DialogService {
                 "No district applies here.", Material.WRITABLE_BOOK));
         }
 
-        items.add(DialogMenuItem.locked("Report Crime", "Create a local report.",
-            "Locked: reports are planned. Use staff channels for now.", Material.BELL));
+        items.add(DialogMenuItem.item("Report Crime", "Submit category, player/none, and details with this location attached.",
+            "vsmenu input player_report", null, Material.BELL));
         items.add(DialogMenuItem.locked("What Happens If I Steal Here?", "Explain local illegal action behavior.",
             "Illegal actions are not automatically blocked. They create evidence if district law/evidence systems are active.",
             Material.IRON_BARS));
@@ -408,8 +411,8 @@ public class DialogService {
             DialogMenuItem.item("Active Jobs", "List active jobs.", "district jobs", null, Material.IRON_PICKAXE),
             DialogMenuItem.item("Submitted Jobs", "Submitted manual jobs.", "vsmenu input district_job_approve", null, Material.PAPER),
             DialogMenuItem.item("Escrow", "Show escrow debug.", "escrow debug", "vs.admin", Material.CHEST),
-            DialogMenuItem.locked("Completed Jobs", "Completed job list placeholder.", "Detailed completed-job history is stored in claims and audit.", Material.EMERALD),
-            DialogMenuItem.locked("Disputed Jobs", "Disputed jobs placeholder.", "Job dispute workflow is planned after core completion.", Material.REDSTONE_TORCH),
+            DialogMenuItem.item("Completed Jobs", "Browse completed and reviewed claim history.", "civic jobs history", null, Material.EMERALD),
+            DialogMenuItem.item("Disputed Jobs", "Open or review district-job disputes.", "civic jobs disputes", null, Material.REDSTONE_TORCH),
             backItem("district"), homeItem(), closeItem()
         );
     }
@@ -418,7 +421,7 @@ public class DialogService {
         DistrictData.District district = getDistrict(player);
         if (district == null) district = getCurrentArea(player).district();
         if (district == null) {
-            return placeholderMenu("Active Laws", "You are not a member of a district.", "district");
+            return unavailableMenu("Active Laws", "You are not a member of a district.", "district");
         }
         List<DialogMenuItem> items = new ArrayList<>();
         for (DistrictData.LawKey law : DistrictData.LawKey.values()) {
@@ -438,7 +441,7 @@ public class DialogService {
         DistrictData.District district = getDistrict(player);
         if (district == null) district = getCurrentArea(player).district();
         if (district == null) {
-            return placeholderMenu("Pending Laws", "You are not a member of a district.", "district");
+            return unavailableMenu("Pending Laws", "You are not a member of a district.", "district");
         }
         List<DialogMenuItem> items = new ArrayList<>();
         if (district.getPendingLaws().isEmpty()) {
@@ -509,6 +512,9 @@ public class DialogService {
         ChatChannel active = getChatChannelService() != null
             ? getChatChannelService().getActiveChannel(player)
             : ChatChannel.GLOBAL;
+        CivicWorkflowService.Preferences preferences = getCivicWorkflow() == null
+            ? new CivicWorkflowService.Preferences("ALL", "AUTO", "PUBLIC")
+            : getCivicWorkflow().preferences(player.getUniqueId());
         return List.of(
             DialogMenuItem.locked("Current Channel", "Your active chat channel.",
                 active.displayName(), Material.PAPER),
@@ -520,24 +526,26 @@ public class DialogService {
             chatItem(player, ChatChannel.STAFF, "Staff Channel", "Switch active chat to staff.", Material.REDSTONE_TORCH),
             DialogMenuItem.item("Chat Preview", "Preview your current chat channel.", "chatpreview", null, Material.SPYGLASS),
             DialogMenuItem.item("Notification Settings", "Show current chat settings.", "chatsettings", null, Material.BELL),
-            DialogMenuItem.placeholder("Notifications", "Notification preferences are planned.", Material.BELL),
-            DialogMenuItem.placeholder("Menu Style", "Dialog preference controls are planned.", Material.COMPARATOR),
-            DialogMenuItem.placeholder("Privacy", "Player privacy controls are planned.", Material.ENDER_EYE),
+            DialogMenuItem.item("Notifications: " + preferences.notifications(), "Control routine and important workflow notifications.", "civic preferences notifications next", null, Material.BELL),
+            DialogMenuItem.item("Menu Style: " + preferences.menuStyle(), "Choose automatic, native Paper dialogs, or compact fallback menus.", "civic preferences menu next", null, Material.COMPARATOR),
+            DialogMenuItem.item("Privacy: " + preferences.privacy(), "Control public, friend-only, or private profile visibility.", "civic preferences privacy next", null, Material.ENDER_EYE),
+            DialogMenuItem.item("Public Profile Preview", "Preview the profile other players can request.", "civic profile " + player.getName(), null, Material.PLAYER_HEAD),
             backItem(), homeItem(), closeItem()
         );
     }
 
-    private List<DialogMenuItem> guidesMenu() {
+    private List<DialogMenuItem> guidesMenu(Player player) {
         return List.of(
-            DialogMenuItem.locked("Vaults", "Guide placeholder.", "Use /vault deposit and /vault withdraw for now.", Material.BARREL),
-            DialogMenuItem.locked("Districts", "Guide placeholder.", "Use /district info and /district list for now.", Material.MAP),
-            DialogMenuItem.locked("Auction Hall", "Guide placeholder.", "Use /ah listings for now.", Material.GOLD_INGOT),
+            DialogMenuItem.item("Vaults", "Learn placement, access, deposits, breaches, lockdown, and repair.", "civic guide vaults", null, Material.BARREL),
+            DialogMenuItem.item("Districts", "Learn claims, roles, laws, treasury, jobs, diplomacy, stations, and development.", "civic guide districts", null, Material.MAP),
+            DialogMenuItem.item("Auction Hall", "Learn physical listings, purchases, cancellation, and locker collection.", "civic guide auction", null, Material.GOLD_INGOT),
             backItem(), homeItem(), closeItem()
         );
     }
 
     private List<DialogMenuItem> merchantMenu() {
         return List.of(
+            DialogMenuItem.item("Show Market Zone", "Display your district's market-zone chunk borders.", "district marketzone borders", null, Material.LIME_DYE),
             DialogMenuItem.item("My Buy Orders", "View your merchant buy orders.", "merchant orders", null, Material.WRITABLE_BOOK),
             DialogMenuItem.item("Create Buy Order", "Create a new buy order (hold the item).", "vsmenu input merchant_create", null, Material.EMERALD),
             DialogMenuItem.item("Active Buy Orders", "Browse all active buy orders.", "merchant order list", null, Material.BOOKSHELF),
@@ -548,6 +556,20 @@ public class DialogService {
             DialogMenuItem.item("Claim Payout", "Claim pending payout locker cash.", "payouts claim", null, Material.GOLD_NUGGET),
             backItem(), homeItem(), closeItem()
         );
+    }
+
+    private List<DialogMenuItem> merchantCreateOrderMenu(Player player) {
+        int limit = Math.max(1, plugin.getConfigManager().getConfig().getInt("merchant.max_active_orders", 10));
+        long active = count("SELECT COUNT(*) FROM merchant_orders WHERE merchant_uuid='" + player.getUniqueId()
+            + "' AND status IN ('ACTIVE','PARTIALLY_FILLED')");
+        return List.of(
+            DialogMenuItem.locked("Held Item", "The item in your main hand becomes the order template.",
+                player.getInventory().getItemInMainHand().getType().isAir() ? "Hold the item suppliers must deliver." : player.getInventory().getItemInMainHand().getType().name(), Material.ITEM_FRAME),
+            DialogMenuItem.locked("Active Order Limit", "Your active order usage.", active + "/" + limit, Material.COMPARATOR),
+            DialogMenuItem.item("Create Order", "Enter price, quantity, and optional 'partial'. Escrow is withdrawn atomically.", "vsmenu input merchant_create", null, Material.EMERALD),
+            DialogMenuItem.item("My Orders", "Review order state, fills, escrow, and storage.", "vsmenu merchant.orders", null, Material.WRITABLE_BOOK),
+            DialogMenuItem.item("Browse Demand", "Compare active buy orders.", "merchant order list", null, Material.BOOKSHELF),
+            backItem("merchant"), homeItem(), closeItem());
     }
 
     private List<DialogMenuItem> merchantShopsMenu(Player player) {
@@ -578,7 +600,7 @@ public class DialogService {
             items.add(closeItem());
             return items;
         } catch (RuntimeException e) {
-            return placeholderMenu("Shops", "Merchant shop service is not available.", "merchant");
+            return unavailableMenu("Shops", "Merchant shop service is not available.", "merchant");
         }
     }
 
@@ -614,7 +636,7 @@ public class DialogService {
             items.add(closeItem());
             return items;
         } catch (RuntimeException e) {
-            return placeholderMenu("Merchant Orders", "Merchant order service is not available.", "merchant");
+            return unavailableMenu("Merchant Orders", "Merchant order service is not available.", "merchant");
         }
     }
 
@@ -645,19 +667,61 @@ public class DialogService {
             items.add(closeItem());
             return items;
         } catch (RuntimeException e) {
-            return placeholderMenu("Earnings", "Merchant order service is not available.", "merchant");
+            return unavailableMenu("Earnings", "Merchant order service is not available.", "merchant");
         }
     }
 
     private List<DialogMenuItem> railMenu() {
         return List.of(
-            DialogMenuItem.item("Stations", "List active train stations.", "rail stations", null, Material.RAIL),
-            DialogMenuItem.item("Routes", "View rail routes.", "rail routes", null, Material.MINECART),
-            DialogMenuItem.item("Buy Ticket", "Buy a ticket for a route (stand on platform).", "vsmenu input rail_travel", null, Material.PAPER),
+            DialogMenuItem.item("Stations", "Browse active stations and district status.", "vsmenu rail.station", null, Material.RAIL),
+            DialogMenuItem.item("Routes", "View destinations, prices, and travel time.", "vsmenu rail.routes", null, Material.MINECART),
+            DialogMenuItem.item("Buy Ticket", "Select an active route from its departure platform.", "vsmenu rail.ticket", null, Material.PAPER),
             DialogMenuItem.item("Journey Status", "View your active train journey.", "vsmenu rail.journey", null, Material.CLOCK),
             DialogMenuItem.item("Station Info", "View your district station status.", "district station", null, Material.COMPASS),
             backItem(), homeItem(), closeItem()
         );
+    }
+
+    private List<DialogMenuItem> railStationMenu(Player player) {
+        try {
+            var rail = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.rail.RailService.class);
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var station : rail.getAllStations()) {
+                items.add(DialogMenuItem.locked(station.getName() + " (#" + station.getId() + ")",
+                    "District #" + station.getDistrictId() + " | " + station.getStatus(),
+                    rail.getRoutesFrom(station.getId()).size() + " route(s) | revenue " + station.getTotalRevenue() + " | upkeep " + station.getUpkeepCost(),
+                    station.getStatus() == com.vaultsurvival.plugin.rail.RailData.StationStatus.ACTIVE ? Material.RAIL : Material.BARRIER));
+            }
+            if (items.isEmpty()) items.add(DialogMenuItem.locked("No Stations", "No station applications exist yet.", "District diplomats and councils can submit an application.", Material.RAIL));
+            items.add(DialogMenuItem.item("My District Station", "Open station application and platform controls.", "vsmenu district.station", null, Material.COMPASS));
+            items.add(DialogMenuItem.item("Routes", "Browse active routes.", "vsmenu rail.routes", null, Material.MINECART));
+            items.add(backItem("rail")); items.add(homeItem()); items.add(closeItem());
+            return items;
+        } catch (RuntimeException unavailable) { return unavailableMenu("Stations", "Rail service is unavailable.", "rail"); }
+    }
+
+    private List<DialogMenuItem> railRoutesMenu(Player player, boolean ticketMode) {
+        try {
+            var rail = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.rail.RailService.class);
+            List<DialogMenuItem> items = new ArrayList<>();
+            for (var route : rail.getAllRoutes()) {
+                var from = rail.getStation(route.getFromStationId()); var to = rail.getStation(route.getToStationId());
+                String names = (from == null ? "Station #" + route.getFromStationId() : from.getName()) + " -> "
+                    + (to == null ? "Station #" + route.getToStationId() : to.getName());
+                if (ticketMode && route.getStatus() == com.vaultsurvival.plugin.rail.RailData.RouteStatus.ACTIVE) {
+                    items.add(DialogMenuItem.item("Buy Route #" + route.getId(), names + " | price " + route.getTicketPrice()
+                        + " | " + (route.getTravelTimeTicks() / 20) + "s", "rail travel " + route.getId(), null, Material.PAPER));
+                } else {
+                    items.add(DialogMenuItem.locked("Route #" + route.getId(), names,
+                        route.getStatus() + " | price " + route.getTicketPrice() + " | tax " + route.getKingdomTaxPercent() + "% | " + (route.getTravelTimeTicks() / 20) + "s",
+                        route.getStatus() == com.vaultsurvival.plugin.rail.RailData.RouteStatus.ACTIVE ? Material.MINECART : Material.BARRIER));
+                }
+            }
+            if (items.isEmpty()) items.add(DialogMenuItem.locked("No Routes", "No rail routes are configured.", "Staff can create routes after stations become active.", Material.RAIL));
+            if (ticketMode) items.add(DialogMenuItem.item("Enter Route ID", "Open the route-id ticket form.", "vsmenu input rail_travel", null, Material.WRITABLE_BOOK));
+            items.add(backItem("rail")); items.add(homeItem()); items.add(closeItem());
+            return items;
+        } catch (RuntimeException unavailable) { return unavailableMenu(ticketMode ? "Tickets" : "Routes", "Rail service is unavailable.", "rail"); }
     }
 
     private List<DialogMenuItem> journeyMenu(Player player) {
@@ -666,7 +730,7 @@ public class DialogService {
                 com.vaultsurvival.plugin.rail.RailService.class);
             var journey = railService.getActiveJourney(player.getUniqueId());
             if (journey == null) {
-                return placeholderMenu("Journey", "You have no active journey. Buy a ticket first!", "rail");
+                return unavailableMenu("Journey", "You have no active journey. Buy a ticket first!", "rail");
             }
             List<DialogMenuItem> items = new ArrayList<>();
             items.add(DialogMenuItem.locked("Route", journey.getFromStationName() + " → " + journey.getToStationName(),
@@ -692,7 +756,7 @@ public class DialogService {
             items.add(closeItem());
             return items;
         } catch (RuntimeException e) {
-            return placeholderMenu("Journey", "Rail service is not available.", "rail");
+            return unavailableMenu("Journey", "Rail service is not available.", "rail");
         }
     }
 
@@ -721,11 +785,11 @@ public class DialogService {
             items.add(closeItem());
             return items;
         } catch (RuntimeException e) {
-            return placeholderMenu("District Station", "Rail service is not available.", "district");
+            return unavailableMenu("District Station", "Rail service is not available.", "district");
         }
     }
 
-    private List<DialogMenuItem> placeholderMenu(String title, String reason, String backRoute) {
+    private List<DialogMenuItem> unavailableMenu(String title, String reason, String backRoute) {
         return List.of(
             DialogMenuItem.locked(title, reason, reason, Material.BARRIER),
             DialogMenuItem.item("Back", "Return to the previous menu.", "vsmenu " + backRoute, null, Material.ARROW),
@@ -736,12 +800,12 @@ public class DialogService {
 
     private List<DialogMenuItem> adminMenu(Player player) {
         return List.of(
-            DialogMenuItem.adminItem("Players", "Open player administration placeholders.", "vsmenu players", "vs.admin", Material.PLAYER_HEAD),
+            DialogMenuItem.adminItem("Players", "Open audited player search, lists, and profiles.", "vsmenu staff.players", "vs.admin", Material.PLAYER_HEAD),
             DialogMenuItem.adminItem("Security", "Open security dashboard.", "vsmenu security", "vs.admin", Material.SHIELD),
             DialogMenuItem.adminItem("Economy", "Open economy dashboard.", "vsmenu economy", "vs.admin", Material.GOLD_INGOT),
             DialogMenuItem.adminItem("Vaults", "Open vault administration shortcuts.", "vsmenu vaults", "vs.vault.admin.inspect", Material.BARREL),
-            DialogMenuItem.adminItem("Contracts", "Open contract placeholders.", "vsmenu contracts", "vs.admin", Material.WRITABLE_BOOK),
-            DialogMenuItem.adminItem("Districts", "Open district admin placeholders.", "vsmenu districts", "vs.district.admin", Material.MAP),
+            DialogMenuItem.adminItem("Contracts", "Open contract, escrow, dispute, and payout oversight.", "vsmenu contracts", "vs.admin", Material.WRITABLE_BOOK),
+            DialogMenuItem.adminItem("Districts", "Open applications, moderation, support, and teleport tools.", "vsmenu staff.districts", "vs.district.admin", Material.MAP),
             DialogMenuItem.adminItem("Rail Admin", "Manage station applications and routes.", "rail applications", "vs.admin", Material.POWERED_RAIL),
             DialogMenuItem.adminItem("Debug", "Open debug shortcuts.", "vsmenu debug", "vs.admin", Material.SPYGLASS),
             DialogMenuItem.adminItem("System", "Open system shortcuts.", "vsmenu system", "vs.admin", Material.COMMAND_BLOCK),
@@ -834,13 +898,14 @@ public class DialogService {
 
     private List<DialogMenuItem> staffMenu(Player player) {
         return List.of(
+            DialogMenuItem.adminItem("Staff Test World", "Transfer to the fully isolated staff sandbox.", "staffmode test", "vs.staffmode.use", Material.GRASS_BLOCK),
             DialogMenuItem.adminItem("Quick Actions", "Freeze, inspect, debug, and return shortcuts.", "vsmenu staff.quick", "vs.staffmode.use", Material.LIGHTNING_ROD),
-            DialogMenuItem.adminItem("Player Inspector", "Search players and open audited profiles.", "vsmenu players", "vs.staffinspect", Material.PLAYER_HEAD),
+            DialogMenuItem.adminItem("Player Inspector", "Search players and open audited profiles.", "vsmenu staff.players", "vs.staffinspect", Material.PLAYER_HEAD),
             DialogMenuItem.adminItem("Reports", "Open report queues.", "vsmenu staff.reports", "vs.staffmode.use", Material.PAPER),
             DialogMenuItem.adminItem("Security Alerts", "Open security and abuse tools.", "vsmenu security", "vs.staffmode.use", Material.SHIELD),
             DialogMenuItem.adminItem("Economy Tools", "Cash, vault, and contract oversight.", "vsmenu economy", "vs.cash.admin", Material.GOLD_INGOT),
             DialogMenuItem.adminItem("Vault Tools", "Inspect vault administration tools.", "vsmenu vaults", "vs.vault.admin.inspect", Material.BARREL),
-            DialogMenuItem.adminItem("District Tools", "Open district moderation tools.", "vsmenu districts", "vs.district.admin", Material.MAP),
+            DialogMenuItem.adminItem("District Tools", "Open district moderation tools.", "vsmenu staff.districts", "vs.district.admin", Material.MAP),
             DialogMenuItem.adminItem("Contract Oversight", "Inspect contracts, escrow, and payouts.", "vsmenu contracts", "vs.admin", Material.WRITABLE_BOOK),
             DialogMenuItem.adminItem("Region Debug", "Inspect this location's regions and flags.", "vsmenu debug", "vs.region.admin", Material.SPYGLASS),
             DialogMenuItem.adminItem("System Tools", "Modules, config, updates, and diagnostics.", "vsmenu system", "vs.staffmode.use", Material.COMPARATOR),
@@ -861,6 +926,167 @@ public class DialogService {
         );
     }
 
+    private List<DialogMenuItem> staffPlayerSearchMenu() {
+        return List.of(
+            DialogMenuItem.adminItem("Search", "Search partial name, UUID prefix, district, or rank.", "vsmenu input staffinspect_search", "vs.staffinspect", Material.SPYGLASS),
+            DialogMenuItem.adminItem("Open Exact Profile", "Open a player by exact name or UUID.", "vsmenu input staffinspect_profile", "vs.staffinspect", Material.PLAYER_HEAD),
+            DialogMenuItem.item("Player Lists", "Browse online, recent, wanted, and frozen players.", "vsmenu staff.player.list", null, Material.BOOK),
+            backItem("staff.players"), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> staffPlayerListMenu() {
+        return List.of(
+            DialogMenuItem.adminItem("Online Players", "Open paginated online players.", "staffinspect online", "vs.staffinspect", Material.LIME_DYE),
+            DialogMenuItem.adminItem("Recently Active", "Open paginated recently active players.", "staffinspect recent", "vs.staffinspect", Material.CLOCK),
+            DialogMenuItem.adminItem("Wanted Players", "Open players with active wanted records.", "staffinspect wanted", "vs.staffinspect", Material.CROSSBOW),
+            DialogMenuItem.adminItem("Frozen Players", "Open the current movement-freeze set.", "staffinspect frozen", "vs.staffinspect", Material.ICE),
+            DialogMenuItem.item("Search", "Search across all known players.", "vsmenu staff.player.search", null, Material.SPYGLASS),
+            backItem("staff.players"), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> staffPlayerProfileMenu() {
+        return List.of(
+            DialogMenuItem.adminItem("Open Profile", "Enter a player name or UUID for an audited profile.", "vsmenu input staffinspect_profile", "vs.staffinspect", Material.PLAYER_HEAD),
+            DialogMenuItem.item("Search First", "Find a player by partial name, district, or rank.", "vsmenu staff.player.search", null, Material.SPYGLASS),
+            backItem("staff.players"), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> staffReportsMenu() {
+        return List.of(
+            metric("Open Reports", count("SELECT COUNT(*) FROM player_reports WHERE status IN ('OPEN','CLAIMED')"), Material.PAPER),
+            metric("Unclaimed Reports", count("SELECT COUNT(*) FROM player_reports WHERE status='OPEN'"), Material.BELL),
+            metric("Police Abuse", count("SELECT COUNT(*) FROM player_reports WHERE category='POLICE_ABUSE' AND status IN ('OPEN','CLAIMED')"), Material.IRON_BARS),
+            DialogMenuItem.adminItem("Open Queue", "Claim or resolve all player reports.", "civic reports ALL", "vs.staffmode.use", Material.PAPER),
+            DialogMenuItem.adminItem("Police Abuse Queue", "Open the filtered high-priority queue.", "civic reports POLICE_ABUSE", "vs.staffmode.use", Material.IRON_BARS),
+            backItem("staff"), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> staffCashTraceMenu() {
+        return List.of(
+            metric("Tracked Cash Items", count("SELECT COUNT(*) FROM cash_items"), Material.GOLD_NUGGET),
+            metric("Cash Transactions", count("SELECT COUNT(*) FROM cash_transactions"), Material.BOOK),
+            metric("Invalidated Cash", count("SELECT COUNT(*) FROM cash_items WHERE state='INVALIDATED'"), Material.REDSTONE),
+            DialogMenuItem.adminItem("Trace Cash UUID", "Enter a physical cash UUID.", "vsmenu input cash_trace", "vs.cash.admin", Material.SPYGLASS),
+            DialogMenuItem.adminItem("Inspect Player", "Inspect carried physical cash for a player.", "vsmenu input cash_inspect", "vs.cash.admin", Material.PLAYER_HEAD),
+            DialogMenuItem.adminItem("Global Scan", "Scan tracked physical cash state.", "cash scan", "vs.cash.admin", Material.COMPASS),
+            backItem("economy"), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> staffDistrictsMenu() {
+        return List.of(
+            metric("Active Districts", count("SELECT COUNT(*) FROM districts WHERE status='ACTIVE'"), Material.MAP),
+            metric("Applications", count("SELECT COUNT(*) FROM districts WHERE status='APPLICATION'"), Material.PAPER),
+            metric("Open Join Requests", count("SELECT COUNT(*) FROM district_join_requests WHERE status='OPEN'"), Material.PLAYER_HEAD),
+            metric("Kingdom Support", count("SELECT COUNT(*) FROM kingdom_support_requests WHERE status IN ('OPEN','ASSIGNED')"), Material.BELL),
+            DialogMenuItem.adminItem("District Applications", "Review pending district applications.", "district applications", "vs.district.admin", Material.WRITABLE_BOOK),
+            DialogMenuItem.adminItem("District List", "List every official district.", "district list", "vs.district.admin", Material.FILLED_MAP),
+            DialogMenuItem.adminItem("Teleport to District", "Enter an id or exact district name.", "vsmenu input district_staff_tp", "vs.district.teleport", Material.ENDER_PEARL),
+            DialogMenuItem.adminItem("Kingdom Support Queue", "Assign and complete district support requests.", "civic support list", "vs.staffmode.use", Material.EMERALD),
+            DialogMenuItem.adminItem("Police Abuse", "Review district-police abuse reports.", "vsmenu staff.police_abuse", "vs.staffmode.use", Material.IRON_BARS),
+            backItem("staff"), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> staffPoliceAbuseMenu() {
+        return List.of(
+            metric("Open Police-Abuse Reports", count("SELECT COUNT(*) FROM player_reports WHERE category='POLICE_ABUSE' AND status IN ('OPEN','CLAIMED')"), Material.IRON_BARS),
+            metric("Police-Related Alerts", count("SELECT COUNT(*) FROM staff_alerts WHERE alert_type LIKE '%POLICE%' AND status IN ('OPEN','CLAIMED')"), Material.BELL),
+            DialogMenuItem.adminItem("Review Reports", "Claim and resolve police-abuse reports.", "civic reports POLICE_ABUSE", "vs.staffmode.use", Material.PAPER),
+            DialogMenuItem.adminItem("Security Alerts", "Review persistent police-related operational alerts.", "staffalerts list POLICE", "vs.staff.alerts", Material.REDSTONE_TORCH),
+            DialogMenuItem.adminItem("Player Inspector", "Inspect the involved officer or reporter.", "vsmenu staff.player.search", "vs.staffinspect", Material.PLAYER_HEAD),
+            backItem("security"), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> playerOrdersMenu(Player player) {
+        long availableOrders = count("SELECT COUNT(*) FROM merchant_orders WHERE status IN ('ACTIVE','PARTIALLY_FILLED')");
+        long auctionListings = count("SELECT COUNT(*) FROM auction_listings WHERE status='ACTIVE'");
+        long ownOrders = count("SELECT COUNT(*) FROM merchant_orders WHERE merchant_uuid='" + player.getUniqueId() + "'");
+        return List.of(
+            metric("Available Buy Orders", availableOrders, Material.CHEST),
+            metric("Auction Listings", auctionListings, Material.GOLD_INGOT),
+            metric("Your Merchant Orders", ownOrders, Material.WRITABLE_BOOK),
+            DialogMenuItem.item("Browse Buy Orders", "Deliver requested items for physical-cash payouts.", "merchant order list", null, Material.BOOKSHELF),
+            DialogMenuItem.item("My Merchant Orders", "View status, escrow, fills, and storage.", "vsmenu merchant.orders", null, Material.EMERALD),
+            DialogMenuItem.item("Create Buy Order", "Hold the target item and enter price and quantity.", "vsmenu merchant.create_order", null, Material.WRITABLE_BOOK),
+            DialogMenuItem.item("Auction Hall Listings", "Browse active player listings.", "ah listings", "vs.market.buy", Material.GOLD_BLOCK),
+            DialogMenuItem.item("Claim Payouts", "Collect pending merchant and job payouts.", "payouts claim", null, Material.GOLD_NUGGET),
+            backItem(), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> playerRiskMenu(Player player) {
+        CurrentAreaContext context = getCurrentArea(player);
+        List<DialogMenuItem> items = new ArrayList<>();
+        items.add(DialogMenuItem.locked("Local Risk", context.areaName(), context.riskSummary(), Material.CROSSBOW));
+        items.add(DialogMenuItem.locked("Law Context", "Active law state at this location.", context.lawSummary(), Material.LECTERN));
+        items.add(DialogMenuItem.locked("Region Rules", "Effective gameplay flags.", summarizeFlags(context), Material.REDSTONE_TORCH));
+        items.add(DialogMenuItem.item("My Crime Record", "View your wanted, evidence, bounty, and jail state.", "crime record " + player.getName(), null, Material.PAPER));
+        items.add(DialogMenuItem.item("Submit Report", "Attach this location to a persistent staff report.", "vsmenu input player_report", null, Material.BELL));
+        if (context.hasDistrict()) items.add(DialogMenuItem.item("District Police Desk", "Open local evidence and wanted tools when your role allows it.", "vsmenu district.police", null, Material.SHIELD));
+        items.add(backItem()); items.add(homeItem()); items.add(closeItem());
+        return items;
+    }
+
+    private List<DialogMenuItem> currentDistrictMenu(Player player) {
+        CurrentAreaContext context = getCurrentArea(player);
+        DistrictData.District district = context.district() != null ? context.district() : getDistrict(player);
+        if (district == null) return List.of(
+            DialogMenuItem.locked("No District", "No active district applies to you or this location.", "Browse /district list or start an application.", Material.MAP),
+            DialogMenuItem.item("Browse Districts", "List all official districts.", "district list", null, Material.FILLED_MAP),
+            backItem("district"), homeItem(), closeItem());
+        DistrictService districtService = getDistrictService();
+        List<DialogMenuItem> items = new ArrayList<>();
+        items.add(DialogMenuItem.locked(district.getName(), "District #" + district.getId(), district.getStatus() + " | " + district.getMemberCount() + " member(s) | your roles " + (districtService == null ? district.getRoles(player.getUniqueId()) : districtService.getDistrictRoles(player.getUniqueId(), district)), Material.MAP));
+        items.add(DialogMenuItem.locked("Treasury", "Physical district treasury balance.", String.valueOf(district.getTreasuryBalance()), Material.GOLD_BLOCK));
+        items.add(DialogMenuItem.locked("Market", "Live current-area market context.", context.marketSummary(), Material.EMERALD));
+        items.add(DialogMenuItem.locked("Jobs", "Live current-area job context.", context.jobSummary(), Material.IRON_PICKAXE));
+        items.add(DialogMenuItem.locked("Station", "Live rail context.", context.stationSummary(), Material.RAIL));
+        items.add(DialogMenuItem.item("Active Laws", "Review active district laws.", "vsmenu district.laws", null, Material.LECTERN));
+        items.add(DialogMenuItem.item("Member Overview", "List members and role assignments.", "district members", null, Material.PLAYER_HEAD));
+        if (district.isCouncil(player.getUniqueId())) items.add(DialogMenuItem.item("Join Requests", "Review persistent membership requests.", "civic joins", null, Material.PAPER));
+        items.add(backItem("district")); items.add(homeItem()); items.add(closeItem());
+        return items;
+    }
+
+    private List<DialogMenuItem> districtMarketMenu(Player player) {
+        DistrictData.District district = getDistrict(player);
+        if (district == null) return unavailableMenu("District Market", "Join a district to open its market dashboard.", "district");
+        return List.of(
+            metric("District Shops", count("SELECT COUNT(*) FROM merchant_shops WHERE district_id=" + district.getId()), Material.VILLAGER_SPAWN_EGG),
+            metric("Network Buy Orders", count("SELECT COUNT(*) FROM merchant_orders WHERE status IN ('ACTIVE','PARTIALLY_FILLED')"), Material.WRITABLE_BOOK),
+            DialogMenuItem.item("Show Market Border", "Display market-zone chunk borders.", "district marketzone borders", null, Material.LIME_DYE),
+            DialogMenuItem.item("Merchant Dashboard", "Manage shops, orders, storage, and payouts.", "vsmenu district.merchant", null, Material.EMERALD),
+            DialogMenuItem.item("Browse Buy Orders", "Browse and fulfill active orders.", "merchant order list", null, Material.BOOKSHELF),
+            DialogMenuItem.item("Market Supply Jobs", "Browse active district supply jobs.", "district jobs", null, Material.CHEST),
+            backItem("district"), homeItem(), closeItem());
+    }
+
+    private List<DialogMenuItem> districtTreasuryMenu(Player player) {
+        DistrictData.District district = getDistrict(player); DistrictService service = getDistrictService();
+        if (district == null) return unavailableMenu("District Treasury", "Join a district to view treasury controls.", "district");
+        boolean allowed = service != null && service.canManageTreasury(player.getUniqueId(), district);
+        List<DialogMenuItem> items = new ArrayList<>();
+        items.add(DialogMenuItem.locked("Balance", "Physical cash stored in the district treasury.", String.valueOf(district.getTreasuryBalance()), Material.GOLD_BLOCK));
+        items.add(allowed ? DialogMenuItem.item("Deposit", "Deposit physical cash.", "vsmenu input district_deposit", null, Material.HOPPER)
+            : DialogMenuItem.locked("Deposit", "Deposit physical cash.", "Requires MAYOR, CO_MAYOR, or TREASURER.", Material.HOPPER));
+        items.add(allowed ? DialogMenuItem.adminItem("Withdraw", "Withdraw physical treasury cash.", "vsmenu input district_withdraw", null, Material.DROPPER)
+            : DialogMenuItem.locked("Withdraw", "Withdraw physical treasury cash.", "Requires MAYOR, CO_MAYOR, or TREASURER.", Material.DROPPER));
+        items.add(DialogMenuItem.item("Development Projects", "View treasury-backed development work.", "vsmenu district.development", null, Material.BRICKS));
+        items.add(DialogMenuItem.item("District Jobs", "View treasury-funded job escrow.", "vsmenu district.jobs", null, Material.IRON_PICKAXE));
+        items.add(backItem("district")); items.add(homeItem()); items.add(closeItem());
+        return items;
+    }
+
+    private List<DialogMenuItem> diplomacyMenu(Player player) {
+        DistrictData.District district = getDistrict(player);
+        if (district == null) return unavailableMenu("Diplomacy", "Join a district to use diplomacy.", "district");
+        return List.of(
+            metric("Recorded Relations", count("SELECT COUNT(*) FROM district_diplomacy WHERE district_a=" + district.getId() + " OR district_b=" + district.getId()), Material.WHITE_BANNER),
+            metric("Allies", count("SELECT COUNT(*) FROM district_diplomacy WHERE relation='ALLIED' AND (district_a=" + district.getId() + " OR district_b=" + district.getId() + ")"), Material.LIME_BANNER),
+            metric("Pending Alliances", count("SELECT COUNT(*) FROM district_diplomacy WHERE relation='PENDING_ALLIANCE' AND (district_a=" + district.getId() + " OR district_b=" + district.getId() + ")"), Material.PAPER),
+            DialogMenuItem.item("Open Diplomacy Board", "View relations and perform role-gated transitions.", "civic diplomacy list", null, Material.MAP),
+            DialogMenuItem.item("Ally Chat", "Message your district and accepted allied districts.", "chat ally", null, Material.WRITABLE_BOOK),
+            backItem("district"), homeItem(), closeItem());
+    }
+
     /** Opens a command result as a follow-up dialog instead of dumping it into chat. */
     public void openResult(Player player, String title, String body, List<DialogMenuItem> items) {
         openCustomMenu(player, title, body, items);
@@ -870,11 +1096,11 @@ public class DialogService {
         return List.of(
             DialogMenuItem.adminItem("Freeze Nearest Player", "Freeze the nearest online player.", "staffinspect freeze", "vs.staffinspect.freeze", Material.ICE),
             DialogMenuItem.adminItem("Inspect Player", "Search a player and open their profile.", "vsmenu input staffinspect_profile", "vs.staffinspect", Material.PLAYER_HEAD),
-            DialogMenuItem.placeholder("Open Reports", "Report queues are not implemented yet.", Material.PAPER),
-            DialogMenuItem.placeholder("Security Alerts", "Alert routing is not implemented yet.", Material.BELL),
+            DialogMenuItem.adminItem("Open Reports", "Open the persistent claim and resolution queue.", "civic reports ALL", "vs.staffmode.use", Material.PAPER),
+            DialogMenuItem.adminItem("Security Alerts", "Open the persistent actionable alert queue.", "staffalerts list", "vs.staff.alerts", Material.BELL),
             DialogMenuItem.adminItem("Region Debug Here", "Show regions and flags at your location.", "region here", "vs.region.admin", Material.SPYGLASS),
-            DialogMenuItem.placeholder("Teleport to Last Alert", "There is no alert location to teleport to yet.", Material.ENDER_PEARL),
-            DialogMenuItem.placeholder("Return to Previous Location", "Staff return-location tracking is not implemented yet.", Material.COMPASS),
+            DialogMenuItem.adminItem("Teleport to Last Alert", "Teleport to the newest open alert with a location.", "staffalerts last", "vs.staff.alerts", Material.ENDER_PEARL),
+            DialogMenuItem.adminItem("Return to Previous Location", "Pop the audited staff teleport history stack.", "staffalerts return", "vs.staff.alerts", Material.COMPASS),
             backItem("staff"), homeItem(), closeItem()
         );
     }
@@ -886,13 +1112,14 @@ public class DialogService {
             metric("Vault Breaches", count("SELECT COUNT(*) FROM vault_breaches WHERE success=1"), Material.TNT),
             metric("Contract Abuse Signals", count("SELECT COUNT(*) FROM contract_disputes"), Material.WRITABLE_BOOK),
             metric("High Risk Players", count("SELECT COUNT(*) FROM wanted_players"), Material.CROSSBOW),
-            DialogMenuItem.placeholder("Anti-Xray", "Anti-Xray hook is not implemented yet.", Material.DEEPSLATE_DIAMOND_ORE),
-            DialogMenuItem.placeholder("Storage Discovery", "ChestESP/storage discovery hook is not implemented yet.", Material.CHEST),
-            DialogMenuItem.placeholder("Movement and Combat Alerts", "Movement/combat scoring hook is not implemented yet.", Material.LEATHER_BOOTS),
-            DialogMenuItem.placeholder("Inventory Exploit Alerts", "Inventory exploit scoring hook is not implemented yet.", Material.HOPPER),
-            DialogMenuItem.adminItem("Police Abuse", "Open police abuse placeholder.", "vsmenu staff.police_abuse", "vs.staffmode.use", Material.IRON_BARS),
+            DialogMenuItem.adminItem("Alert Queue", "Claim, teleport, and resolve persistent alerts.", "staffalerts list", "vs.staff.alerts", Material.BELL),
+            DialogMenuItem.adminItem("Anti-Xray", "Verify or update actual Paper anti-xray configuration.", "staffalerts antixray", "vs.staff.alerts", Material.DEEPSLATE_DIAMOND_ORE),
+            DialogMenuItem.adminItem("Storage Discovery", "Scan loaded nearby container tile entities and mark them.", "staffalerts storage 64", "vs.staff.alerts", Material.CHEST),
+            DialogMenuItem.adminItem("Movement and Combat Alerts", "Review 24-hour movement and combat scores.", "staffalerts scores MOVEMENT", "vs.staff.alerts", Material.LEATHER_BOOTS),
+            DialogMenuItem.adminItem("Inventory Exploit Alerts", "Review oversized-stack, injection, and click-rate scores.", "staffalerts scores INVENTORY", "vs.staff.alerts", Material.HOPPER),
+            DialogMenuItem.adminItem("Police Abuse", "Open the filtered police-abuse report queue.", "vsmenu staff.police_abuse", "vs.staffmode.use", Material.IRON_BARS),
             DialogMenuItem.adminItem("Region Debug", "Open region debug shortcuts.", "vsmenu debug", "vs.region.admin", Material.SPYGLASS),
-            DialogMenuItem.adminItem("Reports", "Open reports placeholder.", "vsmenu staff.reports", "vs.staffmode.use", Material.PAPER),
+            DialogMenuItem.adminItem("Reports", "Open player report queues.", "vsmenu staff.reports", "vs.staffmode.use", Material.PAPER),
             backItem("staff"), homeItem(), closeItem()
         );
     }
@@ -909,7 +1136,7 @@ public class DialogService {
             metric("Invalid Cash", stats.getTotalCashInvalidated(), Material.REDSTONE),
             metric("Admin Cash Events", count("SELECT COUNT(*) FROM admin_audit_log WHERE action_type='CASH_CREATE'"), Material.COMMAND_BLOCK),
             DialogMenuItem.adminItem("Cash Admin", "Open cash admin shortcuts.", "vsmenu admin_cash", "vs.cash.admin", Material.GOLD_NUGGET),
-            DialogMenuItem.adminItem("Cash Trace", "Open cash trace placeholder.", "vsmenu staff.cash_trace", "vs.cash.admin", Material.SPYGLASS),
+            DialogMenuItem.adminItem("Cash Trace", "Open cash lookup and trail tools.", "vsmenu staff.cash_trace", "vs.cash.admin", Material.SPYGLASS),
             DialogMenuItem.adminItem("Vaults", "Open vault shortcuts.", "vsmenu vaults", "vs.vault.admin.inspect", Material.BARREL),
             DialogMenuItem.adminItem("Contracts", "Open contract and escrow tools.", "vsmenu contracts", "vs.admin", Material.WRITABLE_BOOK),
             backItem("staff"), homeItem(), closeItem()
@@ -929,8 +1156,8 @@ public class DialogService {
             DialogMenuItem.adminItem("Escrow Debug", "List escrow records.", "escrow debug", "vs.admin", Material.CHEST),
             DialogMenuItem.adminItem("Payout Lockers", "Open payout locker command.", "payouts", "vs.admin", Material.ENDER_CHEST),
             DialogMenuItem.adminItem("Disputed Contracts", "Show dispute counts.", "contract debug", "vs.admin", Material.REDSTONE_TORCH),
-            DialogMenuItem.locked("Suspicious Payouts", "Suspicious payout review placeholder.",
-                "Locked: suspicious payout scoring is planned.", Material.BARRIER),
+            DialogMenuItem.adminItem("Suspicious Payouts", "Review high-value and burst-scored payout records.",
+                "staffalerts payouts", "vs.staff.alerts", Material.GOLD_BLOCK),
             backItem("staff"), homeItem(), closeItem()
         );
     }
@@ -954,10 +1181,10 @@ public class DialogService {
                 "rail routes", "vs.admin", Material.MINECART),
             DialogMenuItem.adminItem("Suspended Stations", "Review suspended stations.",
                 "rail stations", "vs.admin", Material.BARRIER),
-            DialogMenuItem.locked("Revenue Logs", "Revenue log viewer is planned for a future sprint.",
-                "Revenue logs are planned.", Material.GOLD_NUGGET),
-            DialogMenuItem.locked("Travel Logs", "Travel log viewer is planned for a future sprint.",
-                "Travel logs are planned.", Material.BOOK),
+            DialogMenuItem.adminItem("Revenue Logs", "Aggregate purchased tickets and gross revenue by route.",
+                "civic rail revenue", "vs.staffmode.use", Material.GOLD_NUGGET),
+            DialogMenuItem.adminItem("Travel Logs", "View recent ticket, boarding, departure, arrival, and cancellation events.",
+                "civic rail travel", "vs.staffmode.use", Material.BOOK),
             backItem("staff"), homeItem(), closeItem()
         );
     }
@@ -1109,6 +1336,24 @@ public class DialogService {
         } catch (RuntimeException ignored) {
             return null;
         }
+    }
+
+    private CivicWorkflowService getCivicWorkflow() {
+        try {
+            return plugin.getServiceRegistry().get(CivicWorkflowService.class);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private boolean preferNative(Player player) {
+        CivicWorkflowService civic = getCivicWorkflow();
+        if (civic == null) return plugin.getConfigManager().preferNativeDialogs();
+        return switch (civic.preferences(player.getUniqueId()).menuStyle()) {
+            case "NATIVE" -> true;
+            case "COMPACT" -> false;
+            default -> plugin.getConfigManager().preferNativeDialogs();
+        };
     }
 
     private DialogMenuItem chatItem(Player player, ChatChannel channel, String label, String description, Material material) {
@@ -1268,6 +1513,18 @@ public class DialogService {
             input("merchant_deliver", "Deliver Items", "Enter order id and optional quantity.", "orderId [quantity]", "merchant order deliver $(value)", null, false),
             input("merchant_cancel", "Cancel Order", "Enter the order id to cancel.", "orderId", "merchant order cancel $(value)", null, false),
             input("merchant_shop_create", "Create Shop NPC", "Enter a name for your shop NPC.", "Shop name", "merchant shop create $(value)", null, false),
+            input("player_report", "Submit Report", "Enter: category player|none details. Categories include THEFT, GRIEFING, HARASSMENT, POLICE_ABUSE, EXPLOIT, and OTHER.", "category player|none details", "civic report $(value)", null, false),
+            input("report_resolve", "Resolve Report", "Enter report id and a resolution note.", "id resolution", "civic reports resolve $(value)", "vs.staffmode.use", true),
+            input("report_dismiss", "Dismiss Report", "Enter report id and a dismissal reason.", "id reason", "civic reports dismiss $(value)", "vs.staffmode.use", true),
+            input("alert_resolve", "Resolve Security Alert", "Enter alert id and a resolution note.", "id resolution", "staffalerts resolve $(value)", "vs.staff.alerts", true),
+            input("cash_trace", "Trace Physical Cash", "Enter the full cash UUID.", "Cash UUID", "cash trace $(value)", "vs.cash.admin", true),
+            input("district_staff_tp", "Teleport to District", "Enter a district id or exact name.", "District", "district teleport $(value)", "vs.district.teleport", true),
+            input("diplomacy_request", "Request Alliance", "Enter a district id or exact one-word name.", "District", "civic diplomacy request $(value)", null, true),
+            input("diplomacy_neutral", "Set Neutral", "Enter a district id or exact one-word name.", "District", "civic diplomacy neutral $(value)", null, true),
+            input("diplomacy_hostile", "Declare Hostile", "Enter a district id or exact one-word name.", "District", "civic diplomacy hostile $(value)", null, true),
+            input("job_dispute", "Dispute District Job", "Enter claim id and a detailed reason.", "claimId reason", "civic jobs dispute $(value)", null, false),
+            input("job_dispute_resolve", "Resolve Job Dispute", "Enter dispute id, approve|deny, and a resolution note.", "id approve|deny note", "civic jobs resolve $(value)", null, true),
+            input("support_request", "Request Kingdom Support", "Enter a project id or all, followed by the needed materials/staffing.", "projectId|all details", "civic support request $(value)", null, true),
             input("staffinspect_search", "Search Player", "Search by player name, partial name, UUID, district, or rank.", "Search", "staffinspect search $(value)", "vs.staffinspect", true),
             input("staffinspect_profile", "Open Player Profile", "Enter a player name or UUID.", "Player", "staffinspect $(value)", "vs.staffinspect", true),
             input("station_request", "Request Station", "Enter station name.", "Station name", "district station request $(value)", null, false),

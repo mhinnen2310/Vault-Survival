@@ -31,11 +31,19 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `/rank <player> remove <group>` | Remove a rank group. |
 | `/staffmode` | Toggle protected staff mode. |
 | `/staffmode *` | Toggle permitted staff bypass testing mode. |
+| `/staffmode test` | Transfer from active staffmode to the isolated staff test world. |
+| `/staffmode return` | Return from the isolated test world to production. |
 | `/staffinspect <player>` | Open a player profile dialog. |
 | `/staffinspect search <query>` | Search players by name, UUID, rank, or district. |
 | `/staffinspect online|recent|wanted|frozen [page]` | Staff player lists. |
 | `/staffinspect freeze|unfreeze <player>` | Confirmed freeze controls. |
 | `/staffinspect tp|bring|spectate <player>` | Confirmed movement actions. |
+| `/staffalerts list [type]` | Open the persistent actionable security queue. |
+| `/staffalerts claim|resolve <id> [note]` | Assign or close an alert with audit history. |
+| `/staffalerts tp <id>`, `/staffalerts last`, `/staffalerts return` | Alert teleports and shared staff return stack. |
+| `/staffalerts antixray [set <world|default> <on|off> [mode]]` | Verify or update actual Paper anti-xray configuration. |
+| `/staffalerts storage [radius]` | Discover loaded nearby container tile entities. |
+| `/staffalerts scores [type]`, `/staffalerts payouts` | Review anti-cheat scores and suspicious payouts. |
 
 ## Spawn City
 
@@ -79,7 +87,8 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `/district chat rolecolor <role> <color>` | MAYOR-only district role chat color. |
 | `/district marketzone` | Start merchant market-zone chunk selection. |
 | `/district marketzone confirm|cancel|status` | Manage market-zone selection. |
-| `/district npcs start|confirm|cancel|activate` | Plan and unlock district NPCs. |
+| `/district marketzone borders` | Show the saved market-zone chunk borders (merchant-capable roles). |
+| `/district npcs start|confirm|cancel|activate` | Place only missing, currently unlocked district NPCs and activate saved plans. |
 | `/district development|projects|maintenance|contributors` | District progression overview. |
 | `/district project create|list|info|pause|resume|contribute|support` | Project lifecycle. |
 | `/district jobs` | District jobs in current district. |
@@ -87,6 +96,13 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `/district station status|request|setplatform|confirm|cancel|setarrival` | District station application and platform setup. |
 | `/district disband` | Disband your district. |
 | `/district applications`, `/district approve <id>`, `/district reject <id> <reason>` | Staff district application controls. |
+| `/district teleport <id|name>` | Teleport staff to a district center. |
+| `/civic join <district> [message]` | Submit a persistent district membership request. |
+| `/civic joins [approve|deny <id>]` | Council review of open join requests. |
+| `/civic diplomacy <list|request|accept|deny|neutral|hostile> [district]` | Persistent inter-district relations and alliances. |
+| `/civic jobs history|disputes` | Completed-claim history and dispute queue. |
+| `/civic jobs dispute <claim> <reason>` | Open a district-job dispute. |
+| `/civic support <list|request|assign|complete>` | Kingdom Support request lifecycle. |
 
 ## VS-WorldEdit
 
@@ -153,3 +169,9 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `/chatsettings`, `/chatpreview [message]` | Chat configuration and preview. |
 | `/vsresourcepack [player|reload]` | Resource-pack delivery. |
 | `/vsgive cash|breachkit|vault [amount]` | Staff-mode test items. |
+| `/civic preferences [notifications|menu|privacy] [value|next]` | Persist player notification, menu-style, and privacy choices. |
+| `/civic profile [player]` | View a privacy-filtered public player profile. |
+| `/civic report <category> <player|none> <details>` | Submit a location-aware staff report. |
+| `/civic reports [category|claim|resolve|dismiss]` | Staff report queue and lifecycle. |
+| `/civic guide <vaults|districts|auction>` | Open complete gameplay guides. |
+| `/civic rail <revenue|travel>` | Staff rail revenue and journey logs. |

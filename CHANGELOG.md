@@ -1,5 +1,20 @@
 # Vault Survival — Changelog & Status
 
+## Version 1.0.28 (2026-07-10)
+
+- Closed the complete 45-item product-placeholder audit. See `docs/OPEN_PLACEHOLDERS.md` for the closure register.
+- Added persistent district join requests, player reports, diplomacy, district-job disputes, and Kingdom Support assignment/completion.
+- Added player notification, dialog-style, and privacy preferences plus complete Vault, District, and Auction Hall guides.
+- Completed district market, merchant, treasury, rail station/route/ticket, staff player, reports, cash trace, moderation, police-abuse, and rail-log dialogs.
+- Added persistent actionable staff alerts with assignment, resolution, located-alert teleports, and a shared staff return stack.
+- Added Paper anti-xray verification/control, storage discovery, movement/combat/inventory scoring, and suspicious payout review.
+- Added computed current-area risk, market, job, and station context plus real district maintenance scoring and controlled decay.
+- Enforced `merchant.max_active_orders` before escrow withdrawal.
+- Added merchant market-zone border visualization, staff district teleport, and missing-unlocked-only district NPC placement.
+- Added a fully isolated, unlimited staff sandbox entered from active staffmode with `/staffmode test`.
+
+---
+
 ## Version 0.1.0-pre-alpha (2026-07-08)
 
 ---

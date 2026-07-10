@@ -15,6 +15,7 @@ public class StaffmodeData {
     private final UUID playerUuid;
     private boolean staffModeActive;
     private boolean bypassMode; // Owner override - bypasses all restrictions
+    private boolean sandboxTransferPending;
     private ItemStack[] gameplayInventory;
     private ItemStack[] gameplayArmor;
     private Location gameplayLocation;
@@ -29,6 +30,8 @@ public class StaffmodeData {
     public void setStaffModeActive(boolean active) { this.staffModeActive = active; }
     public boolean isBypassMode() { return bypassMode; }
     public void setBypassMode(boolean bypass) { this.bypassMode = bypass; }
+    public boolean isSandboxTransferPending() { return sandboxTransferPending; }
+    public void setSandboxTransferPending(boolean pending) { this.sandboxTransferPending = pending; }
 
     public ItemStack[] getGameplayInventory() { return gameplayInventory; }
     public void setGameplayInventory(ItemStack[] inv) { this.gameplayInventory = inv; }

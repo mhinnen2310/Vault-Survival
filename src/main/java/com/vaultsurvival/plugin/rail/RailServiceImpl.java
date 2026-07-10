@@ -58,7 +58,7 @@ public class RailServiceImpl implements RailService {
 
     /**
      * Create a new station application. Platform and arrival are set in subsequent steps.
-     * Creates a PENDING station with placeholder coordinates that get updated later.
+     * Creates a PENDING station with staging coordinates that are replaced during setup.
      */
     public RailData.Station createApplication(Player requester, String name) {
         DistrictService districtService;
@@ -110,7 +110,7 @@ public class RailServiceImpl implements RailService {
             deductFromTreasury(district.getId(), appFee);
         }
 
-        // Create PENDING station with placeholder coordinates
+        // Create a PENDING station with staging coordinates.
         Location loc = requester.getLocation();
         long now = System.currentTimeMillis();
         long defaultPrice = plugin.getConfigManager().getConfig().getLong("rail.defaultTicketPrice", 100);

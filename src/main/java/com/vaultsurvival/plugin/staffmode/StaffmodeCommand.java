@@ -51,6 +51,13 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        if (args.length >= 1 && args[0].equalsIgnoreCase("test")) {
+            return transferToSandbox(player);
+        }
+        if (args.length >= 1 && (args[0].equalsIgnoreCase("return") || args[0].equalsIgnoreCase("back"))) {
+            return transferToProduction(player);
+        }
+
         // /staffmode * [player] - bypass mode
         if (args.length >= 1 && args[0].equals("*")) {
             return handleBypass(player, args);
@@ -108,6 +115,7 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(fmt.success("Staff mode enabled. Inventory separated."));
         player.sendMessage(fmt.info("Your gameplay inventory is stored safely."));
         player.sendMessage(fmt.info("Use &e/staffmode *&7 for testing bypass."));
+        player.sendMessage(fmt.info("Use &e/staffmode test&7 to enter the isolated staff test world."));
     }
 
     private void disableStaffMode(Player player, StaffmodeData data) {
@@ -193,7 +201,48 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private boolean transferToSandbox(Player player) {
+        if (config.isStaffSandbox()) {
+            player.sendMessage(fmt.info("You are already in the isolated staff sandbox. Use &e/staffmode return&7 to go back."));
+            return true;
+        }
+        StaffmodeData data = staffData.get(player.getUniqueId());
+        if (data == null || !data.isStaffModeActive()) {
+            player.sendMessage(fmt.error("Enable staffmode before entering the test world."));
+            return true;
+        }
+        if (!config.isStaffSandboxTransferEnabled()) {
+            player.sendMessage(fmt.error("Staff sandbox transfer is disabled in config.yml."));
+            return true;
+        }
+        plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "STAFF_SANDBOX_ENTER", "PLAYER",
+            player.getUniqueId().toString(), "host=" + config.getStaffSandboxTestHost() + " port=" + config.getStaffSandboxTestPort());
+        data.setSandboxTransferPending(true);
+        player.sendMessage(fmt.success("Connecting to the isolated staff test world..."));
+        player.transfer(config.getStaffSandboxTestHost(), config.getStaffSandboxTestPort());
+        return true;
+    }
+
+    private boolean transferToProduction(Player player) {
+        if (!config.isStaffSandbox()) {
+            player.sendMessage(fmt.info("You are already on the production server."));
+            return true;
+        }
+        if (!config.isStaffSandboxTransferEnabled()) {
+            player.sendMessage(fmt.error("Production return transfer is disabled in config.yml."));
+            return true;
+        }
+        plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "STAFF_SANDBOX_RETURN", "PLAYER",
+            player.getUniqueId().toString(), "host=" + config.getStaffSandboxProductionHost() + " port=" + config.getStaffSandboxProductionPort());
+        player.sendMessage(fmt.success("Returning to production..."));
+        player.transfer(config.getStaffSandboxProductionHost(), config.getStaffSandboxProductionPort());
+        return true;
+    }
+
     private boolean hasVsPermission(Player player, String permission) {
+        if (config.isStaffSandbox() && config.getStaffSandboxAllowedUuids().contains(player.getUniqueId())) {
+            return true;
+        }
         if (player.hasPermission(permission)) {
             return true;
         }
@@ -208,7 +257,7 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("*");
+            return config.isStaffSandbox() ? List.of("return") : List.of("test", "*");
         }
         if (args.length == 2 && args[0].equals("*")) {
             return Bukkit.getOnlinePlayers().stream()

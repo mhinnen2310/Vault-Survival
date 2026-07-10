@@ -8,6 +8,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -63,6 +66,73 @@ public class ConfigManager {
             }
             save();
         }
+        applyRuntimeOverrides();
+    }
+
+    /**
+     * A staff sandbox runs in its own Paper process. These in-memory overrides
+     * remove production caps without writing sandbox values back to config.yml.
+     */
+    private void applyRuntimeOverrides() {
+        if (!isStaffSandbox()) return;
+        config.set("staffSandbox.enabled", true);
+        config.set("server.name", "Vault Survival Staff Sandbox");
+        config.set("database.file", "staff_sandbox.db");
+        config.set("spawn.world", getStaffSandboxExpectedWorld());
+        config.set("spawn.chunkClaim.maxChunks", 1000000);
+        config.set("chat.channels.localRadius", 30000000);
+        config.set("staffmode.allow_container_interact", true);
+        config.set("staffmode.allow_item_drop", true);
+        config.set("staffmode.allow_item_pickup", true);
+        config.set("staffmode.revert_blocks_on_exit", false);
+        config.set("staffmode.max_tracked_blocks", Integer.MAX_VALUE);
+        config.set("security.anticheat.enabled", false);
+        config.set("districts.min_distance_from_spawn", 0);
+        config.set("districts.min_distance_between", 0);
+        config.set("districts.selection.requiredChunks", 1);
+        config.set("districts.selection.timeoutMinutes", Integer.MAX_VALUE);
+        for (int level = 0; level <= 6; level++) config.set("districts.selection.chunksByLevel." + level, 1000000);
+        config.set("districts.marketZone.maxPercentOfDistrict", 1.0);
+        config.set("districts.stationPlatform.maxPercentOfDistrict", 1.0);
+        config.set("districts.laws.maxChangesPerDay", Integer.MAX_VALUE);
+        config.set("districts.evidence.expireDays", 36500);
+        config.set("districtDevelopment.scaling.enabled", false);
+        config.set("districtDevelopment.scaling.dormantDistricts.enabled", false);
+        config.set("restoration.normal_delay_minutes", 0);
+        config.set("restoration.exhausted_delay_minutes", 0);
+        config.set("restoration.daily_repair_points", Integer.MAX_VALUE);
+        config.set("restoration.daily_wage", 0);
+        config.set("merchant.max_active_orders", Integer.MAX_VALUE);
+        config.set("merchant.default_expire_hours", 0);
+        config.set("rail.defaultTicketPrice", 0);
+        config.set("rail.defaultUpkeepCost", 0);
+        config.set("rail.defaultKingdomTaxPercent", 0);
+        config.set("rail.applicationFee", 0);
+        config.set("rail.minPlatformRadius", 1);
+        config.set("districtMarket.requireMarketZone", false);
+        config.set("districtMarket.maxNpcPerMerchant", Integer.MAX_VALUE);
+        config.set("districtMarket.maxNpcPerDistrict", Integer.MAX_VALUE);
+        config.set("districtMarket.maxTaxPercent", 0);
+        config.set("districtMarket.defaultTaxPercent", 0);
+        config.set("market.tax_percent", 0.0);
+        config.set("market.default_listing_duration_hours", 876000);
+        config.set("market.max_listing_duration_hours", 876000);
+        config.set("vaults.breach_cooldown_minutes", 0);
+        config.set("vaults.max_breach_percent", 100.0);
+        config.set("breach.max_distance_blocks", 30000000);
+        config.set("breach.escape_cooldown_seconds", 0);
+        config.set("breach.tumbler_speed_ticks", 1);
+        config.set("breach.tumbler_max_attempts", 1000000);
+        config.set("breach.dial_time_ticks", 72000);
+        config.set("breach.dial_max_attempts", 1000000);
+        config.set("vsworldedit.maxBlocksPerOperation", 100000000);
+        config.set("vsworldedit.blocksPerTick", 10000);
+        config.set("vsworldedit.maxUndoOperations", 1000000);
+        config.set("vsworldedit.requireConfirmationAboveBlocks", Integer.MAX_VALUE);
+        config.set("vsworldedit.patterns.maxEntries", Integer.MAX_VALUE);
+        config.set("vsworldedit.patterns.maxWeight", Integer.MAX_VALUE);
+        config.set("updates.enabled", false);
+        logger.warning("STAFF SANDBOX MODE ACTIVE: isolated database and unlimited test overrides enabled.");
     }
 
     /**
@@ -112,6 +182,46 @@ public class ConfigManager {
     public String getServerName() { return config.getString("server.name", "Vault Survival"); }
     public String getChatPrefix() { return config.getString("server.chat_prefix", "&8[&6VS&8]"); }
     public boolean isDebugMode() { return config.getBoolean("server.debug", false); }
+
+    // Dedicated staff sandbox (must run in a separate Paper instance)
+    public boolean isStaffSandbox() {
+        return Boolean.parseBoolean(System.getProperty("vaultsurvival.staffSandbox", "false"))
+            || config.getBoolean("staffSandbox.enabled", false);
+    }
+    public String getStaffSandboxExpectedWorld() {
+        return System.getProperty("vaultsurvival.staffSandbox.world",
+            config.getString("staffSandbox.expectedWorld", "staff_test"));
+    }
+    public Set<UUID> getStaffSandboxAllowedUuids() {
+        Set<UUID> allowed = new LinkedHashSet<>();
+        for (String raw : config.getStringList("staffSandbox.allowedUuids")) addUuid(allowed, raw);
+        String property = System.getProperty("vaultsurvival.staffSandbox.allowedUuids", "");
+        for (String raw : property.split(",")) addUuid(allowed, raw);
+        return Set.copyOf(allowed);
+    }
+    public boolean isStaffSandboxTransferEnabled() { return config.getBoolean("staffSandbox.transfer.enabled", true); }
+    public String getStaffSandboxTestHost() {
+        return System.getProperty("vaultsurvival.staffSandbox.testHost",
+            config.getString("staffSandbox.transfer.testHost", "127.0.0.1"));
+    }
+    public int getStaffSandboxTestPort() {
+        return Integer.getInteger("vaultsurvival.staffSandbox.testPort",
+            config.getInt("staffSandbox.transfer.testPort", 25566));
+    }
+    public String getStaffSandboxProductionHost() {
+        return System.getProperty("vaultsurvival.staffSandbox.productionHost",
+            config.getString("staffSandbox.transfer.productionHost", "127.0.0.1"));
+    }
+    public int getStaffSandboxProductionPort() {
+        return Integer.getInteger("vaultsurvival.staffSandbox.productionPort",
+            config.getInt("staffSandbox.transfer.productionPort", 25565));
+    }
+
+    private void addUuid(Set<UUID> target, String raw) {
+        if (raw == null || raw.isBlank()) return;
+        try { target.add(UUID.fromString(raw.trim())); }
+        catch (IllegalArgumentException ignored) { logger.warning("Ignoring invalid staff sandbox UUID: " + raw); }
+    }
     
     // Spawn
     public String getSpawnCityName() { return config.getString("spawn.cityName", "Spawn City"); }

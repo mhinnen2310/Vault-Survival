@@ -33,12 +33,16 @@ import com.vaultsurvival.plugin.regions.RegionModule;
 import com.vaultsurvival.plugin.staffmode.StaffmodeModule;
 import com.vaultsurvival.plugin.staff.StaffInspectCommand;
 import com.vaultsurvival.plugin.security.AntiCheatListener;
+import com.vaultsurvival.plugin.security.StaffAlertCommand;
 import com.vaultsurvival.plugin.security.StaffAlertService;
+import com.vaultsurvival.plugin.security.StaffSandboxGuard;
 import com.vaultsurvival.plugin.spawncity.SpawnCityModule;
 import com.vaultsurvival.plugin.spawnjobs.SpawnJobModule;
 import com.vaultsurvival.plugin.updates.UpdateService;
 import com.vaultsurvival.plugin.vaults.VaultModule;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditModule;
+import com.vaultsurvival.plugin.workflow.CivicWorkflowCommand;
+import com.vaultsurvival.plugin.workflow.CivicWorkflowService;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
@@ -79,6 +83,20 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         // Load configuration
         configManager.load(getResource("config.yml"));
         this.messageFormatter = new MessageFormatter(configManager.getChatPrefix());
+
+        if (configManager.isStaffSandbox()) {
+            String expectedWorld = configManager.getStaffSandboxExpectedWorld();
+            String primaryWorld = getServer().getWorlds().isEmpty() ? "" : getServer().getWorlds().getFirst().getName();
+            if (!expectedWorld.equals(primaryWorld)) {
+                getLogger().severe("Refusing staff sandbox startup: primary world is '" + primaryWorld
+                    + "' but must be '" + expectedWorld + "'. Use the dedicated staff-test-server runtime.");
+                getServer().getPluginManager().disablePlugin(this);
+                return;
+            }
+            if (configManager.getStaffSandboxAllowedUuids().isEmpty()) {
+                getLogger().severe("Staff sandbox has no allowed UUIDs. It will fail closed and reject every login.");
+            }
+        }
 
         // Connect to database
         try {
@@ -230,6 +248,11 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         CurrentAreaService currentAreaService = new CurrentAreaService(this);
         serviceRegistry.register(CurrentAreaService.class, currentAreaService);
         getServer().getPluginManager().registerEvents(new AreaGreetingListener(this, currentAreaService), this);
+        CivicWorkflowService civicWorkflowService = new CivicWorkflowService(this);
+        serviceRegistry.register(CivicWorkflowService.class, civicWorkflowService);
+        var civicCommand = new CivicWorkflowCommand(this, civicWorkflowService);
+        getCommand("civic").setExecutor(civicCommand);
+        getCommand("civic").setTabCompleter(civicCommand);
         ChatChannelService chatChannelService = new ChatChannelService(this);
         serviceRegistry.register(ChatChannelService.class, chatChannelService);
 
@@ -261,7 +284,13 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         staffAlertService.install();
         getServer().getPluginManager().registerEvents(staffAlertService, this);
         staffAlertService.runStartupAudit();
+        var staffAlertsCommand = new StaffAlertCommand(this, staffAlertService);
+        getCommand("staffalerts").setExecutor(staffAlertsCommand);
+        getCommand("staffalerts").setTabCompleter(staffAlertsCommand);
         getServer().getPluginManager().registerEvents(new AntiCheatListener(this), this);
+        if (configManager.isStaffSandbox()) {
+            getServer().getPluginManager().registerEvents(new StaffSandboxGuard(this), this);
+        }
 
         // Register resource pack command
         var rpCmd = new ResourcePackCommand(this);

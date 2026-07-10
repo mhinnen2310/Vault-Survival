@@ -60,8 +60,9 @@ public class MarketServiceImpl implements MarketService {
             return null;
         }
 
-        if (hours <= 0 || hours > 168) {
-            seller.sendMessage(fmt.error("Duration must be between 1 and 168 hours (7 days)."));
+        int maximumHours = plugin.getConfigManager().getConfig().getInt("market.max_listing_duration_hours", 168);
+        if (hours <= 0 || hours > maximumHours) {
+            seller.sendMessage(fmt.error("Duration must be between 1 and " + maximumHours + " hours."));
             return null;
         }
 

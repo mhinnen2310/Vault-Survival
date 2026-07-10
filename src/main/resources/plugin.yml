@@ -1,5 +1,5 @@
 ﻿name: VaultSurvival
-version: 1.0.27
+version: 1.0.28
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -35,11 +35,18 @@ commands:
     permission: vs.vault.use
   staffmode:
     description: Toggle staff mode with inventory separation and abuse protection
-    usage: /staffmode [* [player]]
+    usage: /staffmode [test|return|* [player]]
   staffinspect:
     description: Staff player search, profiles, and audited actions
     usage: /staffinspect <player|search|online|recent|wanted|frozen|freeze|unfreeze>
     permission: vs.staffinspect
+  staffalerts:
+    description: Persistent staff alert queue, security scoring, and staff navigation
+    usage: /staffalerts <list|claim|resolve|tp|last|return|antixray|storage|scores|payouts>
+    permission: vs.staff.alerts
+  civic:
+    description: Player preferences and persistent district, report, dispute, diplomacy, and support workflows
+    usage: /civic <preferences|profile|join|joins|report|reports|diplomacy|jobs|support|guide|rail>
   breach:
     description: Vault breaching commands
     usage: /breach <kit|start|cancel|log|logplayer|escapecooldown>
@@ -234,6 +241,9 @@ permissions:
   vs.district.admin:
     description: Allows district admin (approve/reject)
     default: false
+  vs.district.teleport:
+    description: Allows teleporting to district centers
+    default: false
   vs.damage.use:
     description: Allows viewing temporary damage info
     default: true
@@ -292,7 +302,7 @@ permissions:
     description: Allows staff chat spy visibility
     default: false
   vs.staff.alerts:
-    description: Receives live anti-cheat operational alerts
+    description: Receives and manages persistent security alerts while in staffmode
     default: false
   vs.admin.alerts:
     description: Receives startup-audit and server-error alerts
@@ -324,8 +334,12 @@ permissions:
       vs.friends: true
       vs.staff.chat: true
       vs.staff.spy: true
+      vs.staff.alerts: true
+      vs.admin.alerts: true
       vs.staffmode.use: true
       vs.staffmode.bypass: true
       vs.staffmode.bypass.grant: true
       vs.police.use: true
       vs.district.admin.approve: true
+      vs.district.admin: true
+      vs.district.teleport: true

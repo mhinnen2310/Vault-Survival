@@ -745,7 +745,105 @@ public class DatabaseManager {
             "CREATE TABLE IF NOT EXISTS district_projects (id INTEGER PRIMARY KEY AUTOINCREMENT, district_id INTEGER NOT NULL, type TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'DRAFT', cash_required INTEGER NOT NULL DEFAULT 0, cash_contributed INTEGER NOT NULL DEFAULT 0, item_required INTEGER NOT NULL DEFAULT 0, item_contributed INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL, created_at INTEGER NOT NULL, approved_by TEXT)",
             "CREATE TABLE IF NOT EXISTS district_development_contributions (id INTEGER PRIMARY KEY AUTOINCREMENT, district_id INTEGER NOT NULL, project_id INTEGER, player_uuid TEXT NOT NULL, category TEXT NOT NULL, source TEXT NOT NULL, amount INTEGER NOT NULL, contributed_at INTEGER NOT NULL, details TEXT)",
             "CREATE TABLE IF NOT EXISTS district_npc_plans (id INTEGER PRIMARY KEY AUTOINCREMENT, district_id INTEGER NOT NULL, npc_type TEXT NOT NULL, world TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL, yaw REAL NOT NULL, pitch REAL NOT NULL, minimum_level INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'PLANNED', npc_id INTEGER, planned_by TEXT NOT NULL, planned_at INTEGER NOT NULL, UNIQUE(district_id, npc_type))",
-            "CREATE TABLE IF NOT EXISTS anticheat_flags (id INTEGER PRIMARY KEY AUTOINCREMENT, player_uuid TEXT NOT NULL, check_type TEXT NOT NULL, score REAL NOT NULL, details TEXT, created_at INTEGER NOT NULL)"
+            "CREATE TABLE IF NOT EXISTS anticheat_flags (id INTEGER PRIMARY KEY AUTOINCREMENT, player_uuid TEXT NOT NULL, check_type TEXT NOT NULL, score REAL NOT NULL, details TEXT, created_at INTEGER NOT NULL)",
+
+            // === Civic workflows and player preferences ===
+            "CREATE TABLE IF NOT EXISTS player_preferences (" +
+                "player_uuid TEXT PRIMARY KEY," +
+                "notifications TEXT NOT NULL DEFAULT 'ALL'," +
+                "menu_style TEXT NOT NULL DEFAULT 'AUTO'," +
+                "privacy TEXT NOT NULL DEFAULT 'PUBLIC'," +
+                "updated_at INTEGER NOT NULL" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS district_join_requests (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
+                "player_uuid TEXT NOT NULL," +
+                "player_name TEXT NOT NULL," +
+                "message TEXT," +
+                "status TEXT NOT NULL DEFAULT 'OPEN'," +
+                "handled_by TEXT," +
+                "created_at INTEGER NOT NULL," +
+                "resolved_at INTEGER NOT NULL DEFAULT 0" +
+            ")",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_open_district_join_request ON district_join_requests(district_id, player_uuid) WHERE status='OPEN'",
+
+            "CREATE TABLE IF NOT EXISTS player_reports (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "reporter_uuid TEXT NOT NULL," +
+                "reporter_name TEXT NOT NULL," +
+                "subject_uuid TEXT," +
+                "subject_name TEXT," +
+                "district_id INTEGER," +
+                "category TEXT NOT NULL," +
+                "details TEXT NOT NULL," +
+                "world TEXT NOT NULL," +
+                "x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL," +
+                "status TEXT NOT NULL DEFAULT 'OPEN'," +
+                "assigned_to TEXT," +
+                "resolution TEXT," +
+                "created_at INTEGER NOT NULL," +
+                "resolved_at INTEGER NOT NULL DEFAULT 0" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS district_diplomacy (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "district_a INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
+                "district_b INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
+                "relation TEXT NOT NULL DEFAULT 'NEUTRAL'," +
+                "proposer_district INTEGER," +
+                "changed_by TEXT," +
+                "updated_at INTEGER NOT NULL," +
+                "UNIQUE(district_a, district_b)" +
+            ")",
+
+            "CREATE TABLE IF NOT EXISTS district_job_disputes (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "claim_id INTEGER NOT NULL REFERENCES district_job_claims(id) ON DELETE CASCADE," +
+                "job_id INTEGER NOT NULL REFERENCES district_jobs(id) ON DELETE CASCADE," +
+                "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
+                "opened_by TEXT NOT NULL," +
+                "reason TEXT NOT NULL," +
+                "status TEXT NOT NULL DEFAULT 'OPEN'," +
+                "handled_by TEXT," +
+                "resolution TEXT," +
+                "created_at INTEGER NOT NULL," +
+                "resolved_at INTEGER NOT NULL DEFAULT 0" +
+            ")",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_open_district_job_dispute ON district_job_disputes(claim_id) WHERE status='OPEN'",
+
+            "CREATE TABLE IF NOT EXISTS kingdom_support_requests (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +
+                "project_id INTEGER," +
+                "requested_by TEXT NOT NULL," +
+                "details TEXT NOT NULL," +
+                "status TEXT NOT NULL DEFAULT 'OPEN'," +
+                "assigned_to TEXT," +
+                "completion_note TEXT," +
+                "created_at INTEGER NOT NULL," +
+                "updated_at INTEGER NOT NULL" +
+            ")",
+
+            // === Persistent, actionable staff alert queue ===
+            "CREATE TABLE IF NOT EXISTS staff_alerts (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "alert_type TEXT NOT NULL," +
+                "severity TEXT NOT NULL," +
+                "player_uuid TEXT," +
+                "player_name TEXT," +
+                "details TEXT NOT NULL," +
+                "world TEXT," +
+                "x REAL, y REAL, z REAL," +
+                "status TEXT NOT NULL DEFAULT 'OPEN'," +
+                "assigned_to TEXT," +
+                "resolution TEXT," +
+                "created_at INTEGER NOT NULL," +
+                "resolved_at INTEGER NOT NULL DEFAULT 0" +
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_staff_alerts_queue ON staff_alerts(status, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_player_reports_queue ON player_reports(status, created_at DESC)"
         };
 
         try (Statement stmt = connection.createStatement()) {

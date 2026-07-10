@@ -59,9 +59,14 @@ public class StaffmodeListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
+        StaffmodeData data = staffData.get(player.getUniqueId());
+        if (data != null && data.isSandboxTransferPending()) {
+            event.joinMessage(null);
+            data.setSandboxTransferPending(false);
+            player.sendMessage(fmt.success("Returned from the staff sandbox. Your normal gameplay state is active."));
+        }
         if (!player.hasPermission("vs.staffmode.use")) return;
 
-        StaffmodeData data = staffData.get(player.getUniqueId());
         if (data != null && data.isStaffModeActive()) {
             // Re-apply full staffmode state on rejoin
             applyVisibilityEffects(player, data);
@@ -83,6 +88,7 @@ public class StaffmodeListener implements Listener {
         Player player = event.getPlayer();
         StaffmodeData data = staffData.get(player.getUniqueId());
         if (data != null && data.isStaffModeActive()) {
+            if (data.isSandboxTransferPending()) event.quitMessage(null);
             // Logout is fail-closed: never preserve staff tools, inventory, or staff location.
             if (config.isStaffModeRevertBlocks() && !data.isBypassMode()) revertBlocks(player, data);
             player.getInventory().clear();

@@ -17,7 +17,7 @@ ranks:
     allow: [vs.staffinspect.freeze, vs.staff.chat]
   admin:
     inherits: moderator
-    allow: [vs.admin, vs.admin.alerts, vs.cash.admin, vs.vault.admin.inspect, vs.district.admin, vs.region.admin, vs.admin.reload]
+    allow: [vs.admin, vs.admin.alerts, vs.cash.admin, vs.vault.admin.inspect, vs.district.admin, vs.district.teleport, vs.region.admin, vs.admin.reload]
   owner:
     inherits: admin
     allow: [vs.*, vs.update, vs.staffmode.bypass, vs.staffmode.bypass.grant]

@@ -46,6 +46,7 @@ public class PayoutLockerServiceImpl implements PayoutLockerService {
             ResultSet keys = ps.getGeneratedKeys();
             int id = keys.next() ? keys.getInt(1) : -1;
             audit.log(parseContractId(sourceId), playerUuid, "PAYOUT_LOCKER_STORE", amount, details);
+            scorePayout(id, playerUuid, amount, sourceType, sourceId);
             return id;
         } catch (SQLException e) {
             plugin.getLogger().log(Level.WARNING, "Failed to store payout", e);
@@ -135,5 +136,30 @@ public class PayoutLockerServiceImpl implements PayoutLockerService {
 
     private int parseContractId(String sourceId) {
         try { return Integer.parseInt(sourceId); } catch (Exception ignored) { return 0; }
+    }
+
+    private void scorePayout(int payoutId, UUID playerUuid, long amount, String sourceType, String sourceId) {
+        long threshold = plugin.getConfigManager().getConfig().getLong("security.suspiciousPayout.minimumAmount", 25_000L);
+        long window = plugin.getConfigManager().getConfig().getLong("security.suspiciousPayout.windowMillis", 600_000L);
+        int burstCount = plugin.getConfigManager().getConfig().getInt("security.suspiciousPayout.burstCount", 5);
+        long burstTotal = plugin.getConfigManager().getConfig().getLong("security.suspiciousPayout.burstTotal", 50_000L);
+        int recentCount = 0;
+        long recentTotal = 0;
+        try (Connection conn = plugin.getDatabase().getConnection(); PreparedStatement ps = conn.prepareStatement(
+            "SELECT COUNT(*),COALESCE(SUM(amount),0) FROM payout_lockers WHERE player_uuid=? AND created_at>=?")) {
+            ps.setString(1, playerUuid.toString());
+            ps.setLong(2, System.currentTimeMillis() - Math.max(1_000L, window));
+            ResultSet result = ps.executeQuery();
+            if (result.next()) { recentCount = result.getInt(1); recentTotal = result.getLong(2); }
+        } catch (SQLException ignored) { }
+        if (amount < threshold && recentCount < burstCount && recentTotal < burstTotal) return;
+        try {
+            plugin.getServiceRegistry().get(com.vaultsurvival.plugin.security.StaffAlertService.class).recordAlert(
+                "PAYOUT", amount >= threshold * 2 ? "HIGH" : "MEDIUM", playerUuid,
+                org.bukkit.Bukkit.getOfflinePlayer(playerUuid).getName(),
+                "Payout #" + payoutId + " amount=" + amount + " source=" + sourceType + "/" + sourceId
+                    + " recentCount=" + recentCount + " recentTotal=" + recentTotal,
+                null);
+        } catch (RuntimeException ignored) { }
     }
 }

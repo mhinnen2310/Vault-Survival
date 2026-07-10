@@ -84,8 +84,9 @@ public class VSGiveCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        if (amount <= 0 || amount > 100_000_000) {
-            player.sendMessage(fmt.error("Amount must be between 1 and 100,000,000."));
+        long maximumAmount = plugin.getConfigManager().isStaffSandbox() ? 1_000_000_000_000L : 100_000_000L;
+        if (amount <= 0 || amount > maximumAmount) {
+            player.sendMessage(fmt.error("Amount must be between 1 and " + String.format("%,d", maximumAmount) + "."));
             return true;
         }
 

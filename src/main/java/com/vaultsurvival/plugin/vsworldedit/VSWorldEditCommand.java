@@ -20,10 +20,12 @@ import java.util.stream.Stream;
  */
 public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
 
+    private final VaultSurvivalPlugin plugin;
     private final VSWorldEditService service;
     private final MessageFormatter fmt;
 
     public VSWorldEditCommand(VaultSurvivalPlugin plugin) {
+        this.plugin = plugin;
         this.service = plugin.getServiceRegistry().get(VSWorldEditService.class);
         this.fmt = plugin.getMessageFormatter();
     }
@@ -294,8 +296,9 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
                 try { weight = Integer.parseInt(weightParts[i].trim()); }
                 catch (NumberFormatException ignored) { player.sendMessage(fmt.error("Pattern weights must be whole numbers.")); return null; }
             }
-            if (weight < 1 || weight > 10_000) {
-                player.sendMessage(fmt.error("Pattern weights must be between 1 and 10000."));
+            int maximumWeight = plugin.getConfigManager().getConfig().getInt("vsworldedit.patterns.maxWeight", 10_000);
+            if (weight < 1 || weight > maximumWeight) {
+                player.sendMessage(fmt.error("Pattern weights must be between 1 and " + maximumWeight + "."));
                 return null;
             }
             pattern.add(new VSWorldEditData.WeightedMaterial(material, weight));

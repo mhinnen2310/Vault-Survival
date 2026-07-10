@@ -23,9 +23,12 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /** District founders place facing marker blocks, then confirm their permanent NPC plan. */
 public final class DistrictNpcPlanningService implements Listener {
@@ -49,18 +52,32 @@ public final class DistrictNpcPlanningService implements Listener {
             return;
         }
         cancel(player, false);
-        PlanSession session = new PlanSession(district);
+        Set<NpcPlanType> requiredTypes;
+        try {
+            requiredTypes = missingUnlockedTypes(district);
+        } catch (Exception error) {
+            player.sendMessage(fmt.error("Could not load this district's NPC placements. Try again later."));
+            return;
+        }
+        if (requiredTypes.isEmpty()) {
+            player.sendMessage(fmt.info("All unlocked district NPCs already have placements. Use &e/district npcs activate&7 if one still needs to spawn."));
+            return;
+        }
+        PlanSession session = new PlanSession(district, requiredTypes);
         sessions.put(player.getUniqueId(), session);
-        for (NpcPlanType type : NpcPlanType.values()) giveMarker(player, type);
-        player.sendMessage(fmt.success("District NPC markers added. Place each block facing the desired NPC direction, then use &e/district npcs confirm&a."));
-        player.sendMessage(fmt.info("Level 0 NPCs spawn immediately; later-level markers are saved and activate after leveling."));
+        for (NpcPlanType type : requiredTypes) giveMarker(player, type);
+        player.sendMessage(fmt.success(requiredTypes.size() + " missing unlocked district NPC marker(s) added. Place each block facing the desired NPC direction, then use &e/district npcs confirm&a."));
+        player.sendMessage(fmt.info("Already placed and still-locked NPCs were skipped."));
     }
 
     public void confirm(Player player) {
         PlanSession session = sessions.get(player.getUniqueId());
         if (session == null) { player.sendMessage(fmt.error("No district NPC planning session is active.")); return; }
-        if (!session.markers.containsKey(NpcPlanType.CLERK) || !session.markers.containsKey(NpcPlanType.JOB_BOARD)) {
-            player.sendMessage(fmt.error("Place at least the Clerk and Job Board markers before confirming."));
+        Set<NpcPlanType> missing = EnumSet.copyOf(session.requiredTypes);
+        missing.removeAll(session.markers.keySet());
+        if (!missing.isEmpty()) {
+            String names = missing.stream().map(type -> type.displayName).collect(Collectors.joining(", "));
+            player.sendMessage(fmt.error("Place every marker from this session before confirming. Missing: " + names + "."));
             return;
         }
         try {
@@ -133,6 +150,27 @@ public final class DistrictNpcPlanningService implements Listener {
             district.getId(), type.name(), location.getWorld().getName(), location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch(), type.minimumLevel, player.getUniqueId().toString(), System.currentTimeMillis());
     }
 
+    private Set<NpcPlanType> missingUnlockedTypes(DistrictData.District district) throws Exception {
+        Set<NpcPlanType> placedTypes = EnumSet.noneOf(NpcPlanType.class);
+        try (Connection connection = plugin.getDatabase().getConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT npc_type FROM district_npc_plans WHERE district_id=?")) {
+            statement.setInt(1, district.getId());
+            try (ResultSet results = statement.executeQuery()) {
+                while (results.next()) {
+                    try {
+                        placedTypes.add(NpcPlanType.valueOf(results.getString("npc_type")));
+                    } catch (IllegalArgumentException ignored) { }
+                }
+            }
+        }
+        int level = developmentLevel(district.getId());
+        Set<NpcPlanType> missing = EnumSet.noneOf(NpcPlanType.class);
+        for (NpcPlanType type : NpcPlanType.values()) {
+            if (type.minimumLevel <= level && !placedTypes.contains(type)) missing.add(type);
+        }
+        return missing;
+    }
+
     private int activateEligible(DistrictData.District district, String skin) {
         int level = developmentLevel(district.getId());
         int count = 0;
@@ -163,6 +201,14 @@ public final class DistrictNpcPlanningService implements Listener {
         private final String displayName; private final Material material; private final int minimumLevel; private final NpcData.ActionType actionType; private final String command;
         NpcPlanType(String displayName, Material material, int minimumLevel, NpcData.ActionType actionType, String command){this.displayName=displayName;this.material=material;this.minimumLevel=minimumLevel;this.actionType=actionType;this.command=command;}
     }
-    private static final class PlanSession { private final DistrictData.District district; private final Map<NpcPlanType,PlacedMarker> markers=new EnumMap<>(NpcPlanType.class); private PlanSession(DistrictData.District district){this.district=district;} }
+    private static final class PlanSession {
+        private final DistrictData.District district;
+        private final Set<NpcPlanType> requiredTypes;
+        private final Map<NpcPlanType,PlacedMarker> markers = new EnumMap<>(NpcPlanType.class);
+        private PlanSession(DistrictData.District district, Set<NpcPlanType> requiredTypes) {
+            this.district = district;
+            this.requiredTypes = EnumSet.copyOf(requiredTypes);
+        }
+    }
     private record PlacedMarker(Location location, BlockState original) { }
 }

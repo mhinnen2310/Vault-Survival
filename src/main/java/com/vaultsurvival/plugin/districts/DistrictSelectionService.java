@@ -258,6 +258,38 @@ public final class DistrictSelectionService implements Listener {
         player.sendMessage(fmt.info("Showing &e" + district.getName() + "&7 borders: &e" + claim.chunkCount() + " chunks &7(" + claim.minBlockX() + ", " + claim.minBlockZ() + " to " + claim.maxBlockX() + ", " + claim.maxBlockZ() + ")."));
     }
 
+    public void showMarketZoneBorders(Player player) {
+        DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
+        if (district == null || !districts.canCreateMerchantNpc(player.getUniqueId(), district)) {
+            player.sendMessage(fmt.error("Requires the MERCHANT, CO_MAYOR, or MAYOR district role."));
+            return;
+        }
+        try {
+            RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
+            String regionName = "district_market_" + district.getId();
+            RegionData.Region zone = regions.getAllRegions().stream()
+                .filter(region -> region.getName().equalsIgnoreCase(regionName))
+                .findFirst().orElse(null);
+            if (zone == null) {
+                player.sendMessage(fmt.error("This district does not have a market zone yet."));
+                return;
+            }
+            if (!zone.getWorldName().equals(player.getWorld().getName())) {
+                player.sendMessage(fmt.error("Travel to &e" + zone.getWorldName() + "&c to view this market zone."));
+                return;
+            }
+            DistrictData.ChunkClaim claim = new DistrictData.ChunkClaim(zone.getWorldName(),
+                Math.floorDiv(Math.min(zone.getX1(), zone.getX2()), 16),
+                Math.floorDiv(Math.min(zone.getZ1(), zone.getZ2()), 16),
+                Math.floorDiv(Math.max(zone.getX1(), zone.getX2()), 16),
+                Math.floorDiv(Math.max(zone.getZ1(), zone.getZ2()), 16));
+            drawRectangle(player, claim, Color.LIME, 2);
+            player.sendMessage(fmt.info("Showing &a" + district.getName() + " market-zone&7 borders: &e" + claim.chunkCount() + " chunks&7."));
+        } catch (RuntimeException error) {
+            player.sendMessage(fmt.error("Market-zone borders are unavailable right now."));
+        }
+    }
+
     public void startOverlay() {
         if (overlayTask != null) return;
         overlayTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {

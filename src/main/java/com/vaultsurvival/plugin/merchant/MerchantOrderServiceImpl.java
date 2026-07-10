@@ -62,6 +62,16 @@ public class MerchantOrderServiceImpl implements MerchantOrderService {
             merchant.sendMessage(fmt.error("Requires MERCHANT, CO_MAYOR, or MAYOR in an active district."));
             return null;
         }
+        int activeLimit = Math.max(1, plugin.getConfigManager().getConfig().getInt("merchant.max_active_orders", 10));
+        long activeOrders = orders.values().stream()
+            .filter(order -> order.getMerchantUuid().equals(merchant.getUniqueId()))
+            .filter(order -> order.getStatus() == MerchantOrderData.OrderStatus.ACTIVE
+                || order.getStatus() == MerchantOrderData.OrderStatus.PARTIALLY_FILLED)
+            .count();
+        if (activeOrders >= activeLimit) {
+            merchant.sendMessage(fmt.error("You already have the maximum of " + activeLimit + " active buy orders."));
+            return null;
+        }
         ItemStack heldItem = merchant.getInventory().getItemInMainHand();
         if (heldItem.getType().isAir()) {
             merchant.sendMessage(fmt.error("You must hold the item you want to buy in your hand."));
@@ -73,12 +83,19 @@ public class MerchantOrderServiceImpl implements MerchantOrderService {
             return null;
         }
 
-        if (requiredQuantity <= 0 || requiredQuantity > 10000) {
-            merchant.sendMessage(fmt.error("Quantity must be between 1 and 10,000."));
+        int maximumQuantity = plugin.getConfigManager().isStaffSandbox() ? 1_000_000 : 10_000;
+        if (requiredQuantity <= 0 || requiredQuantity > maximumQuantity) {
+            merchant.sendMessage(fmt.error("Quantity must be between 1 and " + String.format("%,d", maximumQuantity) + "."));
             return null;
         }
 
-        long totalEscrow = pricePerItem * requiredQuantity;
+        long totalEscrow;
+        try {
+            totalEscrow = Math.multiplyExact(pricePerItem, (long) requiredQuantity);
+        } catch (ArithmeticException overflow) {
+            merchant.sendMessage(fmt.error("Price multiplied by quantity is too large."));
+            return null;
+        }
         long playerCash = currency.getPlayerCashTotal(merchant.getUniqueId());
         if (playerCash < totalEscrow) {
             merchant.sendMessage(fmt.error("You don't have enough cash for the escrow. Need: &6" +

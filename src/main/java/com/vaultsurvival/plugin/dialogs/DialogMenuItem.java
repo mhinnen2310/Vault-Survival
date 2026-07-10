@@ -49,10 +49,6 @@ public class DialogMenuItem {
             material, false, true, explanation);
     }
 
-    public static DialogMenuItem placeholder(String label, String description, Material material) {
-        return locked(label, description, "This service is planned for a later sprint.", material);
-    }
-
     public DialogMenuItem lockedCopy(String explanation) {
         return new DialogMenuItem(label, description, "vsmenu locked " + sanitize(explanation), permission,
             material, adminSensitive, true, explanation);

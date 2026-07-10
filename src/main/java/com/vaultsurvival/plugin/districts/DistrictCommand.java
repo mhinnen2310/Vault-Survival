@@ -1,11 +1,15 @@
 package com.vaultsurvival.plugin.districts;
 
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
+import com.vaultsurvival.plugin.access.AccessService;
 import com.vaultsurvival.plugin.area.CurrentAreaContext;
 import com.vaultsurvival.plugin.area.CurrentAreaService;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import org.bukkit.Bukkit;
+import org.bukkit.HeightMap;
+import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -42,10 +46,14 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     private final DistrictNpcPlanningService npcPlanning;
 
     public DistrictCommand(VaultSurvivalPlugin plugin) {
+        this(plugin, new DistrictDevelopmentService(plugin));
+    }
+
+    public DistrictCommand(VaultSurvivalPlugin plugin, DistrictDevelopmentService development) {
         this.plugin = plugin;
         this.districtService = plugin.getServiceRegistry().get(DistrictService.class);
         this.fmt = plugin.getMessageFormatter();
-        this.development = new DistrictDevelopmentService(plugin);
+        this.development = development;
         this.selection = plugin.getServiceRegistry().get(DistrictSelectionService.class);
         this.npcPlanning = plugin.getServiceRegistry().get(DistrictNpcPlanningService.class);
     }
@@ -65,6 +73,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "expand" -> handleExpansion(sender);
             case "borders", "border" -> handleBorders(sender);
             case "marketzone", "market" -> handleMarketZone(sender, args);
+            case "teleport", "tp" -> handleTeleport(sender, args);
             case "npcs", "npc" -> handleNpcs(sender, args);
             case "message", "messages" -> handleDistrictMessage(sender, args);
             case "chat" -> handleDistrictChat(sender, args);
@@ -146,8 +155,62 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         if (args.length >= 2 && args[1].equalsIgnoreCase("confirm")) selection.confirm(player);
         else if (args.length >= 2 && args[1].equalsIgnoreCase("cancel")) selection.cancel(player);
         else if (args.length >= 2 && (args[1].equalsIgnoreCase("status") || args[1].equalsIgnoreCase("selection"))) selection.showStatus(player);
+        else if (args.length >= 2 && (args[1].equalsIgnoreCase("borders") || args[1].equalsIgnoreCase("border") || args[1].equalsIgnoreCase("show"))) selection.showMarketZoneBorders(player);
         else selection.startMarketZone(player);
         return true;
+    }
+
+    private boolean handleTeleport(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        if (!isStaff(player)) { player.sendMessage(fmt.permissionDenied()); return true; }
+        if (args.length < 2) {
+            player.sendMessage(fmt.error("Usage: /district teleport <id|name>"));
+            return true;
+        }
+        String query = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+        DistrictData.District district = null;
+        int id = parseInt(query);
+        if (id >= 0) district = districtService.getDistrict(id);
+        if (district == null) {
+            district = districtService.getAllDistricts().stream()
+                .filter(candidate -> candidate.getName().equalsIgnoreCase(query))
+                .findFirst().orElse(null);
+        }
+        if (district == null || district.getStatus() == DistrictData.DistrictStatus.DISBANDED) {
+            player.sendMessage(fmt.error("District not found: " + query));
+            return true;
+        }
+        World world = Bukkit.getWorld(district.getWorldName());
+        if (world == null) {
+            player.sendMessage(fmt.error("District world is not loaded: " + district.getWorldName()));
+            return true;
+        }
+        int surfaceY = world.getHighestBlockYAt(district.getCenterX(), district.getCenterZ(), HeightMap.MOTION_BLOCKING_NO_LEAVES) + 1;
+        if (surfaceY >= world.getMaxHeight()) {
+            player.sendMessage(fmt.error("No safe surface destination was found for " + district.getName() + "."));
+            return true;
+        }
+        Location destination = new Location(world, district.getCenterX() + 0.5, surfaceY, district.getCenterZ() + 0.5,
+            player.getLocation().getYaw(), player.getLocation().getPitch());
+        try { plugin.getServiceRegistry().get(com.vaultsurvival.plugin.security.StaffAlertService.class).pushReturn(player); }
+        catch (RuntimeException ignored) { }
+        if (!player.teleport(destination)) {
+            player.sendMessage(fmt.error("Teleport to " + district.getName() + " failed."));
+            return true;
+        }
+        plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "DISTRICT_STAFF_TELEPORT", "DISTRICT",
+            String.valueOf(district.getId()), "world=" + district.getWorldName() + " x=" + district.getCenterX() + " z=" + district.getCenterZ());
+        player.sendMessage(fmt.success("Teleported to &e" + district.getName() + "&a."));
+        return true;
+    }
+
+    private boolean isStaff(Player player) {
+        try {
+            return plugin.getServiceRegistry().get(AccessService.class).isStaff(player.getUniqueId())
+                || player.hasPermission("vs.district.teleport");
+        } catch (RuntimeException ignored) {
+            return player.hasPermission("vs.district.teleport") || player.hasPermission("vs.district.admin");
+        }
     }
 
     private boolean handleNpcs(CommandSender sender, String[] args) {
@@ -779,6 +842,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("/district borders &8- Show nearby district chunk borders"));
         sender.sendMessage(fmt.info("/district expand &8- Expand your level-gated district claim"));
         sender.sendMessage(fmt.info("/district marketzone [confirm|cancel] &8- Select the merchant market zone"));
+        sender.sendMessage(fmt.info("/district marketzone borders &8- Show your district's market-zone borders"));
         sender.sendMessage(fmt.info("/district npcs <start|confirm|cancel|activate> &8- Plan and unlock district NPCs"));
         sender.sendMessage(fmt.info("/district message <welcome|leave> <text> &8- Mayor-only area messages"));
         sender.sendMessage(fmt.info("/district chat prefix <text> &8- Mayor-only district chat prefix"));
@@ -809,12 +873,15 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(fmt.info("/district reject <id> <reason> &8- Reject application"));
             sender.sendMessage(fmt.info("/district applications &8- Pending applications"));
         }
+        if (sender instanceof Player player && isStaff(player)) {
+            sender.sendMessage(fmt.info("/district teleport <id|name> &8- Teleport to a district"));
+        }
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
-            return Arrays.asList("apply", "confirm", "cancel", "selection", "chunks", "expand", "borders", "marketzone", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
+            return Arrays.asList("apply", "confirm", "cancel", "selection", "chunks", "expand", "borders", "marketzone", "teleport", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
                 "role", "permissions", "members", "deposit", "withdraw", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
@@ -842,7 +909,16 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
                 .filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("marketzone")) {
-            return List.of("confirm", "cancel", "status").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+            return List.of("borders", "confirm", "cancel", "status").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+        }
+        if (args.length >= 2 && (args[0].equalsIgnoreCase("teleport") || args[0].equalsIgnoreCase("tp"))
+            && sender instanceof Player player && isStaff(player)) {
+            String query = String.join(" ", Arrays.copyOfRange(args, 1, args.length)).toLowerCase(Locale.ROOT);
+            return districtService.getAllDistricts().stream()
+                .filter(district -> district.getStatus() != DistrictData.DistrictStatus.DISBANDED)
+                .flatMap(district -> java.util.stream.Stream.of(String.valueOf(district.getId()), district.getName()))
+                .filter(value -> value.toLowerCase(Locale.ROOT).startsWith(query))
+                .toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("npcs")) {
             return List.of("start", "confirm", "cancel", "activate").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();

@@ -16,6 +16,21 @@ server:
   # Enable debug logging (verbose - only enable when troubleshooting)
   debug: false
 
+# Dedicated staff sandbox. Hard isolation also requires the separate Paper
+# runtime from staff-test-server; never enable this on the production process.
+staffSandbox:
+  enabled: false
+  expectedWorld: "staff_test"
+  allowedUuids: []
+  transfer:
+    enabled: true
+    # These addresses are sent to the Minecraft client. Change them to public
+    # hostnames when staff do not run Minecraft on the server machine itself.
+    testHost: "127.0.0.1"
+    testPort: 25566
+    productionHost: "127.0.0.1"
+    productionPort: 25565
+
 # Spawn City — the Kingdom capital
 spawn:
   # Name of the spawn city (configurable)
@@ -142,10 +157,18 @@ security:
     scoreDecayMinutes: 30
     movementMaxDistanceSquared: 36
     fastBreakMinIntervalMs: 45
+    combatMaxReachSquared: 22
+    combatMinAttackIntervalMs: 35
+    liveAlertMinimumScore: 3
   antiXray:
     managedByPaper: true
     requireEngineMode: 2
     hideLavaCaves: true
+  suspiciousPayout:
+    minimumAmount: 25000
+    windowMillis: 600000
+    burstCount: 5
+    burstTotal: 50000
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ DISTRICTS                                                                │
@@ -287,6 +310,8 @@ market:
   tax_percent: 5.0
   # Default listing duration in hours
   default_listing_duration_hours: 48
+  # Maximum custom listing duration accepted by commands.
+  max_listing_duration_hours: 168
 
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ BREACH                                                                   │

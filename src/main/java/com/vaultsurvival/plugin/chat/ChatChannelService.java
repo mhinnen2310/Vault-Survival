@@ -5,6 +5,7 @@ import com.vaultsurvival.plugin.core.ConfigManager;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.districts.DistrictData;
 import com.vaultsurvival.plugin.districts.DistrictService;
+import com.vaultsurvival.plugin.workflow.CivicWorkflowService;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -98,7 +99,7 @@ public class ChatChannelService {
             case GLOBAL, HELP -> recipients.addAll(Bukkit.getOnlinePlayers());
             case LOCAL -> {
                 int radius = Math.max(1, config.getChatLocalRadius());
-                double maxDistanceSquared = radius * radius;
+                double maxDistanceSquared = (double) radius * radius;
                 for (Player player : Bukkit.getOnlinePlayers()) {
                     if (player.getWorld().equals(sender.getWorld())
                         && player.getLocation().distanceSquared(sender.getLocation()) <= maxDistanceSquared) {
@@ -119,13 +120,15 @@ public class ChatChannelService {
             case POLICE -> addRoleRecipients(sender, recipients, POLICE_ROLES);
             case MERCHANT -> addRoleRecipients(sender, recipients, MERCHANT_ROLES);
             case ALLY -> {
-                playerPlaceholder(sender, "Ally diplomacy is not active yet; message stayed in your district.");
                 DistrictData.District district = getDistrict(sender);
                 if (district != null) {
+                    Set<Integer> alliedIds = Set.of(district.getId());
+                    try {
+                        alliedIds = plugin.getServiceRegistry().get(CivicWorkflowService.class).alliedDistrictIds(district.getId());
+                    } catch (RuntimeException ignored) { }
                     for (Player player : Bukkit.getOnlinePlayers()) {
-                        if (isDistrictRecipient(player, district)) {
-                            recipients.add(player);
-                        }
+                        DistrictData.District recipientDistrict = getDistrict(player);
+                        if (recipientDistrict != null && alliedIds.contains(recipientDistrict.getId()) && canUseDistrict(player)) recipients.add(player);
                     }
                 }
             }
@@ -161,7 +164,7 @@ public class ChatChannelService {
         }
         return switch (channel) {
             case DISTRICT -> canUseDistrict(player) ? null : "District chat requires district membership.";
-            case ALLY -> canUseDistrict(player) ? null : "Ally chat requires district membership. Diplomacy is a placeholder.";
+            case ALLY -> canUseDistrict(player) ? null : "Ally chat requires district membership.";
             case POLICE -> hasAnyRole(player, POLICE_ROLES) ? null : "Police chat requires POLICE, WARDEN, CO_MAYOR, or MAYOR.";
             case MERCHANT -> hasAnyRole(player, MERCHANT_ROLES) ? null : "Merchant chat requires MERCHANT, TREASURER, CO_MAYOR, or MAYOR.";
             case STAFF -> hasStaffChat(player) ? null : "Staff chat requires vs.staff.chat.";
@@ -235,10 +238,6 @@ public class ChatChannelService {
 
     private boolean hasStaffSpy(Player player) {
         return player.hasPermission("vs.staff.spy") || player.hasPermission("vs.admin");
-    }
-
-    private void playerPlaceholder(Player player, String message) {
-        player.sendMessage(fmt.warn(message));
     }
 
     public static String channelList() {

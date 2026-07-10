@@ -1,77 +1,54 @@
-# Vault Survival Plugin
+# Vault Survival
 
-## Overview
-This plugin enhances the survival gameplay experience on your Minecraft server. It provides essential commands for managing player health, hunger, and overall status.
+Vault Survival is a Paper/Java 21 survival gamemode built around physical cash, breachable vaults, player districts, local law and policing, merchant trade, rail travel, jobs, NPCs, and audited staff operations.
 
-## Features Implemented
+## Main systems
 
-### 1. Heal Command
-- **Command:** `/heal`
-- **Permission:** `vaultsurvival.heal`
-- **Description:** Restores full health to the player who executes the command
-- **Usage:**
-  - `/heal` - Heals the executing player
-  - `/heal all` - Heals all online players (requires admin permission)
+- Server-authoritative physical cash with traceable UUIDs, transaction history, escrow, lockers, and counterfeit handling.
+- Tiered vaults with access control, breach limits, lockdown, repairs, and persistent audit data.
+- Whole-chunk districts with roles, treasury, daily laws, development, maintenance, jobs, diplomacy, join requests, market zones, stations, and level-gated NPCs.
+- Auction Hall listings, merchant buy orders, merchant NPC shops, physical payouts, and enforced active-order limits.
+- Spawn City jobs, district jobs, claims, completion history, disputes, contracts, and Kingdom Support workflow.
+- Rail station applications, routes, tickets, live journeys, revenue logs, and travel-event logs.
+- Native Paper dialogs where supported, with inventory/clickable fallback menus and per-player style preferences.
+- Persistent player reports and staff alert queues with assignment, resolution, teleports, and audit logging.
+- Conservative signal-only anti-cheat scoring for movement, combat, breaking, inventory exploits, and suspicious payouts. It never auto-bans.
 
-### 2. Hunger Command
-- **Command:** `/hunger [amount]`
-- **Permission:** `vaultsurvival.hunger`
-- **Description:** Modifies hunger level for the executing player
-- **Usage:**
-  - `/hunger` - Adds 10 hunger points (default)
-  - `/hunger 5` - Adds 5 hunger points
-  - `/hunger -5` - Removes 5 hunger points
+## Build
 
-### 3. Status Command
-- **Command:** `/status`
-- **Permission:** `vaultsurvival.status`
-- **Description:** Displays the current health and hunger levels of the player
-- **Usage:**
-  - `/status` - Shows current status information
+Requirements: Java 21 and PowerShell or a compatible shell.
 
-## Installation Instructions
+```powershell
+.\mvnw.cmd clean package
+```
 
-1. Build the plugin using Maven:
-   ```
-   mvn clean package
-   ```
+The release artifact is `target/VaultSurvival.jar`.
 
-2. Place the generated `.jar` file in your server's `plugins` directory
+## Install
 
-3. Restart or reload your Minecraft server:
-   ```
-   /reload
-   ```
+1. Stop the Paper server.
+2. Copy `target/VaultSurvival.jar` to the server's `plugins` directory.
+3. Start Paper and verify `/vs version`, `/vs configcheck`, and `/vs audit`.
+4. Configure database-backed ranks with `/rank` and review `permissions.yml`.
 
-4. The plugin will automatically enable and register commands
+The plugin uses its own SQLite database under `plugins/VaultSurvival` and initializes compatible schema additions automatically.
 
-## Permissions
-- `vaultsurvival.heal` - Access to heal command
-- `vaultsurvival.hunger` - Access to hunger command  
-- `vaultsurvival.status` - Access to status command
+## Staff sandbox
 
-## Testing Instructions
+`staff-test-server` provisions a second Paper process with its own `staff_test` world, playerdata, statistics, advancements, inventories, plugin database, economy, districts, markets, and audit data. Production staff enter it only from active staffmode with `/staffmode test` and return with `/staffmode return`.
 
-1. Join your Minecraft server with a player
-2. Use the commands listed above to test functionality:
-   - `/status` - Verify current health and hunger values
-   - `/heal` - Confirm health is restored to full
-   - `/hunger` - Confirm hunger increases appropriately
-   - `/hunger -5` - Confirm hunger decreases appropriately
+```powershell
+.\staff-test-server\start.ps1 -Staff "uuid:MinecraftName"
+```
 
-## Troubleshooting
+See `staff-test-server/README.md` for fail-closed allowlisting, remote transfers, and reset instructions.
 
-If commands are not working:
-1. Check server console for error messages
-2. Ensure the plugin is properly installed in the plugins folder
-3. Verify you have the necessary permissions to use the commands
-4. Check that your server version is compatible (requires Spigot 1.19+)
+## Documentation
 
-## Future Development
+- `docs/COMMANDS.md` — complete command reference.
+- `docs/OPEN_PLACEHOLDERS.md` — complete 45-item closure audit; current open count is zero.
+- `CHANGELOG.md` — release history and feature status.
 
-This initial version provides core survival features. Further development could include:
-- Crafting systems
-- Resource tracking
-- Weather control
-- Custom items and blocks
-- Achievement system
+## Release
+
+Version `1.0.28` targets the configured Paper API and Java 21 runtime. GitHub release assets use the shaded `VaultSurvival.jar` produced by Maven.

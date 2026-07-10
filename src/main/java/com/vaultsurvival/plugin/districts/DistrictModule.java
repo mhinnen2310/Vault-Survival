@@ -14,6 +14,7 @@ public class DistrictModule extends Module {
     private DistrictServiceImpl districtService;
     private DistrictSelectionService selectionService;
     private DistrictNpcPlanningService npcPlanningService;
+    private DistrictDevelopmentService developmentService;
 
     public DistrictModule(VaultSurvivalPlugin plugin) {
         super(plugin);
@@ -37,6 +38,7 @@ public class DistrictModule extends Module {
         plugin.getServiceRegistry().register(DistrictSelectionService.class, selectionService);
         npcPlanningService = new DistrictNpcPlanningService(plugin, districtService);
         plugin.getServiceRegistry().register(DistrictNpcPlanningService.class, npcPlanningService);
+        developmentService = new DistrictDevelopmentService(plugin);
         plugin.getLogger().info("District service registered");
     }
 
@@ -44,11 +46,12 @@ public class DistrictModule extends Module {
     public void onEnable() {
         districtService.loadAll();
         districtService.startLawReloadScheduler();
+        developmentService.startMaintenanceScheduler();
         selectionService.startOverlay();
         plugin.getServer().getPluginManager().registerEvents(selectionService, plugin);
         plugin.getServer().getPluginManager().registerEvents(npcPlanningService, plugin);
 
-        var cmd = new DistrictCommand(plugin);
+        var cmd = new DistrictCommand(plugin, developmentService);
         plugin.getCommand("district").setExecutor(cmd);
         plugin.getCommand("district").setTabCompleter(cmd);
     }
@@ -56,6 +59,7 @@ public class DistrictModule extends Module {
     @Override
     public void onDisable() {
         districtService.stopLawReloadScheduler();
+        developmentService.stopMaintenanceScheduler();
         selectionService.shutdown();
         plugin.getServiceRegistry().unregister(DistrictNpcPlanningService.class);
         plugin.getServiceRegistry().unregister(DistrictSelectionService.class);

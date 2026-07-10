@@ -57,15 +57,8 @@ public class BreachServiceImpl implements BreachService {
 
     // Config constants
     private static final int TUMBLER_SLOTS = 5;
-    private static final int TUMBLER_MAX_ATTEMPTS = 3;
-    private static final int TUMBLER_SPEED_TICKS = 6; // ticks between indicator moves
-    private static final int PRESSURE_BALANCE_DURATION_TICKS = 80; // ~4 seconds to hold
     private static final int PRESSURE_TICK_INTERVAL = 2; // pressure changes every N ticks
     private static final float PRESSURE_SPEED = 0.04f;
-    private static final int DIAL_TIME_TICKS = 200; // ~10 seconds for dial
-    private static final int DIAL_MAX_ATTEMPTS = 5;
-    private static final int MAX_BREACH_DISTANCE = 8; // blocks from vault
-    private static final int TELEPORT_COOLDOWN_SECONDS = 30;
 
     // GUI slot layouts
     private static final int GUI_ROWS = 5;
@@ -179,9 +172,10 @@ public class BreachServiceImpl implements BreachService {
         }
 
         // Check proximity
+        int maxDistance = plugin.getConfigManager().getBreachMaxDistance();
         if (thief.getLocation().getWorld() != vaultLoc.getWorld() ||
-            thief.getLocation().distance(vaultLoc) > MAX_BREACH_DISTANCE) {
-            thief.sendMessage(fmt.error("You must be within " + MAX_BREACH_DISTANCE + " blocks of the vault."));
+            thief.getLocation().distance(vaultLoc) > maxDistance) {
+            thief.sendMessage(fmt.error("You must be within " + maxDistance + " blocks of the vault."));
             return false;
         }
 
@@ -294,7 +288,7 @@ public class BreachServiceImpl implements BreachService {
         breach.setTumblerTargetSlot(random.nextInt(TUMBLER_SLOTS));
         breach.setTumblerCurrentSlot(random.nextInt(TUMBLER_SLOTS));
         breach.setTumblerTick(0);
-        breach.setTumblerAttempts(TUMBLER_MAX_ATTEMPTS);
+        breach.setTumblerAttempts(plugin.getConfigManager().getBreachTumblerMaxAttempts());
 
         // Show status bar at top
         fillStatusRow(inv, breach);
@@ -317,7 +311,7 @@ public class BreachServiceImpl implements BreachService {
 
             // Advance tumbler indicator
             breach.setTumblerTick(breach.getTumblerTick() + 1);
-            if (breach.getTumblerTick() >= TUMBLER_SPEED_TICKS) {
+            if (breach.getTumblerTick() >= plugin.getConfigManager().getBreachTumblerSpeedTicks()) {
                 breach.setTumblerTick(0);
                 int next = (breach.getTumblerCurrentSlot() + 1) % TUMBLER_SLOTS;
                 breach.setTumblerCurrentSlot(next);
@@ -425,7 +419,7 @@ public class BreachServiceImpl implements BreachService {
     private void setupPressure(Player thief, BreachData.ActiveBreach breach, Inventory inv) {
         breach.setPressureLevel(0.3f + random.nextFloat() * 0.4f); // start at 30-70%
         breach.setPressureMovingUp(random.nextBoolean());
-        breach.setPressureTicksRemaining(PRESSURE_BALANCE_DURATION_TICKS);
+        breach.setPressureTicksRemaining(plugin.getConfigManager().getBreachPressureDurationTicks());
         breach.setPressureScore(0.5); // start at middle
 
         // Cancel old task, start new one
@@ -567,8 +561,8 @@ public class BreachServiceImpl implements BreachService {
         };
         breach.setDialTarget(target);
         breach.setDialCurrent(new int[]{5, 5, 5});
-        breach.setDialAttemptsRemaining(DIAL_MAX_ATTEMPTS);
-        breach.setDialTicksRemaining(DIAL_TIME_TICKS);
+        breach.setDialAttemptsRemaining(plugin.getConfigManager().getBreachDialMaxAttempts());
+        breach.setDialTicksRemaining(plugin.getConfigManager().getBreachDialTimeTicks());
 
         // Cancel old task
         BukkitTask oldTask = breachTasks.remove(breach.getThiefUuid());
@@ -784,7 +778,8 @@ public class BreachServiceImpl implements BreachService {
         }
 
         // Apply teleport cooldown
-        applyTeleportCooldown(breach.getThiefUuid(), TELEPORT_COOLDOWN_SECONDS);
+        int teleportCooldownSeconds = plugin.getConfigManager().getBreachEscapeCooldownSeconds();
+        applyTeleportCooldown(breach.getThiefUuid(), teleportCooldownSeconds);
 
         // Update DB record
         long balanceAfter = vaults.getBalance(breach.getVaultUuid());
@@ -803,7 +798,9 @@ public class BreachServiceImpl implements BreachService {
             plugin.getConfigManager().getCurrencyName(),
             plugin.getConfigManager().getCurrencyNamePlural())));
         thief.sendMessage(fmt.info("Vault is now in &clockdown&7."));
-        thief.sendMessage(fmt.warn("You cannot teleport for " + TELEPORT_COOLDOWN_SECONDS + " seconds. Escape!"));
+        if (teleportCooldownSeconds > 0) {
+            thief.sendMessage(fmt.warn("You cannot teleport for " + teleportCooldownSeconds + " seconds. Escape!"));
+        }
     }
 
     // ========================================================================
@@ -818,7 +815,7 @@ public class BreachServiceImpl implements BreachService {
             vault.getX(), vault.getY(), vault.getZ()
         );
         return player.getLocation().getWorld() == vaultLoc.getWorld() &&
-               player.getLocation().distance(vaultLoc) <= MAX_BREACH_DISTANCE;
+               player.getLocation().distance(vaultLoc) <= plugin.getConfigManager().getBreachMaxDistance();
     }
 
     private void fillStatusRow(Inventory inv, BreachData.ActiveBreach breach) {

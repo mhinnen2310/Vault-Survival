@@ -87,7 +87,7 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
         try {
             File folder = new File(plugin.getDataFolder(), "debug-bundles"); folder.mkdirs();
             File output = new File(folder, "vs-debug-" + System.currentTimeMillis() + ".txt");
-            String body = "Generated: " + Instant.now() + "\nVersion: " + plugin.getDescription().getVersion() + "\nDatabase: " + plugin.getDatabase().isConnected() + "\nModules:\n" + String.join("\n", plugin.getModuleManager().getModuleNames()) + "\nConfig check: run /vs configcheck\nKnown limits: report/alert scoring hooks remain placeholders.\n";
+            String body = "Generated: " + Instant.now() + "\nVersion: " + plugin.getDescription().getVersion() + "\nDatabase: " + plugin.getDatabase().isConnected() + "\nModules:\n" + String.join("\n", plugin.getModuleManager().getModuleNames()) + "\nConfig check: run /vs configcheck\nOperational queues: /civic reports and /staffalerts list\n";
             Files.writeString(output.toPath(), body, StandardCharsets.UTF_8);
             sender.sendMessage(fmt.success("Debug bundle written: " + output.getName()));
         } catch (Exception e) { sender.sendMessage(fmt.error("Could not write debug bundle.")); }
