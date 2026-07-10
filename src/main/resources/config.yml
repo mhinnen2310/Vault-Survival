@@ -401,6 +401,19 @@ updates:
   githubRepo: "Vault-Survival"
   assetName: "VaultSurvival.jar"
 
+districtTreasury:
+  enabled: true
+  maxVaultsPerDistrict: 3
+  requireInsideDistrict: true
+  interactDistanceBlocks: 6
+  allowedRoles: [MAYOR, CO_MAYOR, TREASURER]
+  concealLocationsFromUnauthorized: true
+  requireEmptyBeforeRemoval: true
+  legacyRemoteBankingEnabled: false
+
+spawnCity:
+  economyMode: ADMIN_FUNDED
+
 # Native Minecraft dialogs / fallback menus
 dialogs:
   enabled: true

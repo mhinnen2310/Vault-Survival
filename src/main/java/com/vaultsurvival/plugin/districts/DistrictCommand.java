@@ -5,11 +5,16 @@ import com.vaultsurvival.plugin.access.AccessService;
 import com.vaultsurvival.plugin.area.CurrentAreaContext;
 import com.vaultsurvival.plugin.area.CurrentAreaService;
 import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
+import com.vaultsurvival.plugin.dialogs.DialogMenuType;
+import com.vaultsurvival.plugin.dialogs.DialogService;
+import org.bukkit.Material;
 import org.bukkit.Bukkit;
 import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -44,6 +49,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     private final DistrictDevelopmentService development;
     private final DistrictSelectionService selection;
     private final DistrictNpcPlanningService npcPlanning;
+    private final DistrictTreasuryService treasuries;
 
     public DistrictCommand(VaultSurvivalPlugin plugin) {
         this(plugin, new DistrictDevelopmentService(plugin));
@@ -56,6 +62,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         this.development = development;
         this.selection = plugin.getServiceRegistry().get(DistrictSelectionService.class);
         this.npcPlanning = plugin.getServiceRegistry().get(DistrictNpcPlanningService.class);
+        this.treasuries = plugin.getServiceRegistry().get(DistrictTreasuryService.class);
     }
 
     @Override
@@ -88,6 +95,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "members" -> handleMembers(sender);
             case "deposit" -> handleDeposit(sender, args);
             case "withdraw" -> handleWithdraw(sender, args);
+            case "treasury" -> handleTreasury(sender, args);
             case "laws" -> handleLaws(sender, args);
             case "law" -> handleLaw(sender, args);
             case "jobs" -> handleJobs(sender);
@@ -501,30 +509,62 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleDeposit(CommandSender sender, String[] args) {
-        if (!(sender instanceof Player player)) return true;
-        if (args.length < 2) {
-            sender.sendMessage(fmt.error("Usage: /district deposit <amount>"));
-            return true;
-        }
-        var d = districtService.getPlayerDistrict(player.getUniqueId());
-        if (d == null) { sender.sendMessage(fmt.error("You are not in a district.")); return true; }
-        long amount = parseLong(args[1]);
-        if (amount <= 0) { sender.sendMessage(fmt.error("Invalid amount.")); return true; }
-        districtService.depositTreasury(player, d.getId(), amount);
+        sender.sendMessage(fmt.error("Remote treasury banking is disabled. Use a registered physical treasury vault."));
         return true;
     }
 
     private boolean handleWithdraw(CommandSender sender, String[] args) {
-        if (!(sender instanceof Player player)) return true;
-        if (args.length < 2) {
-            sender.sendMessage(fmt.error("Usage: /district withdraw <amount>"));
-            return true;
+        sender.sendMessage(fmt.error("Remote treasury banking is disabled. Stand at a registered physical treasury vault."));
+        return true;
+    }
+
+    private boolean handleTreasury(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        if (treasuries == null) { sender.sendMessage(fmt.error("Treasury service unavailable.")); return true; }
+        if (args.length < 2) { sender.sendMessage(fmt.info("Use /district treasury <create|remove|list|balance>. Deposits and withdrawals happen by interacting with the vault.")); return true; }
+        var district = districtService.getPlayerDistrict(player.getUniqueId());
+        if (district == null) { sender.sendMessage(fmt.error("You are not in a district.")); return true; }
+        DistrictTreasuryService.Result result;
+        switch (args[1].toLowerCase(Locale.ROOT)) {
+            case "create" -> {
+                Block target = player.getTargetBlockExact(6);
+                result = treasuries.create(player, target);
+            }
+            case "remove" -> {
+                Block target = player.getTargetBlockExact(6);
+                var vault = target == null ? null : treasuries.getVault(target);
+                result = vault == null ? DistrictTreasuryService.Result.error("Look directly at the registered vault to remove it.") : treasuries.remove(player, vault.vaultUuid());
+            }
+            case "list" -> {
+                if (!districtService.canManageTreasury(player.getUniqueId(), district)) { result = DistrictTreasuryService.Result.error("Requires MAYOR, CO_MAYOR, or TREASURER."); break; }
+                int count = treasuries.getVaults(district.getId()).size();
+                result = DistrictTreasuryService.Result.ok("This district has " + count + " registered physical treasury vault(s). Locations are intentionally hidden.", count, null);
+            }
+            case "balance" -> {
+                if (!districtService.canManageTreasury(player.getUniqueId(), district)) { result = DistrictTreasuryService.Result.error("Requires MAYOR, CO_MAYOR, or TREASURER."); break; }
+                long balance = treasuries.getDistrictBalance(district.getId());
+                result = DistrictTreasuryService.Result.ok("Live physical treasury balance: " + balance + ".", balance, null);
+            }
+            case "open", "deposit", "depositall", "withdraw" -> {
+                if (args.length < 3) { result = DistrictTreasuryService.Result.error("This action must originate at a physical treasury vault."); break; }
+                UUID vaultId;
+                try { vaultId = UUID.fromString(args[2]); } catch (IllegalArgumentException ex) { result = DistrictTreasuryService.Result.error("Invalid vault reference."); break; }
+                var vault = treasuries.getVault(vaultId);
+                if (vault == null || !treasuries.isNear(player, vault)) { result = DistrictTreasuryService.Result.error("Stand next to that physical treasury vault."); break; }
+                if (args[1].equalsIgnoreCase("open")) result = DistrictTreasuryService.Result.ok("Physical treasury refreshed.", treasuries.getVaultBalance(vaultId), vault);
+                else if (args[1].equalsIgnoreCase("deposit")) result = treasuries.depositHeld(player, vaultId);
+                else if (args[1].equalsIgnoreCase("depositall")) result = treasuries.depositAll(player, vaultId);
+                else {
+                    if (args.length < 4) { result = DistrictTreasuryService.Result.error("Choose a withdrawal amount."); break; }
+                    long amount = args[3].equalsIgnoreCase("all") ? treasuries.getVaultBalance(vaultId) : parseLong(args[3]);
+                    result = amount <= 0 ? DistrictTreasuryService.Result.error("Withdrawal amount must be positive.") : treasuries.withdraw(player, vaultId, amount);
+                }
+            }
+            default -> result = DistrictTreasuryService.Result.error("Use /district treasury <create|remove|list|balance>.");
         }
-        var d = districtService.getPlayerDistrict(player.getUniqueId());
-        if (d == null) { sender.sendMessage(fmt.error("You are not in a district.")); return true; }
-        long amount = parseLong(args[1]);
-        if (amount <= 0) { sender.sendMessage(fmt.error("Invalid amount.")); return true; }
-        districtService.withdrawTreasury(player, d.getId(), amount);
+        if (result.vault() != null && plugin.getServiceRegistry().has(DialogService.class)) {
+            new DistrictTreasuryListener(plugin, treasuries).open(player, result.vault(), result.message());
+        } else sender.sendMessage(result.success() ? fmt.success(result.message()) : fmt.error(result.message()));
         return true;
     }
 
@@ -552,6 +592,11 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleLaws(CommandSender sender, String[] args) {
+        if (sender instanceof Player player && plugin.getServiceRegistry().has(DialogService.class)) {
+            plugin.getServiceRegistry().get(DialogService.class).openMenu(player,
+                args.length >= 2 && args[1].equalsIgnoreCase("pending") ? DialogMenuType.DISTRICT_PENDING_LAWS : DialogMenuType.DISTRICT_LAWS);
+            return true;
+        }
         DistrictData.District d = null;
         if (sender instanceof Player player) {
             d = districtService.getPlayerDistrict(player.getUniqueId());
@@ -604,6 +649,10 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleJobs(CommandSender sender) {
         if (!(sender instanceof Player player)) return true;
+        if (plugin.getServiceRegistry().has(DialogService.class)) {
+            plugin.getServiceRegistry().get(DialogService.class).openMenu(player, DialogMenuType.DISTRICT_JOBS);
+            return true;
+        }
         DistrictJobService jobs = getJobService(sender);
         if (jobs == null) return true;
         var d = districtService.getPlayerDistrict(player.getUniqueId());
@@ -656,7 +705,12 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         var job = jobs.createJob(player, d, type, title, title, reward, hours, item, amount, null, null, null, manual);
-        if (job != null) sender.sendMessage(fmt.success("Created active district job #" + job.getId() + " with treasury escrow."));
+        if (job != null && plugin.getServiceRegistry().has(DialogService.class)) {
+            plugin.getServiceRegistry().get(DialogService.class).openResult(player, "District Job Created",
+                "Job #" + job.getId() + "\n" + job.getTitle() + "\nReward: " + job.getReward() + "\nStatus: " + job.getStatus(),
+                List.of(DialogMenuItem.item("Job Detail", "Open the refreshed district job board.", "vsmenu district.jobs", null, Material.WRITABLE_BOOK),
+                    DialogMenuItem.item("Back", "Return to district jobs.", "vsmenu district.jobs", null, Material.ARROW)));
+        } else if (job != null) sender.sendMessage(fmt.success("Created active district job #" + job.getId() + " with treasury escrow."));
         return true;
     }
 
@@ -871,8 +925,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("/district role remove <player> <role> &8- Remove district role"));
         sender.sendMessage(fmt.info("/district permissions &8- Show your district permissions"));
         sender.sendMessage(fmt.info("/district members &8- List district members"));
-        sender.sendMessage(fmt.info("/district deposit <amount> &8- Deposit to treasury"));
-        sender.sendMessage(fmt.info("/district withdraw <amount> &8- Withdraw from treasury"));
+        sender.sendMessage(fmt.info("/district treasury create|remove|list|balance &8- Manage physical treasury vaults"));
         sender.sendMessage(fmt.info("/district laws &8- Show active laws"));
         sender.sendMessage(fmt.info("/district laws pending &8- Show pending law changes"));
         sender.sendMessage(fmt.info("/district law propose <law> <true|false> &8- Propose daily law change"));
@@ -894,7 +947,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
             return Arrays.asList("apply", "confirm", "cancel", "selection", "chunks", "expand", "borders", "marketzone", "teleport", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
-                "role", "permissions", "members", "deposit", "withdraw", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
+                "role", "permissions", "members", "treasury", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("job")) {
@@ -919,6 +972,9 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("role")) {
             return List.of("list", "set", "remove").stream()
                 .filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("treasury")) {
+            return List.of("create", "remove", "list", "balance").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("marketzone")) {
             return List.of("borders", "confirm", "cancel", "status").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();

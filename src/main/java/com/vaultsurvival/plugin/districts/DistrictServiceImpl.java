@@ -771,8 +771,9 @@ public class DistrictServiceImpl implements DistrictService {
     }
 
     private long getTreasuryBalance(int districtId) {
-        String sql = "SELECT IFNULL(SUM(amount), 0) FROM cash_items " +
-                     "WHERE state = 'IN_DISTRICT_TREASURY' AND location_id = ?";
+        String sql = "SELECT IFNULL(SUM(c.amount), 0) FROM cash_items c " +
+                     "JOIN district_treasury_vaults v ON v.vault_uuid = c.location_id " +
+                     "WHERE c.state = 'IN_DISTRICT_TREASURY' AND c.location_type = 'DISTRICT_TREASURY_VAULT' AND v.district_id = ?";
         try (Connection conn = plugin.getDatabase().getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, String.valueOf(districtId));

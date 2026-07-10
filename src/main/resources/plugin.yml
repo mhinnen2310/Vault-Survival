@@ -1,5 +1,5 @@
 ﻿name: VaultSurvival
-version: 1.0.29
+version: 1.0.30
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -40,6 +40,30 @@ commands:
     description: Staff player search, profiles, and audited actions
     usage: /staffinspect <player|search|online|recent|wanted|frozen|freeze|unfreeze>
     permission: vs.staffinspect
+  vstp:
+    description: Audited staffmode teleport
+    usage: /vstp <player>
+    aliases: [tp]
+  vstphere:
+    description: Audited staffmode summon
+    usage: /vstphere <player>
+    aliases: [tphere]
+  vsback:
+    description: Return from an audited staff teleport
+    usage: /vsback
+    aliases: [back]
+  vsfly:
+    description: Toggle flight in staffmode
+    usage: /vsfly
+    aliases: [fly]
+  vsheal:
+    description: Heal a player in staffmode
+    usage: /vsheal [player]
+    aliases: [heal]
+  vsgamemode:
+    description: Change gamemode in staffmode
+    usage: /vsgamemode <mode> [player]
+    aliases: [gm]
   staffalerts:
     description: Persistent staff alert queue, security scoring, and staff navigation
     usage: /staffalerts <list|claim|resolve|tp|last|return|antixray|storage|scores|payouts>
@@ -68,7 +92,7 @@ commands:
     permission: vs.region.admin
   district:
     description: District foundation commands
-    usage: /district <apply|approve|reject|info|invite|kick|role|deposit|withdraw|law|list|disband|applications>
+    usage: /district <apply|approve|reject|info|invite|kick|role|treasury|law|list|disband|applications>
     aliases: [d, districts]
   damage:
     description: Temporary damage management commands
@@ -195,6 +219,9 @@ permissions:
     default: false
   vs.staffinspect:
     description: Allows opening staff player profiles and searches
+    default: false
+  vs.staff.utility:
+    description: Allows audited staff utility commands while staffmode is active
     default: false
   vs.staffinspect.freeze:
     description: Allows freezing and unfreezing players

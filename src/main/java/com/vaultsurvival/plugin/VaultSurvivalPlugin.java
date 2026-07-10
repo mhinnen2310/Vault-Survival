@@ -32,6 +32,7 @@ import com.vaultsurvival.plugin.npc.NpcModule;
 import com.vaultsurvival.plugin.regions.RegionModule;
 import com.vaultsurvival.plugin.staffmode.StaffmodeModule;
 import com.vaultsurvival.plugin.staff.StaffInspectCommand;
+import com.vaultsurvival.plugin.staff.StaffUtilityCommand;
 import com.vaultsurvival.plugin.security.AntiCheatListener;
 import com.vaultsurvival.plugin.security.StaffAlertCommand;
 import com.vaultsurvival.plugin.security.StaffAlertService;
@@ -279,6 +280,11 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         getCommand("staffinspect").setExecutor(staffInspect);
         getCommand("staffinspect").setTabCompleter(staffInspect);
         getServer().getPluginManager().registerEvents(staffInspect, this);
+        var staffUtility = new StaffUtilityCommand(this);
+        for (String commandName : java.util.List.of("vstp", "vstphere", "vsback", "vsfly", "vsheal", "vsgamemode")) {
+            getCommand(commandName).setExecutor(staffUtility);
+            getCommand(commandName).setTabCompleter(staffUtility);
+        }
         staffAlertService = new StaffAlertService(this);
         serviceRegistry.register(StaffAlertService.class, staffAlertService);
         staffAlertService.install();

@@ -813,6 +813,26 @@ public class DatabaseManager {
             ")",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_open_district_job_dispute ON district_job_disputes(claim_id) WHERE status='OPEN'",
 
+            // === Physical district treasury vaults ===
+            "CREATE TABLE IF NOT EXISTS district_treasury_vaults (" +
+                "vault_uuid TEXT PRIMARY KEY," +
+                "district_id TEXT NOT NULL," +
+                "world TEXT NOT NULL," +
+                "x INTEGER NOT NULL," +
+                "y INTEGER NOT NULL," +
+                "z INTEGER NOT NULL," +
+                "created_by TEXT," +
+                "created_at INTEGER NOT NULL," +
+                "tier TEXT NOT NULL DEFAULT 'BASIC'," +
+                "locked INTEGER NOT NULL DEFAULT 1," +
+                "breached_until INTEGER NOT NULL DEFAULT 0," +
+                "UNIQUE(world, x, y, z)" +
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_district_treasury_vaults_district ON district_treasury_vaults(district_id)",
+            "CREATE INDEX IF NOT EXISTS idx_district_treasury_vaults_location ON district_treasury_vaults(world, x, y, z)",
+            "CREATE INDEX IF NOT EXISTS idx_cash_items_state_location_id ON cash_items(state, location_id)",
+            "CREATE INDEX IF NOT EXISTS idx_cash_items_state_location_type ON cash_items(state, location_type)",
+
             "CREATE TABLE IF NOT EXISTS kingdom_support_requests (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                 "district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE," +

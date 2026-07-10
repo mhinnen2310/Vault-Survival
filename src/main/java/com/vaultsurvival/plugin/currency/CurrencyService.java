@@ -23,6 +23,9 @@ public interface CurrencyService {
      */
     ItemStack mintCash(long amount, UUID creator, UUID recipient);
 
+    /** Rebuild the physical item for an existing authoritative cash record. */
+    ItemStack materializeCash(UUID cashUuid);
+
     /**
      * Split a cash item into two. The original is invalidated and two new items are created.
      * Useful for making change.

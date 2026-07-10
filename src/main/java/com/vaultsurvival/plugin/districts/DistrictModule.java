@@ -15,6 +15,8 @@ public class DistrictModule extends Module {
     private DistrictSelectionService selectionService;
     private DistrictNpcPlanningService npcPlanningService;
     private DistrictDevelopmentService developmentService;
+    private DistrictTreasuryServiceImpl treasuryService;
+    private DistrictTreasuryListener treasuryListener;
 
     public DistrictModule(VaultSurvivalPlugin plugin) {
         super(plugin);
@@ -39,6 +41,8 @@ public class DistrictModule extends Module {
         npcPlanningService = new DistrictNpcPlanningService(plugin, districtService);
         plugin.getServiceRegistry().register(DistrictNpcPlanningService.class, npcPlanningService);
         developmentService = new DistrictDevelopmentService(plugin);
+        treasuryService = new DistrictTreasuryServiceImpl(plugin, districtService);
+        plugin.getServiceRegistry().register(DistrictTreasuryService.class, treasuryService);
         plugin.getLogger().info("District service registered");
     }
 
@@ -50,6 +54,9 @@ public class DistrictModule extends Module {
         selectionService.startOverlay();
         plugin.getServer().getPluginManager().registerEvents(selectionService, plugin);
         plugin.getServer().getPluginManager().registerEvents(npcPlanningService, plugin);
+        treasuryListener = new DistrictTreasuryListener(plugin, treasuryService);
+        plugin.getServer().getPluginManager().registerEvents(treasuryListener, plugin);
+        treasuryService.reportLegacyBalances();
 
         var cmd = new DistrictCommand(plugin, developmentService);
         plugin.getCommand("district").setExecutor(cmd);
@@ -62,6 +69,7 @@ public class DistrictModule extends Module {
         developmentService.stopMaintenanceScheduler();
         selectionService.shutdown();
         plugin.getServiceRegistry().unregister(DistrictNpcPlanningService.class);
+        plugin.getServiceRegistry().unregister(DistrictTreasuryService.class);
         plugin.getServiceRegistry().unregister(DistrictSelectionService.class);
         plugin.getServiceRegistry().unregister(DistrictService.class);
     }

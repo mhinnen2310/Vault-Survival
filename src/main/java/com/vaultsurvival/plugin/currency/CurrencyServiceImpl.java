@@ -95,6 +95,13 @@ public class CurrencyServiceImpl implements CurrencyService {
     }
 
     @Override
+    public ItemStack materializeCash(UUID cashUuid) {
+        CashItemData data = getCashData(cashUuid);
+        if (data == null || data.getAmount() <= 0 || data.getState() != CashState.ACTIVE) return null;
+        return createCashItemStack(cashUuid, data.getAmount());
+    }
+
+    @Override
     public ItemStack[] splitCash(ItemStack cashItem, long splitAmount) {
         if (!validateCash(cashItem)) {
             logger.warning("Attempted to split invalid cash");
