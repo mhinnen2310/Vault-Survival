@@ -23,4 +23,8 @@ public interface DialogProvider {
     default boolean openVweOperation(Player player, String status, int blockCount) {
         return false;
     }
+
+    default boolean openForm(Player player, DialogFormDefinition form) {
+        return false;
+    }
 }

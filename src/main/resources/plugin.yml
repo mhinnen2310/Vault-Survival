@@ -1,5 +1,5 @@
 ﻿name: VaultSurvival
-version: 1.0.30
+version: 1.0.31
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -35,7 +35,7 @@ commands:
     permission: vs.vault.use
   staffmode:
     description: Toggle staff mode with inventory separation and abuse protection
-    usage: /staffmode [test|return|* [player]]
+    usage: /staffmode [test|return|* [player]|build <player> <on|off>]
   staffinspect:
     description: Staff player search, profiles, and audited actions
     usage: /staffinspect <player|search|online|recent|wanted|frozen|freeze|unfreeze>
@@ -64,6 +64,22 @@ commands:
     description: Change gamemode in staffmode
     usage: /vsgamemode <mode> [player]
     aliases: [gm]
+  vstime:
+    description: Set the current world's time while in staffmode
+    usage: /vstime <day|noon|sunset|night|midnight|sunrise|set|add> [ticks]
+    aliases: [time]
+  vsweather:
+    description: Set bounded weather while in staffmode
+    usage: /vsweather <clear|rain|thunder> [seconds]
+    aliases: [weather]
+  vsspeed:
+    description: Set a safe walk or fly speed while in staffmode
+    usage: /vsspeed <0-10|reset> [walk|fly]
+    aliases: [speed]
+  vsbreaker:
+    description: Toggle the protected staff area breaker
+    usage: /vsbreaker <3x3|4x4|5x5|6x6|7x7|8x8|9x9|off>
+    aliases: [breaker]
   staffalerts:
     description: Persistent staff alert queue, security scoring, and staff navigation
     usage: /staffalerts <list|claim|resolve|tp|last|return|antixray|storage|scores|payouts>
@@ -143,7 +159,7 @@ commands:
     permission: vs.admin
   vwe:
     description: VS-WorldEdit building toolkit
-    usage: /vwe <wand|pos1|pos2|selection|visualize|hide|operation|pattern|set|setgrid|replace|replacegrid|walls|outline|floor|ceiling|hollow|cylinder|hcylinder|circle|hcircle|sphere|hsphere|line|undo|confirm|cancel>
+    usage: /vwe <wand|pos1|pos2|selection|visualize|hide|operation|pattern|schematic|set|setgrid|replace|replacegrid|walls|outline|floor|ceiling|hollow|cylinder|hcylinder|circle|hcircle|sphere|hsphere|line|undo|confirm|cancel>
     permission: vaultsurvival.vwe.use
     aliases: [vswe, vedit]
   chatpreview:
@@ -197,8 +213,32 @@ commands:
   quickactions:
     description: Open the Vault Survival quick actions menu
     usage: /quickactions
+  tpa:
+    description: Request to teleport to another player
+    usage: /tpa <player>
+  tpaccept:
+    description: Accept the current teleport request
+  tpdeny:
+    description: Deny the current teleport request
+  sethome:
+    description: Save a personal home
+    usage: /sethome [name]
+  home:
+    description: Teleport to a personal home
+    usage: /home [name]
+  delhome:
+    description: Delete a personal home
+    usage: /delhome [name]
+  homes:
+    description: List personal homes
 
 permissions:
+  vs.home.limit.2:
+    description: Allows two personal homes
+    default: false
+  vs.home.limit.3:
+    description: Allows three personal homes
+    default: false
   vs.admin.rank:
     description: Allows managing player ranks
     default: false
@@ -231,6 +271,12 @@ permissions:
     default: false
   vs.staffmode.bypass.grant:
     description: Allows granting bypass to other staff members
+    default: false
+  vs.staffmode.build.grant:
+    description: Owner-only grant for persistent build access during another player's staffmode session
+    default: false
+  vs.staffmode.build.active:
+    description: Runtime-only marker applied while owner-approved staff build access is active
     default: false
   vs.breach.use:
     description: Allows breaching vaults
@@ -316,6 +362,9 @@ permissions:
   vaultsurvival.vwe.admin:
     description: Allows VWE admin commands
     default: false
+  vaultsurvival.vwe.schematic:
+    description: Allows audited vanilla structure previews and pastes while staffmode is active
+    default: false
   vs.merchant.use:
     description: Allows creating and managing merchant buy orders
     default: false
@@ -346,6 +395,7 @@ permissions:
     children:
       vaultsurvival.vwe.use: true
       vaultsurvival.vwe.admin: true
+      vaultsurvival.vwe.schematic: true
       vaultsurvival.spawncity.admin: true
       vaultsurvival.spawncity.info: true
       vs.admin.rank: true
@@ -364,8 +414,10 @@ permissions:
       vs.staff.alerts: true
       vs.admin.alerts: true
       vs.staffmode.use: true
+      vs.staff.utility: true
       vs.staffmode.bypass: true
       vs.staffmode.bypass.grant: true
+      vs.staffmode.build.grant: true
       vs.police.use: true
       vs.district.admin.approve: true
       vs.district.admin: true

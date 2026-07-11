@@ -4,6 +4,7 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.Module;
 import com.vaultsurvival.plugin.merchant.shop.MerchantShopService;
 import com.vaultsurvival.plugin.merchant.shop.MerchantShopServiceImpl;
+import com.vaultsurvival.plugin.merchant.shop.MerchantShopEditor;
 
 /**
  * VS-Merchant module: Merchant Buy Orders system.
@@ -58,6 +59,7 @@ public class MerchantOrderModule extends Module {
         plugin.getCommand("merchant").setTabCompleter(cmd);
         plugin.getServer().getPluginManager().registerEvents(new MerchantOrderBoardListener(plugin), plugin);
         plugin.getServer().getPluginManager().registerEvents(new MerchantNpcLifecycleListener(plugin), plugin);
+        plugin.getServer().getPluginManager().registerEvents(new MerchantShopEditor(plugin, shopService), plugin);
 
         plugin.getLogger().info("Merchant commands registered");
     }

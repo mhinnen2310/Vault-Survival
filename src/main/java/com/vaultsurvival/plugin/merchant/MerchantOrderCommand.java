@@ -314,12 +314,13 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleShop(Player player, String[] args) {
         if (args.length < 2) {
-            player.sendMessage(fmt.info("Usage: &e/merchant shop <create|list|stock|prices|collect>"));
+            player.sendMessage(fmt.info("Usage: &e/merchant shop <create|list|edit>"));
             player.sendMessage(fmt.info("  &ecreate &7- Create a merchant shop NPC"));
             player.sendMessage(fmt.info("  &elist &7- List your shops"));
             player.sendMessage(fmt.info("  &estock <id> <slot> <qty> &7- Add stock (hold item)"));
             player.sendMessage(fmt.info("  &eprices <id> <slot> <price> &7- Set item price"));
             player.sendMessage(fmt.info("  &ecollect <id> &7- Collect shop earnings"));
+            player.sendMessage(fmt.info("  &eedit &7- Right-click your shop NPC and edit its inventory"));
             return true;
         }
 
@@ -336,6 +337,10 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
                 return handleShopPrices(player, args);
             case "collect":
                 return handleShopCollect(player, args);
+            case "edit":
+                return handleShopEdit(player, args);
+            case "browse":
+                return handleShopBrowse(player, args);
         }
 
         player.sendMessage(fmt.error("Unknown shop sub-command: " + sub));
@@ -423,6 +428,43 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleShopCollect(Player player, String[] args) {
+        if (args.length < 3) {
+            player.sendMessage(fmt.info("Collect earnings by right-clicking your shop NPC."));
+            return true;
+        }
+        int shopId;
+        try { shopId = Integer.parseInt(args[2]); } catch (NumberFormatException invalid) { return true; }
+        var shop = shopService.getShop(shopId);
+        if (shop == null || !shop.getOwnerUuid().equals(player.getUniqueId())) {
+            player.sendMessage(fmt.error("Shop not found or not yours.")); return true;
+        }
+        var npc = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.npc.NpcService.class).getNpc(shop.getNpcId());
+        if (npc == null || npc.getLocation().getWorld() != player.getWorld()
+            || npc.getLocation().distanceSquared(player.getLocation()) > 64) {
+            player.sendMessage(fmt.error("Stand at your shop NPC to collect its earnings.")); return true;
+        }
+        try { plugin.getServiceRegistry().get(com.vaultsurvival.plugin.social.PayoutLockerService.class).claimMerchantShop(player); }
+        catch (RuntimeException unavailable) { player.sendMessage(fmt.error("Payout service is unavailable.")); }
+        return true;
+    }
+
+    private boolean handleShopEdit(Player player, String[] args) {
+        if (args.length < 3) shopService.beginShopEdit(player);
+        else {
+            try { shopService.openShopEditor(player, Integer.parseInt(args[2])); }
+            catch (NumberFormatException invalid) { player.sendMessage(fmt.error("Invalid shop ID.")); }
+        }
+        return true;
+    }
+
+    private boolean handleShopBrowse(Player player, String[] args) {
+        if (args.length < 3) return true;
+        try { shopService.openCustomerShop(player, Integer.parseInt(args[2])); }
+        catch (NumberFormatException invalid) { player.sendMessage(fmt.error("Invalid shop ID.")); }
+        return true;
+    }
+
+    private boolean showLegacyShopEarnings(Player player) {
         var shops = shopService.getMerchantShops(player.getUniqueId());
         long totalPending = 0;
         try {
@@ -465,7 +507,7 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(fmt.info("&e/merchant shop list &7- List your shops"));
         player.sendMessage(fmt.info("&e/merchant shop stock <id> <slot> <qty> &7- Add stock to shop"));
         player.sendMessage(fmt.info("&e/merchant shop prices <id> <slot> <price> &7- Set item price"));
-        player.sendMessage(fmt.info("&e/merchant shop collect <id> &7- Collect shop earnings"));
+        player.sendMessage(fmt.info("&e/merchant shop edit &7- Right-click a shop NPC to edit it"));
     }
 
     @Override
@@ -500,7 +542,7 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
                 .filter(s -> s.startsWith(args[4].toLowerCase()))
                 .forEach(completions::add);
         } else if (args.length == 2 && args[0].equalsIgnoreCase("shop")) {
-            List.of("create", "list", "stock", "prices", "collect").stream()
+            List.of("create", "list", "edit", "stock", "prices", "collect").stream()
                 .filter(s -> s.startsWith(args[1].toLowerCase()))
                 .forEach(completions::add);
         } else if (args.length == 3 && args[0].equalsIgnoreCase("shop")) {

@@ -66,7 +66,7 @@ public class SpawnJobServiceImpl implements SpawnJobService {
     @Override public boolean accept(Player player, int jobId) {
         SpawnJobData.Job job = jobs.get(jobId);
         if (job == null || !job.isEnabled()) return false;
-        if (getActiveJobs(player).size() >= MAX_ACTIVE) { player.sendMessage(plugin.getMessageFormatter().error("You already have max active spawn jobs.")); return false; }
+        if (getActiveJobs(player).size() >= MAX_ACTIVE) return false;
         if (getActiveJobs(player).stream().anyMatch(j -> j.getJobId() == jobId)) return false;
         try (Connection conn = plugin.getDatabase().getConnection();
              PreparedStatement ps = conn.prepareStatement("INSERT INTO player_spawn_jobs (job_id, player_uuid, status, accepted_at) VALUES (?, ?, 'ACTIVE', ?)", Statement.RETURN_GENERATED_KEYS)) {

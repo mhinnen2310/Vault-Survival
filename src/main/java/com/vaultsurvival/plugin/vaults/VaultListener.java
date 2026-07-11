@@ -148,7 +148,7 @@ public class VaultListener implements Listener {
     public void onBlockPlace(BlockPlaceEvent event) {
         if (regionService == null) return;
         Player player = event.getPlayer();
-        if (!regionService.isAllowed(event.getBlock().getLocation(), RegionData.RuleFlag.BLOCK_PLACE)) {
+        if (!regionService.isBuildAllowed(player, event.getBlock().getLocation(), RegionData.RuleFlag.BLOCK_PLACE)) {
             event.setCancelled(true);
             player.sendMessage(fmt.error("You cannot place blocks in this area."));
         }
@@ -162,7 +162,7 @@ public class VaultListener implements Listener {
         if (regionService == null) return;
         if (vaultService.isVaultBlock(event.getBlock().getLocation())) return; // handled by onBlockBreak
         Player player = event.getPlayer();
-        if (!regionService.isAllowed(event.getBlock().getLocation(), RegionData.RuleFlag.BLOCK_BREAK)) {
+        if (!regionService.isBuildAllowed(player, event.getBlock().getLocation(), RegionData.RuleFlag.BLOCK_BREAK)) {
             event.setCancelled(true);
             player.sendMessage(fmt.error("You cannot break blocks in this area."));
         }

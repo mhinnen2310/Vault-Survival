@@ -7,6 +7,7 @@ import io.papermc.paper.registry.data.dialog.action.DialogAction;
 import io.papermc.paper.registry.data.dialog.body.DialogBody;
 import io.papermc.paper.registry.data.dialog.input.DialogInput;
 import io.papermc.paper.registry.data.dialog.input.SingleOptionDialogInput;
+import io.papermc.paper.registry.data.dialog.input.TextDialogInput;
 import io.papermc.paper.registry.data.dialog.type.DialogType;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -92,7 +93,7 @@ public class NativePaperDialogProvider implements DialogProvider {
     }
 
     private ActionButton button(DialogMenuItem item) {
-        String label = item.locked() ? "[Locked] " + item.label() : item.label();
+        String label = item.locked() && !item.status() ? "[Locked] " + item.label() : item.label();
         String tooltip = item.locked() ? item.lockedExplanation() : item.description();
         return ActionButton.builder(Component.text(label))
             .tooltip(Component.text(tooltip == null ? "" : tooltip))
@@ -192,6 +193,74 @@ public class NativePaperDialogProvider implements DialogProvider {
             .type(DialogType.multiAction(List.of(preview, confirm), cancel, 2)));
         player.showDialog(dialog);
         return true;
+    }
+
+    @Override
+    public boolean openForm(Player player, DialogFormDefinition form) {
+        if (!available) return false;
+
+        List<DialogInput> inputs = new ArrayList<>();
+        for (DialogFormField field : form.fields()) {
+            inputs.add(toNativeInput(field));
+        }
+
+        ActionButton submit = ActionButton.builder(Component.text(form.submitLabel()))
+            .tooltip(Component.text("Validate and save these values"))
+            .width(200)
+            .action(DialogAction.commandTemplate(form.commandTemplate()))
+            .build();
+        ActionButton cancel = ActionButton.builder(Component.text("Cancel"))
+            .tooltip(Component.text("Discard changes"))
+            .width(200)
+            .action(DialogAction.staticAction(ClickEvent.runCommand("/" + form.cancelCommand())))
+            .build();
+
+        Dialog dialog = Dialog.create(builder -> builder.empty()
+            .base(DialogBase.builder(Component.text(form.title()))
+                .body(List.of(DialogBody.plainMessage(Component.text(form.body()), 360)))
+                .inputs(inputs)
+                .canCloseWithEscape(true)
+                .pause(false)
+                .afterAction(DialogBase.DialogAfterAction.CLOSE)
+                .build())
+            .type(DialogType.confirmation(submit, cancel)));
+        player.showDialog(dialog);
+        return true;
+    }
+
+    private DialogInput toNativeInput(DialogFormField field) {
+        Component label = Component.text(field.label());
+        return switch (field.type()) {
+            case TOGGLE -> DialogInput.bool(field.key(), label)
+                .initial(Boolean.parseBoolean(field.initial()))
+                .onTrue("true")
+                .onFalse("false")
+                .build();
+            case DROPDOWN -> DialogInput.singleOption(field.key(), label,
+                    field.options().stream()
+                        .map(option -> SingleOptionDialogInput.OptionEntry.create(
+                            option.value(), Component.text(option.label()), option.value().equalsIgnoreCase(field.initial())))
+                        .toList())
+                .width(300)
+                .build();
+            case SLIDER -> DialogInput.numberRange(field.key(), label, field.minimum(), field.maximum())
+                .width(300)
+                .initial(Float.parseFloat(field.initial()))
+                .step(field.step())
+                .labelFormat("options.generic_value")
+                .build();
+            case NUMBER, TEXT -> DialogInput.text(field.key(), label)
+                .width(300)
+                .initial(field.initial())
+                .maxLength(field.maxLength())
+                .build();
+            case MULTILINE -> DialogInput.text(field.key(), label)
+                .width(300)
+                .initial(field.initial())
+                .maxLength(field.maxLength())
+                .multiline(TextDialogInput.MultilineOptions.create(8, 120))
+                .build();
+        };
     }
 
     private boolean hasClass(String name) {

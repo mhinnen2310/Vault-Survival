@@ -1,14 +1,16 @@
 package com.vaultsurvival.plugin.core;
 
+import org.bukkit.Material;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -34,14 +36,12 @@ public class ConfigManager {
      * Load or create config.yml. Merges in default values from resources.
      */
     public void load(InputStream defaultConfigStream) {
+        byte[] defaultBytes = readDefaults(defaultConfigStream);
         if (!configFile.exists()) {
             configFile.getParentFile().mkdirs();
             try {
-                if (defaultConfigStream != null) {
-                    java.nio.file.Files.copy(
-                        defaultConfigStream,
-                        configFile.toPath()
-                    );
+                if (defaultBytes.length > 0) {
+                    java.nio.file.Files.write(configFile.toPath(), defaultBytes);
                     logger.info("Created default config.yml");
                 } else {
                     configFile.createNewFile();
@@ -51,7 +51,8 @@ public class ConfigManager {
             }
         }
 
-        config = YamlConfiguration.loadConfiguration(configFile);
+        config = loadYaml(configFile);
+        int storedConfigVersion = config.contains("configVersion") ? config.getInt("configVersion", 0) : 0;
 
         // Preserve customized values from the historical lowercase section.
         if (!config.isConfigurationSection("vsWorldEdit") && config.isConfigurationSection("vsworldedit")) {
@@ -69,10 +70,22 @@ public class ConfigManager {
             config.set("vsWorldEdit.patterns.allowLegacyCommaWeights", true);
         }
 
-        if (defaultConfigStream != null) {
-            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
-                new InputStreamReader(defaultConfigStream, StandardCharsets.UTF_8)
-            );
+        migrateLegacyChunkSelectionSettings();
+
+        if (defaultBytes.length > 0) {
+            YamlConfiguration defaults = loadYaml(defaultBytes);
+            int targetConfigVersion = defaults.getInt("configVersion", 1);
+            if (storedConfigVersion < targetConfigVersion) {
+                backupBeforeConfigRewrite(storedConfigVersion, targetConfigVersion);
+                YamlConfiguration ordered = loadYaml(defaultBytes);
+                for (String key : config.getKeys(true)) {
+                    if (!config.isConfigurationSection(key)) ordered.set(key, config.get(key));
+                }
+                ordered.set("configVersion", targetConfigVersion);
+                config = ordered;
+                logger.info("Reordered config.yml to documented layout v" + targetConfigVersion
+                    + " while preserving configured values.");
+            }
             config.setDefaults(defaults);
             config.options().copyDefaults(true);
             String legacyChatFormat = config.getString("chat.format", "");
@@ -83,6 +96,83 @@ public class ConfigManager {
             save();
         }
         applyRuntimeOverrides();
+    }
+
+    private byte[] readDefaults(InputStream stream) {
+        if (stream == null) return new byte[0];
+        try (InputStream input = stream) {
+            return input.readAllBytes();
+        } catch (IOException error) {
+            logger.log(Level.WARNING, "Could not read bundled config defaults", error);
+            return new byte[0];
+        }
+    }
+
+    private YamlConfiguration loadYaml(File file) {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.options().parseComments(true);
+        try {
+            yaml.load(file);
+        } catch (Exception error) {
+            logger.log(Level.SEVERE, "Could not parse " + file.getName(), error);
+        }
+        return yaml;
+    }
+
+    private YamlConfiguration loadYaml(byte[] bytes) {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.options().parseComments(true);
+        try {
+            yaml.loadFromString(new String(bytes, StandardCharsets.UTF_8));
+        } catch (Exception error) {
+            logger.log(Level.SEVERE, "Could not parse bundled config.yml", error);
+        }
+        return yaml;
+    }
+
+    private void backupBeforeConfigRewrite(int fromVersion, int toVersion) {
+        if (!configFile.exists()) return;
+        File backup = new File(configFile.getParentFile(), "config.pre-v" + toVersion + ".bak.yml");
+        if (backup.exists()) backup = new File(configFile.getParentFile(),
+            "config.pre-v" + toVersion + "." + System.currentTimeMillis() + ".bak.yml");
+        try {
+            java.nio.file.Files.copy(configFile.toPath(), backup.toPath(), StandardCopyOption.COPY_ATTRIBUTES);
+            logger.info("Backed up config v" + fromVersion + " before layout migration: " + backup.getName());
+        } catch (IOException error) {
+            logger.log(Level.WARNING, "Could not create pre-migration config backup", error);
+        }
+    }
+
+    /** Translate customized pre-block-selector limits before new defaults are merged. */
+    private void migrateLegacyChunkSelectionSettings() {
+        if (!config.contains("spawn.blockClaim.maxAreaBlocks") && config.contains("spawn.chunkClaim.maxChunks")) {
+            config.set("spawn.blockClaim.maxAreaBlocks", Math.max(1L,
+                config.getLong("spawn.chunkClaim.maxChunks", 256L) * 256L));
+        }
+        if (!config.contains("spawn.blockClaim.wandMaterial") && config.contains("spawn.chunkClaim.wandMaterial")) {
+            config.set("spawn.blockClaim.wandMaterial", config.getString("spawn.chunkClaim.wandMaterial", "GOLDEN_AXE"));
+        }
+        config.set("spawn.chunkClaim", null);
+
+        if (!config.contains("districts.selection.requiredAreaBlocks") && config.contains("districts.selection.requiredChunks")) {
+            config.set("districts.selection.requiredAreaBlocks", Math.max(1L,
+                config.getLong("districts.selection.requiredChunks", 15L) * 256L));
+        }
+        if (!config.contains("districts.selection.overlay.maxPreviewBlocks")
+            && config.contains("districts.selection.overlay.maxPreviewChunks")) {
+            config.set("districts.selection.overlay.maxPreviewBlocks", Math.max(1L,
+                config.getLong("districts.selection.overlay.maxPreviewChunks", 64L) * 256L));
+        }
+        for (int level = 0; level <= 6; level++) {
+            String legacy = "districts.selection.chunksByLevel." + level;
+            String current = "districts.selection.areaBlocksByLevel." + level;
+            if (!config.contains(current) && config.contains(legacy)) {
+                config.set(current, Math.max(1L, config.getLong(legacy) * 256L));
+            }
+        }
+        config.set("districts.selection.requiredChunks", null);
+        config.set("districts.selection.chunksByLevel", null);
+        config.set("districts.selection.overlay.maxPreviewChunks", null);
     }
 
     /**
@@ -96,6 +186,7 @@ public class ConfigManager {
         config.set("database.file", "staff_sandbox.db");
         config.set("spawn.world", getStaffSandboxExpectedWorld());
         config.set("spawn.chunkClaim.maxChunks", 1000000);
+        config.set("spawn.blockClaim.maxAreaBlocks", 1_000_000_000L);
         config.set("chat.channels.localRadius", 30000000);
         config.set("staffmode.allow_container_interact", true);
         config.set("staffmode.allow_item_drop", true);
@@ -106,8 +197,12 @@ public class ConfigManager {
         config.set("districts.min_distance_from_spawn", 0);
         config.set("districts.min_distance_between", 0);
         config.set("districts.selection.requiredChunks", 1);
+        config.set("districts.selection.requiredAreaBlocks", 1L);
         config.set("districts.selection.timeoutMinutes", Integer.MAX_VALUE);
-        for (int level = 0; level <= 6; level++) config.set("districts.selection.chunksByLevel." + level, 1000000);
+        for (int level = 0; level <= 6; level++) {
+            config.set("districts.selection.chunksByLevel." + level, 1000000);
+            config.set("districts.selection.areaBlocksByLevel." + level, 1_000_000_000L);
+        }
         config.set("districts.marketZone.maxPercentOfDistrict", 1.0);
         config.set("districts.stationPlatform.maxPercentOfDistrict", 1.0);
         config.set("districts.laws.maxChangesPerDay", Integer.MAX_VALUE);
@@ -270,7 +365,11 @@ public class ConfigManager {
     public void setSpawnWelcomeMessage(String value) { config.set("spawn.messages.welcome", value); save(); }
     public void setSpawnLeaveMessage(String value) { config.set("spawn.messages.leave", value); save(); }
     public int getSpawnClaimMaxChunks() { return Math.max(1, config.getInt("spawn.chunkClaim.maxChunks", 256)); }
-    public String getSpawnClaimWandMaterial() { return config.getString("spawn.chunkClaim.wandMaterial", "GOLDEN_AXE"); }
+    public long getSpawnClaimMaxBlocks() {
+        return Math.max(1L, config.getLong("spawn.blockClaim.maxAreaBlocks", (long) getSpawnClaimMaxChunks() * 256L));
+    }
+    public String getSpawnClaimWandMaterial() { return config.getString("spawn.blockClaim.wandMaterial",
+        config.getString("spawn.chunkClaim.wandMaterial", "GOLDEN_AXE")); }
 
     // Chat
     public boolean isChatEnabled() { return config.getBoolean("chat.enabled", true); }
@@ -315,6 +414,55 @@ public class ConfigManager {
     public boolean isStaffModeRevertBlocks() { return config.getBoolean("staffmode.revert_blocks_on_exit", true); }
     public int getStaffModeMaxTrackedBlocks() { return config.getInt("staffmode.max_tracked_blocks", 10000); }
     public String getStaffModeBypassPerm() { return config.getString("staffmode.bypass_permission", "vs.staffmode.bypass"); }
+    public double getStaffSpeedMin() {
+        return Math.max(0.0, Math.min(10.0, config.getDouble("staffmode.utilities.speed.min", 0.0)));
+    }
+    public double getStaffSpeedMax() {
+        return Math.max(getStaffSpeedMin(), Math.min(10.0, config.getDouble("staffmode.utilities.speed.max", 10.0)));
+    }
+    public int getStaffWeatherMaxDurationSeconds() {
+        return Math.max(1, Math.min(604800,
+            config.getInt("staffmode.utilities.weather.maxDurationSeconds", 86400)));
+    }
+    public List<Integer> getStaffBreakerAllowedSizes() {
+        List<Integer> configured = config.getIntegerList("staffmode.utilities.breaker.allowedSizes").stream()
+            .filter(size -> size >= 3 && size <= 9)
+            .distinct()
+            .sorted()
+            .toList();
+        return configured.isEmpty() ? List.of(3, 4, 5, 6, 7, 8, 9) : configured;
+    }
+    public boolean isStaffBreakerSkipContainers() {
+        return config.getBoolean("staffmode.utilities.breaker.skipContainers", true);
+    }
+    public boolean isStaffBreakerSameMaterialOnly() {
+        return config.getBoolean("staffmode.utilities.breaker.sameMaterialOnly", false);
+    }
+    public boolean isStaffBreakerApplyPhysics() {
+        return config.getBoolean("staffmode.utilities.breaker.applyPhysics", false);
+    }
+    public Set<Material> getStaffBreakerProtectedMaterials() {
+        Set<Material> materials = new LinkedHashSet<>();
+        for (String name : config.getStringList("staffmode.utilities.breaker.protectedMaterials")) {
+            Material material = Material.matchMaterial(name);
+            if (material != null) materials.add(material);
+        }
+        if (materials.isEmpty()) {
+            materials.addAll(Set.of(Material.BEDROCK, Material.BARRIER, Material.STRUCTURE_BLOCK,
+                Material.JIGSAW, Material.COMMAND_BLOCK, Material.CHAIN_COMMAND_BLOCK,
+                Material.REPEATING_COMMAND_BLOCK, Material.END_PORTAL, Material.END_PORTAL_FRAME,
+                Material.END_GATEWAY, Material.NETHER_PORTAL, Material.REINFORCED_DEEPSLATE));
+        }
+        return Set.copyOf(materials);
+    }
+    public List<String> getStaffModeBuildPermissionNodes() {
+        List<String> nodes = config.getStringList("staffmode.buildPermissions.temporaryPermissionNodes").stream()
+            .map(String::trim)
+            .filter(node -> !node.isEmpty() && !node.equalsIgnoreCase("vs.*") && !node.equals("*"))
+            .distinct()
+            .toList();
+        return nodes.isEmpty() ? List.of("worldguard.region.bypass.%world%") : nodes;
+    }
 
     // Districts
     public int getDistrictMinDistanceFromSpawn() { return config.getInt("districts.min_distance_from_spawn", 500); }
@@ -323,6 +471,16 @@ public class ConfigManager {
     public int getDistrictClaimChunksAtLevel(int level) {
         int highestKnown = Math.max(0, Math.min(6, level));
         return Math.max(getDistrictInitialClaimChunks(), config.getInt("districts.selection.chunksByLevel." + highestKnown, getDistrictInitialClaimChunks()));
+    }
+    public long getDistrictInitialClaimBlocks() {
+        return Math.max(1L, config.getLong("districts.selection.requiredAreaBlocks",
+            (long) getDistrictInitialClaimChunks() * 256L));
+    }
+    public long getDistrictClaimBlocksAtLevel(int level) {
+        int highestKnown = Math.max(0, Math.min(6, level));
+        return Math.max(getDistrictInitialClaimBlocks(), config.getLong(
+            "districts.selection.areaBlocksByLevel." + highestKnown,
+            (long) getDistrictClaimChunksAtLevel(highestKnown) * 256L));
     }
     public boolean isDistrictSelectionOverlayEnabled() { return config.getBoolean("districts.selection.overlay.enabled", true); }
     public int getDistrictSelectionTimeoutMinutes() { return Math.max(1, config.getInt("districts.selection.timeoutMinutes", 20)); }

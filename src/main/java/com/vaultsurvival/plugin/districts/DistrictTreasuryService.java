@@ -36,5 +36,9 @@ public interface DistrictTreasuryService {
     boolean canManage(Player player, TreasuryVault vault);
     boolean isNear(Player player, TreasuryVault vault);
     Result migrateLegacy(Player admin, int districtId, UUID vaultUuid);
+    /** Credit system revenue into an actually registered physical treasury vault. */
+    Result creditSystem(int districtId, long amount, String source, UUID actorUuid);
+    /** Atomically consume physical treasury records for fees/upkeep. */
+    Result debitSystem(int districtId, long amount, String reason, UUID actorUuid);
     void reportLegacyBalances();
 }

@@ -71,13 +71,26 @@ public class PayoutLockerServiceImpl implements PayoutLockerService {
 
     @Override
     public boolean claim(Player player) {
+        return claimFiltered(player, false);
+    }
+
+    @Override
+    public boolean claimMerchantShop(Player player) {
+        return claimFiltered(player, true);
+    }
+
+    private boolean claimFiltered(Player player, boolean merchantOnly) {
         if (currency == null) {
             player.sendMessage(fmt.error("Currency service is unavailable. Your payout remains locked safely."));
             return false;
         }
-        List<ContractData.PayoutLockerEntry> pending = getPending(player.getUniqueId());
+        List<ContractData.PayoutLockerEntry> pending = getPending(player.getUniqueId()).stream()
+            .filter(entry -> merchantOnly == "MERCHANT_SHOP".equalsIgnoreCase(entry.getSourceType()))
+            .toList();
         if (pending.isEmpty()) {
-            player.sendMessage(fmt.info("No pending payouts."));
+            player.sendMessage(fmt.info(merchantOnly
+                ? "No pending shop earnings at this NPC."
+                : "No non-shop payouts. Shop earnings must be collected at your shop NPC."));
             return true;
         }
         if (player.getInventory().firstEmpty() == -1) {
@@ -92,11 +105,20 @@ public class PayoutLockerServiceImpl implements PayoutLockerService {
             currency.invalidateCash(cash, "PAYOUT_OVERFLOW_ROLLBACK");
             return false;
         }
-        try {
-            for (ContractData.PayoutLockerEntry entry : pending) {
-                plugin.getDatabase().executeUpdate(
-                    "UPDATE payout_lockers SET status = 'CLAIMED', claimed_at = ? WHERE id = ?",
-                    System.currentTimeMillis(), entry.getId());
+        try (Connection connection = plugin.getDatabase().getConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement update = connection.prepareStatement(
+                    "UPDATE payout_lockers SET status='CLAIMED',claimed_at=? WHERE id=? AND status='PENDING'")) {
+                for (ContractData.PayoutLockerEntry entry : pending) {
+                    update.setLong(1, System.currentTimeMillis()); update.setInt(2, entry.getId());
+                    if (update.executeUpdate() != 1) throw new SQLException("Payout changed concurrently");
+                }
+                connection.commit();
+            } catch (SQLException error) {
+                connection.rollback();
+                throw error;
+            } finally {
+                connection.setAutoCommit(true);
             }
             audit.log(0, player.getUniqueId(), "PAYOUT_LOCKER_CLAIM", total, "entries=" + pending.size());
             player.sendMessage(fmt.success("Claimed payout: &6" + fmt.formatMoney(total,

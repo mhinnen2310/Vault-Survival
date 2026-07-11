@@ -1,41 +1,127 @@
 # =============================================================================
-# Vault Survival - Main Configuration
+# Vault Survival configuration
 # =============================================================================
-# This is the primary configuration file for the Vault Survival plugin.
-# All gameplay settings are documented here. Edit and restart/reload the server to apply.
-# =============================================================================
+# Configuration version used by future migrations. Do not change manually.
+configVersion: 3
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ SERVER SETTINGS                                                          │
-# └──────────────────────────────────────────────────────────────────────────┘
+# Reload-safe settings can be applied with /vs reload. World, database, command,
+# schematic, and module lifecycle changes should be followed by a full restart.
+
+# -----------------------------------------------------------------------------
+# 1. SERVER, STORAGE, UPDATES
+# -----------------------------------------------------------------------------
 server:
-  # The server name shown in various places
+  # Display name used by plugin status screens.
   name: "Vault Survival"
-  # Chat prefix shown before all plugin messages (supports & color codes)
+  # Prefix for plugin messages. Legacy & colour codes are supported.
   chat_prefix: "&8[&6VS&8]"
-  # Enable debug logging (verbose - only enable when troubleshooting)
+  # Extra diagnostic logging. Leave false on production unless troubleshooting.
   debug: false
 
-# Dedicated staff sandbox. Hard isolation also requires the separate Paper
-# runtime from staff-test-server; never enable this on the production process.
+database:
+  # SQLite file inside plugins/VaultSurvival. Existing data is never discarded.
+  file: "vault_survival.db"
+
+redis:
+  # Reserved optional cross-server cache. The core plugin works without Redis.
+  enabled: false
+  host: "localhost"
+  port: 6379
+  # Keep empty when Redis authentication is disabled.
+  password: ""
+
+updates:
+  # Allow /vs update to check the configured GitHub release feed.
+  enabled: true
+  githubOwner: "mhinnen2310"
+  githubRepo: "Vault-Survival"
+  # Exact release asset name downloaded by the updater.
+  assetName: "VaultSurvival.jar"
+
+# -----------------------------------------------------------------------------
+# 2. ISOLATED STAFF SANDBOX
+# -----------------------------------------------------------------------------
+# Real isolation requires the separate Paper process in staff-test-server.
+# Never point the production process at the sandbox database or world.
 staffSandbox:
   enabled: false
   expectedWorld: "staff_test"
+  # Only these UUIDs may join when sandbox mode is enabled.
   allowedUuids: []
   transfer:
+    # Allows /staffmode test and /staffmode return server transfers.
     enabled: true
-    # These addresses are sent to the Minecraft client. Change them to public
-    # hostnames when staff do not run Minecraft on the server machine itself.
     testHost: "127.0.0.1"
     testPort: 25566
     productionHost: "127.0.0.1"
     productionPort: 25565
 
-# Spawn City — the Kingdom capital
+# -----------------------------------------------------------------------------
+# 3. STAFFMODE AND AUDITED STAFF UTILITIES
+# -----------------------------------------------------------------------------
+staffmode:
+  # Swap gameplay inventory for a clean staff inventory on entry.
+  separate_inventories: true
+  # CREATIVE, SPECTATOR, ADVENTURE, or SURVIVAL.
+  gamemode: "CREATIVE"
+  # GLOWING or NONE.
+  visibility_effect: "GLOWING"
+  glow_color: "RED"
+  staffmode_prefix: "&c[STAFF]"
+
+  # Default staffmode safety restrictions. Owner build grants do not persist
+  # after logout, staffmode exit, or plugin disable.
+  allow_container_interact: false
+  allow_item_drop: false
+  allow_item_pickup: false
+  revert_blocks_on_exit: true
+  max_tracked_blocks: 10000
+  bypass_permission: "vs.staffmode.bypass"
+
+  buildPermissions:
+    # Temporary permissions attached only during an owner-approved build session.
+    # %world% expands once per loaded world. Never place '*' or 'vs.*' here.
+    temporaryPermissionNodes:
+      - "worldguard.region.bypass.%world%"
+
+  utilities:
+    speed:
+      # Logical /speed range. Values are safely mapped to Bukkit's -1..1 range.
+      min: 0.0
+      max: 10.0
+    weather:
+      # Maximum /weather duration in seconds; hard code cap is seven days.
+      maxDurationSeconds: 86400
+    breaker:
+      # Accepted /breaker square sizes. Values outside 3..9 are ignored.
+      allowedSizes: [3, 4, 5, 6, 7, 8, 9]
+      # If true, extra blocks must match the originally broken material.
+      sameMaterialOnly: false
+      # Prevent accidental destruction of inventories and machine containers.
+      skipContainers: true
+      # Physics can cause sand, fluids, redstone, and neighbours to update.
+      applyPhysics: false
+      # These materials are never removed by the staff area breaker.
+      protectedMaterials:
+        - BEDROCK
+        - BARRIER
+        - STRUCTURE_BLOCK
+        - JIGSAW
+        - COMMAND_BLOCK
+        - CHAIN_COMMAND_BLOCK
+        - REPEATING_COMMAND_BLOCK
+        - END_PORTAL
+        - END_PORTAL_FRAME
+        - END_GATEWAY
+        - NETHER_PORTAL
+        - REINFORCED_DEEPSLATE
+
+# -----------------------------------------------------------------------------
+# 4. SPAWN CITY
+# -----------------------------------------------------------------------------
 spawn:
-  # Name of the spawn city (configurable)
   cityName: "Spawn City"
-  # Spawn location (set by /spawncity setspawn)
+  # Set safely with /spawncity setspawn.
   world: "world"
   x: 0.0
   y: 64.0
@@ -45,27 +131,36 @@ spawn:
   messages:
     welcome: "&eWelcome to Spawn City."
     leave: "&7You are leaving Spawn City."
-  chunkClaim:
-    maxChunks: 256
+  blockClaim:
+    # Maximum horizontal area selected with two exact block corners.
+    maxAreaBlocks: 65536
     wandMaterial: GOLDEN_AXE
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ DATABASE                                                                 │
-# └──────────────────────────────────────────────────────────────────────────┘
-database:
-  # SQLite database file name (stored in plugin data folder)
-  file: "vault_survival.db"
+spawnCity:
+  # ADMIN_FUNDED prevents Spawn City from depending on a remote/virtual treasury.
+  economyMode: ADMIN_FUNDED
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ CHAT FORMATTING                                                          │
-# └──────────────────────────────────────────────────────────────────────────┘
+# -----------------------------------------------------------------------------
+# 5. PLAYER DIALOGS, CHAT, AND RESOURCE PACK
+# -----------------------------------------------------------------------------
+dialogs:
+  enabled: true
+  # Use Paper's native dialog API when the server supports it.
+  preferNativeDialogs: true
+  # Inventory GUI is used only when native dialogs are unavailable.
+  fallbackToInventoryGui: true
+  quickActions:
+    enabled: true
+    # Installs the generated quick-actions datapack into the active world.
+    installDatapackToWorld: true
+
 chat:
   enabled: true
-  # Format: staff marker + district role | district | player
+  # Available tokens include district_label, district_role, player_name,
+  # staff_marker, rank_label, and message.
   format: "%district_label% &8| %district_role% &8| %player_name%%staff_marker% &8> &f%message%"
   playerNameColor: "&c"
   noDistrictLabel: "&7OUTLANDS"
-  # Rank labels mapped by access group name (lowercase)
   rankLabels:
     owner: "&4&lOWNER"
     admin: "&c&lADMIN"
@@ -75,16 +170,14 @@ chat:
     developer: "&5&lDEV"
     vip: "&6&lVIP"
     default: "&7PLAYER"
-  # District label configuration
   district:
     enabled: true
     format: "&e%district%"
     noDistrict: "&7OUTLANDS"
-  # Show rank prefix before player names in tab list
   tab_prefix: true
-  # Show rank prefix in player name tags (above head)
   nametag_prefix: true
   channels:
+    # GLOBAL, LOCAL, DISTRICT, ALLY, POLICE, MERCHANT, STAFF, or HELP.
     default: GLOBAL
     rememberLastChannel: true
     localRadius: 100
@@ -94,65 +187,22 @@ chat:
     enabled: true
     auditSpyToggle: true
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ CURRENCY                                                                 │
-# └──────────────────────────────────────────────────────────────────────────┘
-currency:
-  # Name of a single coin
-  name: "Coin"
-  # Name of multiple coins
-  name_plural: "Coins"
-  # Custom model data ID for cash items (from resource pack)
-  custom_model_data: 1001
-  # Material used for physical cash items
-  material: "GOLD_NUGGET"
+resourcepack:
+  # Leave URL empty to disable automatic resource-pack delivery.
+  url: ""
+  # SHA-1 hash without spaces. Required when a URL is configured.
+  hash: ""
+  required: false
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ VAULTS                                                                   │
-# └──────────────────────────────────────────────────────────────────────────┘
-vaults:
-  # Cooldown in minutes before a breached vault can be breached again
-  breach_cooldown_minutes: 60
-  # Maximum percentage that can ever be stolen from a vault (0-100)
-  max_breach_percent: 50.0
-  # Material used for vault blocks in the world
-  vault_material: "BARREL"
-
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ STAFF MODE                                                               │
-# └──────────────────────────────────────────────────────────────────────────┘
-staffmode:
-  # Whether staff mode swaps inventories (separates staff/gameplay items)
-  separate_inventories: true
-  # Game mode set when entering staff mode (CREATIVE, SPECTATOR, SURVIVAL)
-  gamemode: "CREATIVE"
-  # Effect applied to staff in staffmode to make them visible
-  # Options: GLOWING, NONE
-  visibility_effect: "GLOWING"
-  # Color of the glowing effect (for Paper 1.21+)
-  glow_color: "RED"
-  # Chat prefix shown when staff types while in staffmode
-  staffmode_prefix: "&c[STAFF]"
-  # Allow staffmode users to interact with chests/containers
-  allow_container_interact: false
-  # Allow staffmode users to drop items
-  allow_item_drop: false
-  # Allow staffmode users to pick up items
-  allow_item_pickup: false
-  # Revert all blocks placed/broken in staffmode when toggling off
-  revert_blocks_on_exit: true
-  # Maximum number of blocks tracked per staffmode session (prevents memory issues)
-  max_tracked_blocks: 10000
-  # Players with this permission can bypass ALL staffmode restrictions
-  # Default: only owner rank has this. Use /staffmode * to toggle bypass.
-  bypass_permission: "vs.staffmode.bypass"
-
-# Paper handles real chunk obfuscation. Enable anti-xray in Paper's world configuration:
-# anti-xray.enabled: true, engine-mode: 2, max-block-height: 64, update-radius: 2.
-# Do not rely on resource-pack-only fake block IDs for security.
+# -----------------------------------------------------------------------------
+# 6. SECURITY AND ANTI-ABUSE
+# -----------------------------------------------------------------------------
+# Paper must provide real anti-xray obfuscation. Configure engine-mode 2 in the
+# Paper world configuration; the values below verify and report that setup.
 security:
   anticheat:
     enabled: true
+    # Detection remains alert-first; automatic bans are intentionally optional.
     autoBan: false
     scoreDecayMinutes: 30
     movementMaxDistanceSquared: 36
@@ -170,39 +220,76 @@ security:
     burstCount: 5
     burstTotal: 50000
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ DISTRICTS                                                                │
-# └──────────────────────────────────────────────────────────────────────────┘
+# -----------------------------------------------------------------------------
+# 7. PHYSICAL ECONOMY AND VAULTS
+# -----------------------------------------------------------------------------
+currency:
+  name: "Coin"
+  name_plural: "Coins"
+  custom_model_data: 1001
+  material: "GOLD_NUGGET"
+
+vaults:
+  breach_cooldown_minutes: 60
+  # Maximum percentage a successful breach can remove, from 0 to 100.
+  max_breach_percent: 50.0
+  vault_material: "BARREL"
+
+districtTreasury:
+  enabled: true
+  maxVaultsPerDistrict: 3
+  requireInsideDistrict: true
+  interactDistanceBlocks: 6
+  allowedRoles: [MAYOR, CO_MAYOR, TREASURER]
+  concealLocationsFromUnauthorized: true
+  requireEmptyBeforeRemoval: true
+  # Compatibility switch remains false: treasury banking is physical and local.
+  legacyRemoteBankingEnabled: false
+
+breach:
+  max_distance_blocks: 8
+  escape_cooldown_seconds: 30
+  tumbler_speed_ticks: 6
+  tumbler_max_attempts: 3
+  pressure_duration_ticks: 80
+  dial_time_ticks: 200
+  dial_max_attempts: 5
+
+# -----------------------------------------------------------------------------
+# 8. DISTRICTS, BLOCK CLAIMS, NPC PLANNING, DEVELOPMENT
+# -----------------------------------------------------------------------------
 districts:
-  # Measured from claim edge to Spawn City / another district claim edge.
+  # Horizontal block distance measured edge-to-edge.
   min_distance_from_spawn: 500
   min_distance_between: 350
   selection:
-    # New districts must form one filled rectangle of exactly this many chunks.
-    requiredChunks: 15
+    # Exact horizontal area required for a new two-corner block claim.
+    requiredAreaBlocks: 3840
     wandMaterial: GOLDEN_AXE
     timeoutMinutes: 20
     overlay:
       enabled: true
-      maxPreviewChunks: 64
-    # Claim capacity grows with the district development level.
-    chunksByLevel:
-      0: 15
-      1: 20
-      2: 30
-      3: 45
-      4: 65
-      5: 90
-      6: 120
+      # Preview safety cap; selection itself remains exact block-based.
+      maxPreviewBlocks: 16384
+    # Maximum horizontal claim area at each district development level.
+    areaBlocksByLevel:
+      0: 3840
+      1: 5120
+      2: 7680
+      3: 11520
+      4: 16640
+      5: 23040
+      6: 30720
   marketZone:
-    # One rectangular district public market. Its cap grows with the owned claim.
+    # Fraction of the district's exact block area available to its market zone.
     maxPercentOfDistrict: 0.40
   stationPlatform:
-    # Platform chunk cap also grows as the district's claim grows with levels.
+    # Fraction of district block area available to a station platform.
     maxPercentOfDistrict: 0.25
   npcPlanning:
-    # /district npcs gives one facing marker for each entry below.
     enabled: true
+    # NPC types become available by district level. `/district npcs start`
+    # gives markers only for unlocked NPCs that are currently missing.
     level0: [CLERK, JOB_BOARD]
     level1: [MARKET_STEWARD]
     level2: [CONDUCTOR]
@@ -225,10 +312,30 @@ districtDevelopment:
       downgradeDelayMultiplier: 2.0
       maintenanceDecayMultiplier: 0.50
     districtSizeBands:
-      tiny: { activeMembersMin: 1, activeMembersMax: 3, requirementMultiplier: 0.65, upkeepMultiplier: 0.60, maxLevelSoftCap: 3 }
-      small: { activeMembersMin: 4, activeMembersMax: 8, requirementMultiplier: 1.00, upkeepMultiplier: 1.00, maxLevelSoftCap: 4 }
-      medium: { activeMembersMin: 9, activeMembersMax: 15, requirementMultiplier: 1.35, upkeepMultiplier: 1.30, maxLevelSoftCap: 5 }
-      large: { activeMembersMin: 16, activeMembersMax: 999, requirementMultiplier: 1.75, upkeepMultiplier: 1.80, maxLevelSoftCap: 6 }
+      tiny:
+        activeMembersMin: 1
+        activeMembersMax: 3
+        requirementMultiplier: 0.65
+        upkeepMultiplier: 0.60
+        maxLevelSoftCap: 3
+      small:
+        activeMembersMin: 4
+        activeMembersMax: 8
+        requirementMultiplier: 1.00
+        upkeepMultiplier: 1.00
+        maxLevelSoftCap: 4
+      medium:
+        activeMembersMin: 9
+        activeMembersMax: 15
+        requirementMultiplier: 1.35
+        upkeepMultiplier: 1.30
+        maxLevelSoftCap: 5
+      large:
+        activeMembersMin: 16
+        activeMembersMax: 999
+        requirementMultiplier: 1.75
+        upkeepMultiplier: 1.80
+        maxLevelSoftCap: 6
     contributionCaps:
       lowLevelsMaxSinglePlayerPercent: 70
       midLevelsMaxSinglePlayerPercent: 50
@@ -240,103 +347,79 @@ districtDevelopment:
       dormantCanUpgrade: false
       dormantDowngradePausedIfGlobalLowPop: true
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ RESTORATION                                                              │
-# └──────────────────────────────────────────────────────────────────────────┘
 restoration:
-  # Minutes before structure blocks restore (when repair points available)
   normal_delay_minutes: 10
-  # Minutes before structure blocks restore (when repair points exhausted)
   exhausted_delay_minutes: 30
-  # Daily repair points per district repair crew
   daily_repair_points: 500
-  # Daily wage cost for repair crew (paid from district treasury)
+  # Physical district treasury wage per day.
   daily_wage: 1000
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ MERCHANT                                                                 │
-# └──────────────────────────────────────────────────────────────────────────┘
+# -----------------------------------------------------------------------------
+# 9. MERCHANTS, MARKETS, AND RAIL
+# -----------------------------------------------------------------------------
 merchant:
-  # Maximum number of active orders a merchant can have at once
   max_active_orders: 10
-  # Default duration for orders in hours before they expire (0 = never)
+  # Default order lifetime; 0 means no automatic expiry.
   default_expire_hours: 168
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ RAIL (District Train Stations)                                           │
-# └──────────────────────────────────────────────────────────────────────────┘
-rail:
-  enabled: true
-  # Default ticket price for new stations
-  defaultTicketPrice: 100
-  # Default upkeep cost deducted from district treasury
-  defaultUpkeepCost: 5000
-  # Kingdoms tax percent on ticket sales (goes to Spawn City)
-  defaultKingdomTaxPercent: 10
-  # Application fee paid from district treasury
-  applicationFee: 10000
-  # Minimum platform radius in blocks
-  minPlatformRadius: 3
-  # Journey timing settings
-  journey:
-    # Ticks for the full boarding window (20 ticks = 1 second)
-    boardingWindowTicks: 200
-    # Minimum ticks before boarding opens
-    minBoardingTicks: 60
-    # Y-offset for the train car above the platform
-    trainCarYOffset: 5.0
-
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ DISTRICT MARKET (Merchant NPC Shops)                                     │
-# └──────────────────────────────────────────────────────────────────────────┘
 districtMarket:
   enabled: true
+  # Merchant NPC shops must be inside the district's selected market zone.
   requireMarketZone: true
   maxNpcPerMerchant: 3
   maxNpcPerDistrict: 25
   minTaxPercent: 0
   maxTaxPercent: 50
   defaultTaxPercent: 10
+  # Maximum accepted value in the native per-item shop price form.
+  maxItemPrice: 1000000000
   merchantLockerEnabled: true
   merchantNpc:
     killable: true
     respawnMinutes: 15
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ MARKET                                                                   │
-# └──────────────────────────────────────────────────────────────────────────┘
 market:
-  # Tax percentage taken from each Auction Hall sale (0-100)
+  # Auction Hall sale tax, from 0 to 100 percent.
   tax_percent: 5.0
-  # Default listing duration in hours
   default_listing_duration_hours: 48
-  # Maximum custom listing duration accepted by commands.
   max_listing_duration_hours: 168
 
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ BREACH                                                                   │
-# └──────────────────────────────────────────────────────────────────────────┘
-breach:
-  # Maximum distance (blocks) the thief can be from the vault during breach
-  max_distance_blocks: 8
-  # Seconds the thief cannot teleport after any breach (success or fail)
-  escape_cooldown_seconds: 30
-  # Ticks between indicator movements in the Timing Tumbler stage
-  tumbler_speed_ticks: 6
-  # Maximum attempts in the Timing Tumbler stage
-  tumbler_max_attempts: 3
-  # Duration of the Pressure Balance stage (in ticks, 20 ticks = 1 second)
-  pressure_duration_ticks: 80
-  # Time limit for the Final Dial stage (in ticks)
-  dial_time_ticks: 200
-  # Maximum attempts in the Final Dial stage
-  dial_max_attempts: 5
+rail:
+  enabled: true
+  defaultTicketPrice: 100
+  # Upper bound used by the native station ticket-price form.
+  maxTicketPrice: 1000000
+  defaultUpkeepCost: 5000
+  defaultKingdomTaxPercent: 10
+  applicationFee: 10000
+  minPlatformRadius: 3
+  journey:
+    # 20 ticks equals one second.
+    boardingWindowTicks: 200
+    minBoardingTicks: 60
+    trainCarYOffset: 5.0
 
-# VS-WorldEdit
+travel:
+  tpa:
+    # Requests disappear automatically; acceptance is always explicit.
+    timeoutSeconds: 60
+  homes:
+    # Every player gets one home. Rank groups can be mapped to two or three.
+    defaultLimit: 1
+    rankLimits:
+      premium: 2
+      premium_plus: 3
+      vip: 2
+      vip_plus: 3
+
+# -----------------------------------------------------------------------------
+# 10. REGION VISUALIZATION
+# -----------------------------------------------------------------------------
 regions:
   visualization:
     enabled: true
     defaultDurationSeconds: 30
+    # WHILE_EDITING, TEN_SECONDS, THIRTY_SECONDS, SIXTY_SECONDS, or UNTIL_HIDDEN.
     defaultMode: WHILE_EDITING
     particles:
       perimeterSpacing: 0.5
@@ -364,61 +447,38 @@ regions:
       showDimensions: true
       showVolume: true
 
-# VS-WorldEdit
+# -----------------------------------------------------------------------------
+# 11. VS-WORLDEDIT, PATTERNS, UNDO, SCHEMATICS
+# -----------------------------------------------------------------------------
+# The lowercase section contains execution and schematic settings retained for
+# compatibility. Pattern parsing and safety use the canonical vsWorldEdit tree.
 vsworldedit:
   maxBlocksPerOperation: 1000000
   blocksPerTick: 500
   maxUndoOperations: 10
   requireConfirmationAboveBlocks: 10000
+  schematics:
+    enabled: true
+    # Put vanilla Structure Block .nbt files directly in
+    # plugins/VaultSurvival/schematics. Subfolders, symlinks, .schem, and
+    # legacy .schematic files are rejected deliberately.
+    maxFileSizeBytes: 16777216
+    maxBlocks: 250000
+    maxDimensionBlocks: 256
+    confirmationThresholdBlocks: 10000
+    alwaysRequireConfirmation: false
+    # True also pastes air from the structure and can clear existing blocks.
+    pasteAir: true
 
 vsWorldEdit:
   patterns:
     allowNumericAirAlias: true
     normalizePercentages: true
     maxPatternEntries: 32
+    # SINGLE, RANDOM, WEIGHTED_RANDOM, or GRID.
     defaultMode: RANDOM
     allowLegacyCommaWeights: true
   safety:
     confirmationThresholdBlocks: 10000
     maxBlocksPerOperation: 1000000
     requireConfirmationForAirOperations: true
-
-# ┌──────────────────────────────────────────────────────────────────────────┐
-# │ RESOURCE PACK                                                            │
-# └──────────────────────────────────────────────────────────────────────────┘
-resourcepack:
-  # URL to the server resource pack (leave empty to disable)
-  url: ""
-  # SHA-1 hash of the resource pack file (required for proper loading)
-  hash: ""
-  # Force players to use the resource pack
-  required: false
-
-# GitHub release updater
-updates:
-  enabled: true
-  githubOwner: "mhinnen2310"
-  githubRepo: "Vault-Survival"
-  assetName: "VaultSurvival.jar"
-
-districtTreasury:
-  enabled: true
-  maxVaultsPerDistrict: 3
-  requireInsideDistrict: true
-  interactDistanceBlocks: 6
-  allowedRoles: [MAYOR, CO_MAYOR, TREASURER]
-  concealLocationsFromUnauthorized: true
-  requireEmptyBeforeRemoval: true
-  legacyRemoteBankingEnabled: false
-
-spawnCity:
-  economyMode: ADMIN_FUNDED
-
-# Native Minecraft dialogs / fallback menus
-dialogs:
-  enabled: true
-  preferNativeDialogs: true
-  fallbackToInventoryGui: true
-  quickActions:
-    enabled: true
-    installDatapackToWorld: true

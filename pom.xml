@@ -6,7 +6,7 @@
 
     <groupId>com.vaultsurvival</groupId>
     <artifactId>VaultSurvival</artifactId>
-    <version>1.0.30</version>
+    <version>1.0.31</version>
     <packaging>jar</packaging>
 
     <name>VaultSurvival</name>

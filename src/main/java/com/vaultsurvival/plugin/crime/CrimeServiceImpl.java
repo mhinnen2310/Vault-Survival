@@ -5,6 +5,7 @@ import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.currency.CurrencyService;
 import com.vaultsurvival.plugin.districts.DistrictData;
 import com.vaultsurvival.plugin.districts.DistrictService;
+import com.vaultsurvival.plugin.districts.DistrictTreasuryService;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -151,7 +152,6 @@ public class CrimeServiceImpl implements CrimeService {
         }
         Player target = Bukkit.getPlayer(record.getPlayerUuid());
         if (target != null) {
-            removeInventoryCash(target, amount);
             target.sendMessage(fmt.error("You were fined for evidence #" + evidenceId + ": " +
                 fmt.formatMoney(amount, plugin.getConfigManager().getCurrencyName(), plugin.getConfigManager().getCurrencyNamePlural())));
         }
@@ -422,10 +422,6 @@ public class CrimeServiceImpl implements CrimeService {
         }
 
         // Remove physical cash items from criminal inventory
-        if (criminal.isOnline()) {
-            removeInventoryCash(criminal, amount);
-        }
-
         police.sendMessage(fmt.success("Fined &e" + criminal.getName() + " &6" + fmt.formatMoney(amount,
             plugin.getConfigManager().getCurrencyName(),
             plugin.getConfigManager().getCurrencyNamePlural())));
@@ -438,6 +434,24 @@ public class CrimeServiceImpl implements CrimeService {
 
     /** Transfer cash from a player to the district treasury (atomic, works for non-members). */
     private boolean transferCashToTreasury(UUID playerUuid, int districtId, long amount) {
+        DistrictTreasuryService treasury;
+        try { treasury = plugin.getServiceRegistry().get(DistrictTreasuryService.class); }
+        catch (RuntimeException unavailable) { return false; }
+        var vaults = treasury.getVaults(districtId);
+        if (vaults.isEmpty()) return false;
+        String vaultUuid = vaults.getFirst().vaultUuid().toString();
+        Player online = Bukkit.getPlayer(playerUuid);
+        if (online != null) {
+            var withdrawn = currency.withdrawCash(online, amount);
+            if (withdrawn.stream().mapToLong(currency::getCashAmount).sum() != amount) {
+                currency.depositCash(online, withdrawn); return false;
+            }
+            try (Connection conn = plugin.getDatabase().getConnection(); PreparedStatement move = conn.prepareStatement(
+                    "UPDATE cash_items SET state='IN_DISTRICT_TREASURY',location_type='DISTRICT_TREASURY_VAULT',location_id=?,owner_uuid=NULL,last_seen_at=datetime('now') WHERE cash_uuid=? AND state='ACTIVE'")) {
+                for (var item : withdrawn) { move.setString(1, vaultUuid); move.setString(2, currency.getCashUuid(item).toString()); if (move.executeUpdate() != 1) throw new SQLException("Fine cash changed concurrently"); }
+                return true;
+            } catch (SQLException error) { currency.depositCash(online, withdrawn); logger.log(Level.WARNING, "Failed online fine transfer", error); return false; }
+        }
         try (Connection conn = plugin.getDatabase().getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -452,19 +466,21 @@ public class CrimeServiceImpl implements CrimeService {
                         long cashAmt = rs.getLong("amount");
                         if (cashAmt <= remaining) {
                             try (PreparedStatement up = conn.prepareStatement(
-                                    "UPDATE cash_items SET state = 'IN_DISTRICT_TREASURY', location_type = 'TREASURY', " +
+                                    "UPDATE cash_items SET state = 'IN_DISTRICT_TREASURY', location_type = 'DISTRICT_TREASURY_VAULT', " +
                                     "location_id = ?, owner_uuid = NULL, last_seen_at = datetime('now') WHERE cash_uuid = ?")) {
-                                up.setString(1, String.valueOf(districtId));
+                                up.setString(1, vaultUuid);
                                 up.setString(2, cashUuid.toString());
                                 up.executeUpdate();
                             }
                             remaining -= cashAmt;
                         } else {
                             try (PreparedStatement up = conn.prepareStatement(
-                                    "UPDATE cash_items SET amount = ?, last_seen_at = datetime('now') WHERE cash_uuid = ?")) {
+                                    "UPDATE cash_items SET amount = ?, last_seen_at = datetime('now') WHERE cash_uuid = ?");
+                                 PreparedStatement split = conn.prepareStatement("INSERT INTO cash_items(cash_uuid,amount,state,location_type,location_id,owner_uuid,created_by) VALUES(?,?,'IN_DISTRICT_TREASURY','DISTRICT_TREASURY_VAULT',?,NULL,?)")) {
                                 up.setLong(1, cashAmt - remaining);
                                 up.setString(2, cashUuid.toString());
                                 up.executeUpdate();
+                                split.setString(1, UUID.randomUUID().toString()); split.setLong(2, remaining); split.setString(3, vaultUuid); split.setString(4, playerUuid.toString()); split.executeUpdate();
                             }
                             remaining = 0;
                         }

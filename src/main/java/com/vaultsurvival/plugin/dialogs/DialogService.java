@@ -11,15 +11,22 @@ import com.vaultsurvival.plugin.currency.CurrencyService;
 import com.vaultsurvival.plugin.currency.CurrencyStats;
 import com.vaultsurvival.plugin.districts.DistrictData;
 import com.vaultsurvival.plugin.districts.DistrictService;
+import com.vaultsurvival.plugin.regions.RegionVisualizationService;
+import com.vaultsurvival.plugin.regions.RegionVisualizationSession;
 import com.vaultsurvival.plugin.workflow.CivicWorkflowService;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -30,7 +37,28 @@ public class DialogService {
     private final DialogProvider nativeProvider;
     private final DialogProvider fallbackProvider;
     private final Map<String, DialogInputDefinition> inputs;
+    private final DialogFormValidationService formValidation = new DialogFormValidationService();
+    private final Map<UUID, PendingLawConfirmation> pendingLawConfirmations = new ConcurrentHashMap<>();
     private String lastProviderName = "none";
+
+    private static final long LAW_CONFIRMATION_TTL_MILLIS = 120_000L;
+
+    private enum LawGroup {
+        VISITORS("Visitors & Building"),
+        SECURITY("PvP & Security"),
+        ECONOMY("Property & Economy"),
+        PUBLIC_ORDER("Public Order");
+
+        private final String title;
+        LawGroup(String title) { this.title = title; }
+    }
+
+    private record LawUi(LawGroup group, String title, String description) { }
+    private record PendingLawConfirmation(UUID actor, int districtId, String token,
+                                          Map<DistrictData.LawKey, Boolean> changes,
+                                          long expiresAt) { }
+
+    private static final Map<DistrictData.LawKey, LawUi> LAW_UI = buildLawUi();
 
     public DialogService(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
@@ -54,6 +82,14 @@ public class DialogService {
         }
         if (!hasVsPermission(player, "vs.menu")) {
             player.sendMessage(plugin.getMessageFormatter().permissionDenied());
+            return;
+        }
+
+        if ((menuType == DialogMenuType.PLAYER_JOBS || menuType == DialogMenuType.DISTRICT_JOBS)
+            && !hasNpcJobBoardAccess(player)) {
+            render(player, new DialogResult(DialogResultType.LOCKED, "Job Board NPC Required",
+                "Job boards are not part of /vsmenu. Interact with a physical Job Board NPC to open a two-minute job session.",
+                List.of(homeItem(), closeItem())));
             return;
         }
 
@@ -131,6 +167,13 @@ public class DialogService {
     }
 
     public void openInput(Player player, String inputId) {
+        if (inputId != null && inputId.toLowerCase(Locale.ROOT).startsWith("district_job_")
+            && !hasNpcJobBoardAccess(player)) {
+            render(player, new DialogResult(DialogResultType.LOCKED, "Job Board NPC Required",
+                "This job action is available only after interacting with a physical Job Board NPC.",
+                List.of(backItem("district"), homeItem(), closeItem())));
+            return;
+        }
         DialogInputDefinition input = inputs.get(inputId.toLowerCase(Locale.ROOT));
         if (input == null) {
             player.sendMessage(plugin.getMessageFormatter().error("Unknown menu input: " + inputId));
@@ -166,6 +209,486 @@ public class DialogService {
         return inputs.keySet().stream().sorted().toList();
     }
 
+    public void openForm(Player player, String formId, String[] args) {
+        if (!hasVsPermission(player, "vs.menu")) {
+            render(player, new DialogError("No Access", "You need the vs.menu permission.").result());
+            return;
+        }
+        switch (formId.toLowerCase(Locale.ROOT)) {
+            case "settings", "preferences" -> openSettingsForm(player);
+            case "visualization", "region_visualization" -> openVisualizationForm(player);
+            case "laws", "law" -> openLawForm(player, args.length == 0 ? "VISITORS" : args[0]);
+            case "ticket", "ticket_price" -> openTicketPriceForm(player);
+            case "merchant_price" -> openMerchantPriceForm(player, args);
+            case "district_project" -> openDistrictProjectForm(player);
+            case "station_request" -> openStationRequestForm(player);
+            default -> render(player, new DialogError("Unknown Form", "That settings form does not exist.").result());
+        }
+    }
+
+    public void applyForm(Player player, String formId, String[] args) {
+        switch (formId.toLowerCase(Locale.ROOT)) {
+            case "settings", "preferences" -> applySettingsForm(player, args);
+            case "visualization", "region_visualization" -> applyVisualizationForm(player, args);
+            case "laws", "law" -> prepareLawChanges(player, args);
+            case "ticket", "ticket_price" -> applyTicketPriceForm(player, args);
+            case "merchant_price" -> applyMerchantPriceForm(player, args);
+            case "district_project" -> applyDistrictProjectForm(player, args);
+            case "station_request" -> applyStationRequestForm(player, args);
+            default -> render(player, new DialogError("Unknown Form", "No values were changed.").result());
+        }
+    }
+
+    public void commitForm(Player player, String formId, String token) {
+        if (!formId.equalsIgnoreCase("laws")) {
+            render(player, new DialogError("Unknown Confirmation", "This confirmation has expired.").result());
+            return;
+        }
+        commitLawChanges(player, token);
+    }
+
+    public void runAction(Player player, String actionId, String[] args) {
+        if (actionId.equalsIgnoreCase("district_join")) {
+            if (args.length != 1) {
+                render(player, new DialogError("Invalid District", "Choose a district from the directory.").result());
+                return;
+            }
+            int districtId;
+            try { districtId = Integer.parseInt(args[0]); }
+            catch (NumberFormatException error) {
+                render(player, new DialogError("Invalid District", "Choose a district from the directory.").result());
+                return;
+            }
+            CivicWorkflowService civic = getCivicWorkflow();
+            DistrictData.District district = getDistrictService() == null ? null : getDistrictService().getDistrict(districtId);
+            if (civic == null || district == null || district.getStatus() != DistrictData.DistrictStatus.ACTIVE) {
+                render(player, new DialogError("District Unavailable", "That district is no longer accepting directory requests.").result());
+                return;
+            }
+            try {
+                CivicWorkflowService.JoinRequest request = civic.requestJoin(player, districtId, "Requested from the district directory.");
+                render(player, new DialogResult(DialogResultType.SUCCESS, "Join Request Sent",
+                    "Request #" + request.id() + " was sent to " + district.getName() + ".",
+                    List.of(backItem("district.directory"), homeItem(), closeItem())));
+            } catch (RuntimeException error) {
+                render(player, new DialogError("Request Not Sent", error.getMessage() == null ? "Try again later." : error.getMessage()).result());
+            }
+            return;
+        }
+        render(player, new DialogError("Unknown Action", "No changes were made.").result());
+    }
+
+    public void render(Player player, DialogResult result) {
+        List<DialogMenuItem> actions = result.actions().isEmpty()
+            ? List.of(homeItem(), closeItem())
+            : result.actions();
+        openCustomMenu(player, result.title(), result.message(), actions);
+    }
+
+    private void openSettingsForm(Player player) {
+        CivicWorkflowService civic = getCivicWorkflow();
+        ChatChannelService chat = getChatChannelService();
+        if (civic == null || chat == null) {
+            render(player, new DialogError("Settings Unavailable", "The preference service is not available.").result());
+            return;
+        }
+        CivicWorkflowService.Preferences current = civic.preferences(player.getUniqueId());
+        List<DialogFormField.Option> channels = java.util.Arrays.stream(ChatChannel.values())
+            .filter(channel -> chat.getAccessDenial(player, channel) == null)
+            .map(channel -> option(channel.id(), channel.displayName()))
+            .toList();
+        DialogFormDefinition form = new DialogFormDefinition(
+            "Player Settings",
+            "Choose values directly. Saving validates every value and returns to a result dialog.",
+            List.of(
+                dropdown("notifications", "Notifications", current.notifications(), "ALL", "IMPORTANT", "OFF"),
+                dropdown("menu_style", "Menu style", current.menuStyle(), "AUTO", "NATIVE", "COMPACT"),
+                dropdown("privacy", "Profile privacy", current.privacy(), "PUBLIC", "FRIENDS", "PRIVATE"),
+                DialogFormField.dropdown("channel", "Active chat channel", chat.getActiveChannel(player).id(), channels)
+            ),
+            "Save Settings",
+            "vsmenu apply settings $(notifications) $(menu_style) $(privacy) $(channel)",
+            "vsmenu"
+        );
+        openNativeForm(player, form);
+    }
+
+    private void applySettingsForm(Player player, String[] args) {
+        if (args.length != 4) {
+            render(player, new DialogError("Invalid Settings", "The settings form was incomplete. Nothing changed.").result());
+            return;
+        }
+        if (!isOneOf(args[0], "ALL", "IMPORTANT", "OFF")
+            || !isOneOf(args[1], "AUTO", "NATIVE", "COMPACT")
+            || !isOneOf(args[2], "PUBLIC", "FRIENDS", "PRIVATE")) {
+            render(player, new DialogError("Invalid Settings", "One or more selected values are not supported.").result());
+            return;
+        }
+        ChatChannel channel = ChatChannel.from(args[3]);
+        ChatChannelService chat = getChatChannelService();
+        CivicWorkflowService civic = getCivicWorkflow();
+        if (channel == null || chat == null || civic == null) {
+            render(player, new DialogError("Invalid Settings", "The selected chat channel or settings service is unavailable.").result());
+            return;
+        }
+        String denial = chat.getAccessDenial(player, channel);
+        if (denial != null) {
+            render(player, new DialogError("Channel Locked", denial).result());
+            return;
+        }
+        civic.setPreference(player.getUniqueId(), "notifications", args[0]);
+        civic.setPreference(player.getUniqueId(), "menu", args[1]);
+        CivicWorkflowService.Preferences saved = civic.setPreference(player.getUniqueId(), "privacy", args[2]);
+        chat.setActiveChannel(player, channel, false);
+        render(player, new DialogResult(DialogResultType.SUCCESS, "Settings Saved",
+            "Notifications: " + saved.notifications() + "\nMenu style: " + saved.menuStyle()
+                + "\nPrivacy: " + saved.privacy() + "\nChat channel: " + channel.displayName(),
+            List.of(
+                DialogMenuItem.item("Edit Again", "Reopen the settings form.", "vsmenu form settings", null, Material.COMPARATOR),
+                DialogMenuItem.item("Region Visualization", "Configure active selection borders.", "vsmenu form visualization", null, Material.ENDER_EYE),
+                homeItem(), closeItem())));
+    }
+
+    private void openVisualizationForm(Player player) {
+        RegionVisualizationService visualization = getVisualizationService();
+        RegionVisualizationSession session = visualization == null ? null
+            : visualization.session(player.getUniqueId()).orElse(null);
+        if (session == null) {
+            render(player, new DialogError("No Active Visualization",
+                "Start a district, region, or VS-WorldEdit selection first. These controls only change an active border.").result());
+            return;
+        }
+        DialogFormDefinition form = new DialogFormDefinition(
+            "Region Visualization",
+            "Toggle grid detail and choose how long the active particle border remains visible.",
+            List.of(
+                DialogFormField.toggle("side_grid", "Show side grid", session.sideGrid()),
+                DialogFormField.toggle("floor_grid", "Show floor grid", session.floorGrid()),
+                DialogFormField.dropdown("duration", "Duration", session.mode().name(), List.of(
+                    option("TEN_SECONDS", "10 seconds"), option("THIRTY_SECONDS", "30 seconds"),
+                    option("SIXTY_SECONDS", "60 seconds"), option("UNTIL_CANCELLED", "Until cancelled"),
+                    option("WHILE_EDITING", "While editing")))
+            ),
+            "Apply Visualization",
+            "vsmenu apply visualization $(side_grid) $(floor_grid) $(duration)",
+            "vsmenu settings"
+        );
+        openNativeForm(player, form);
+    }
+
+    private void applyVisualizationForm(Player player, String[] args) {
+        if (args.length != 3 || !isBoolean(args[0]) || !isBoolean(args[1])) {
+            render(player, new DialogError("Invalid Visualization", "The visualization form was incomplete. Nothing changed.").result());
+            return;
+        }
+        RegionVisualizationSession.Mode mode;
+        try {
+            mode = RegionVisualizationSession.Mode.valueOf(args[2].toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException error) {
+            render(player, new DialogError("Invalid Duration", "Choose one of the durations shown in the dropdown.").result());
+            return;
+        }
+        RegionVisualizationService visualization = getVisualizationService();
+        if (visualization == null || visualization.session(player.getUniqueId()).isEmpty()) {
+            render(player, new DialogError("Visualization Expired", "Start the selection visualization again.").result());
+            return;
+        }
+        visualization.setSideGrid(player.getUniqueId(), Boolean.parseBoolean(args[0]));
+        visualization.setFloorGrid(player.getUniqueId(), Boolean.parseBoolean(args[1]));
+        visualization.setMode(player.getUniqueId(), mode);
+        render(player, new DialogResult(DialogResultType.REFRESH, "Visualization Updated",
+            "Side grid: " + args[0] + "\nFloor grid: " + args[1] + "\nDuration: " + readable(mode.name()),
+            List.of(DialogMenuItem.item("Adjust Again", "Reopen these controls.", "vsmenu form visualization", null, Material.ENDER_EYE),
+                DialogMenuItem.item("Hide Border", "Stop this visualization.", "region hide", "vs.region.admin", Material.INK_SAC),
+                backItem("settings"), homeItem(), closeItem())));
+    }
+
+    private void openLawForm(Player player, String rawGroup) {
+        DistrictData.District district = getDistrict(player);
+        DistrictService service = getDistrictService();
+        if (district == null || service == null) {
+            render(player, new DialogError("Laws Unavailable", "No district applies to your player.").result());
+            return;
+        }
+        LawGroup group;
+        try {
+            group = LawGroup.valueOf(rawGroup.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException error) {
+            render(player, new DialogError("Unknown Law Category", "Choose a category from the District Laws screen.").result());
+            return;
+        }
+        List<Map.Entry<DistrictData.LawKey, LawUi>> laws = lawsIn(group);
+        if (!service.canManageLaws(player.getUniqueId(), district)) {
+            String body = laws.stream().map(entry -> {
+                boolean current = Boolean.TRUE.equals(district.getLaws().get(entry.getKey().name()));
+                Boolean pending = district.getPendingLaws().get(entry.getKey().name());
+                return entry.getValue().title() + " — " + (current ? "ON" : "OFF")
+                    + (pending == null ? "" : " (pending " + (pending ? "ON" : "OFF") + ")")
+                    + "\n" + entry.getValue().description();
+            }).collect(java.util.stream.Collectors.joining("\n\n"));
+            render(player, new DialogResult(DialogResultType.NEXT, group.title + " Laws", body
+                + "\n\nEditing requires MAYOR or CO_MAYOR.",
+                List.of(backItem("district.laws"), homeItem(), closeItem())));
+            return;
+        }
+        List<DialogFormField> fields = new ArrayList<>();
+        StringBuilder body = new StringBuilder("Changes become pending; the active law remains in force until the configured law reload.\n\n");
+        StringBuilder command = new StringBuilder("vsmenu apply laws ").append(group.name());
+        for (int index = 0; index < laws.size(); index++) {
+            DistrictData.LawKey key = laws.get(index).getKey();
+            LawUi ui = laws.get(index).getValue();
+            boolean current = Boolean.TRUE.equals(district.getLaws().get(key.name()));
+            boolean selected = district.getPendingLaws().getOrDefault(key.name(), current);
+            String inputKey = "law_" + index;
+            fields.add(DialogFormField.toggle(inputKey, ui.title(), selected));
+            command.append(" $(").append(inputKey).append(')');
+            body.append(ui.title()).append(": ").append(ui.description())
+                .append(" [active ").append(current ? "ON" : "OFF");
+            if (district.getPendingLaws().containsKey(key.name())) {
+                body.append(", pending ").append(selected ? "ON" : "OFF");
+            }
+            body.append("]\n");
+        }
+        openNativeForm(player, new DialogFormDefinition(group.title + " Laws", body.toString(), fields,
+            "Review Changes", command.toString(), "vsmenu district.laws"));
+    }
+
+    private void prepareLawChanges(Player player, String[] args) {
+        if (args.length < 2) {
+            render(player, new DialogError("Invalid Law Form", "The law form was incomplete. Nothing changed.").result());
+            return;
+        }
+        LawGroup group;
+        try {
+            group = LawGroup.valueOf(args[0].toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException error) {
+            render(player, new DialogError("Invalid Law Category", "Nothing changed.").result());
+            return;
+        }
+        DistrictData.District district = getDistrict(player);
+        DistrictService service = getDistrictService();
+        List<Map.Entry<DistrictData.LawKey, LawUi>> laws = lawsIn(group);
+        if (district == null || service == null || !service.canManageLaws(player.getUniqueId(), district)) {
+            render(player, new DialogError("Law Editor Locked", "Required role: MAYOR or CO_MAYOR.").result());
+            return;
+        }
+        if (args.length != laws.size() + 1) {
+            render(player, new DialogError("Invalid Law Form", "The law form was incomplete. Nothing changed.").result());
+            return;
+        }
+        Map<DistrictData.LawKey, Boolean> changes = new LinkedHashMap<>();
+        for (int index = 0; index < laws.size(); index++) {
+            if (!isBoolean(args[index + 1])) {
+                render(player, new DialogError("Invalid Law Value", "Only the provided toggle values are accepted.").result());
+                return;
+            }
+            DistrictData.LawKey key = laws.get(index).getKey();
+            boolean desired = Boolean.parseBoolean(args[index + 1]);
+            boolean effective = district.getPendingLaws().getOrDefault(key.name(),
+                Boolean.TRUE.equals(district.getLaws().get(key.name())));
+            if (desired != effective) changes.put(key, desired);
+        }
+        if (changes.isEmpty()) {
+            render(player, new DialogResult(DialogResultType.REFRESH, "No Law Changes",
+                "All toggles already match the active or pending values.",
+                List.of(DialogMenuItem.item("Back to Laws", "Return to law categories.", "vsmenu district.laws", null, Material.LECTERN),
+                    homeItem(), closeItem())));
+            return;
+        }
+        int newPending = (int) changes.keySet().stream().filter(key -> !district.getPendingLaws().containsKey(key.name())).count();
+        int remaining = Math.max(0, plugin.getConfigManager().getDistrictMaxLawChangesPerDay() - district.getPendingLaws().size());
+        if (newPending > remaining) {
+            render(player, new DialogError("Daily Law Limit",
+                "This would add " + newPending + " pending changes, but only " + remaining + " slot(s) remain today.").result());
+            return;
+        }
+        String token = UUID.randomUUID().toString().replace("-", "");
+        pendingLawConfirmations.put(player.getUniqueId(), new PendingLawConfirmation(player.getUniqueId(), district.getId(), token,
+            Map.copyOf(changes), System.currentTimeMillis() + LAW_CONFIRMATION_TTL_MILLIS));
+        String summary = changes.entrySet().stream()
+            .map(entry -> LAW_UI.get(entry.getKey()).title() + " -> " + (entry.getValue() ? "ON" : "OFF"))
+            .collect(java.util.stream.Collectors.joining("\n"));
+        render(player, new DialogResult(DialogResultType.CONFIRMATION, "Confirm Pending Law Changes",
+            "These changes do not activate immediately. Review before submitting:\n\n" + summary,
+            List.of(
+                DialogMenuItem.adminItem("Confirm Changes", "Submit these audited pending changes.", "vsmenu commit laws " + token, null, Material.EMERALD),
+                DialogMenuItem.item("Cancel", "Discard this confirmation.", "vsmenu district.laws", null, Material.BARRIER),
+                homeItem(), closeItem())));
+    }
+
+    private void commitLawChanges(Player player, String token) {
+        PendingLawConfirmation pending = pendingLawConfirmations.remove(player.getUniqueId());
+        DistrictService service = getDistrictService();
+        DistrictData.District district = getDistrict(player);
+        if (pending == null || !pending.actor().equals(player.getUniqueId()) || !pending.token().equals(token)
+            || pending.expiresAt() < System.currentTimeMillis() || district == null
+            || district.getId() != pending.districtId() || service == null
+            || !service.canManageLaws(player.getUniqueId(), district)) {
+            render(player, new DialogError("Confirmation Expired", "Reopen the law editor and review the values again.").result());
+            return;
+        }
+        int accepted = 0;
+        for (Map.Entry<DistrictData.LawKey, Boolean> change : pending.changes().entrySet()) {
+            if (service.proposeLaw(district.getId(), player.getUniqueId(), change.getKey(), change.getValue())) accepted++;
+        }
+        if (accepted != pending.changes().size()) {
+            render(player, new DialogError("Partially Submitted",
+                accepted + " of " + pending.changes().size() + " changes were accepted. Review the pending-law screen.").result());
+            return;
+        }
+        render(player, new DialogResult(DialogResultType.SUCCESS, "Law Changes Pending",
+            accepted + " audited change(s) are now pending. Current laws remain active until the configured reload.",
+            List.of(DialogMenuItem.item("View Pending", "Review queued changes.", "vsmenu district.pending_laws", null, Material.PAPER),
+                DialogMenuItem.item("Back to Laws", "Return to law categories.", "vsmenu district.laws", null, Material.LECTERN),
+                homeItem(), closeItem())));
+    }
+
+    private void openTicketPriceForm(Player player) {
+        com.vaultsurvival.plugin.rail.RailService rail = getRailService();
+        DistrictData.District district = getDistrict(player);
+        DistrictService districts = getDistrictService();
+        com.vaultsurvival.plugin.rail.RailData.Station station = rail == null || district == null ? null : rail.getStationByDistrict(district.getId());
+        if (station == null || district == null || districts == null || !districts.canRequestStation(player.getUniqueId(), district)) {
+            render(player, new DialogResult(DialogResultType.LOCKED, "Ticket Price Locked",
+                "Required: an existing district station and MAYOR, CO_MAYOR, or DIPLOMAT role.",
+                List.of(backItem("district.station"), homeItem(), closeItem())));
+            return;
+        }
+        long maximum = Math.max(1L, plugin.getConfigManager().getConfig().getLong("rail.maxTicketPrice", 1_000_000L));
+        openNativeForm(player, new DialogFormDefinition("Station Ticket Price",
+            "Enter a whole-number price from 0 to " + maximum + ". The value is validated before saving.",
+            List.of(DialogFormField.number("price", "Ticket price", station.getTicketPrice())),
+            "Save Ticket Price", "vsmenu apply ticket $(price)", "vsmenu district.station"));
+    }
+
+    private void applyTicketPriceForm(Player player, String[] args) {
+        long maximum = Math.max(1L, plugin.getConfigManager().getConfig().getLong("rail.maxTicketPrice", 1_000_000L));
+        if (args.length != 1) {
+            render(player, new DialogError("Invalid Ticket Price", "The form was incomplete. Nothing changed.").result());
+            return;
+        }
+        var error = formValidation.boundedLong(args[0], "Ticket price", 0, maximum);
+        if (error.isPresent()) {
+            render(player, new DialogError("Invalid Ticket Price", error.get()).result());
+            return;
+        }
+        com.vaultsurvival.plugin.rail.RailService rail = getRailService();
+        DistrictData.District district = getDistrict(player);
+        var station = rail == null || district == null ? null : rail.getStationByDistrict(district.getId());
+        long price = Long.parseLong(args[0]);
+        if (station == null || !rail.setTicketPriceSilently(station.getId(), player, price)) {
+            render(player, new DialogError("Ticket Price Not Saved", "Your role or station state changed. Nothing was updated.").result());
+            return;
+        }
+        render(player, new DialogResult(DialogResultType.SUCCESS, "Ticket Price Saved",
+            "New station ticket price: " + price,
+            List.of(DialogMenuItem.item("Adjust Again", "Enter another bounded value.", "vsmenu form ticket", null, Material.GOLD_NUGGET),
+                backItem("district.station"), homeItem(), closeItem())));
+    }
+
+    private void openMerchantPriceForm(Player player, String[] args) {
+        if (args.length != 2) { render(player, new DialogError("Invalid Shop Slot", "Reopen the shop editor.").result()); return; }
+        int shopId, slot;
+        try { shopId = Integer.parseInt(args[0]); slot = Integer.parseInt(args[1]); }
+        catch (NumberFormatException invalid) { render(player, new DialogError("Invalid Shop Slot", "Reopen the shop editor.").result()); return; }
+        com.vaultsurvival.plugin.merchant.shop.MerchantShopService shops;
+        try { shops = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.merchant.shop.MerchantShopService.class); }
+        catch (RuntimeException unavailable) { render(player, new DialogError("Shop Unavailable", "The merchant service is unavailable.").result()); return; }
+        var shop = shops.getShop(shopId);
+        var item = shops.getShopItems(shopId).stream().filter(row -> row.getSlot() == slot).findFirst().orElse(null);
+        if (shop == null || !shop.getOwnerUuid().equals(player.getUniqueId()) || item == null) {
+            render(player, new DialogError("Shop Slot Unavailable", "The item was removed or this shop is not yours.").result()); return;
+        }
+        openNativeForm(player, new DialogFormDefinition("Set Shop Price", item.getItemDisplay() + " | Stock: " + item.getStock(),
+            List.of(DialogFormField.number("price", "Price per item", item.getPrice())), "Save Price",
+            "vsmenu apply merchant_price " + shopId + " " + slot + " $(price)", "merchant shop edit " + shopId));
+    }
+
+    private void applyMerchantPriceForm(Player player, String[] args) {
+        if (args.length != 3) { render(player, new DialogError("Invalid Price", "No price was changed.").result()); return; }
+        int shopId, slot;
+        try { shopId = Integer.parseInt(args[0]); slot = Integer.parseInt(args[1]); }
+        catch (NumberFormatException invalid) { render(player, new DialogError("Invalid Shop Slot", "No price was changed.").result()); return; }
+        long maximum = Math.max(1L, plugin.getConfigManager().getConfig().getLong("districtMarket.maxItemPrice", 1_000_000_000L));
+        var error = formValidation.boundedLong(args[2], "Item price", 1, maximum);
+        if (error.isPresent()) { render(player, new DialogError("Invalid Shop Price", error.get()).result()); return; }
+        var shops = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.merchant.shop.MerchantShopService.class);
+        if (!shops.setPriceSilently(player, shopId, slot, Long.parseLong(args[2]))) {
+            render(player, new DialogError("Price Not Saved", "The shop or item changed. Reopen the editor.").result()); return;
+        }
+        render(player, new DialogResult(DialogResultType.SUCCESS, "Shop Price Saved", "Price per item: " + args[2], List.of(
+            DialogMenuItem.item("Back to Shop Editor", "Continue stocking and pricing.", "merchant shop edit " + shopId, null, Material.CRAFTING_TABLE),
+            closeItem())));
+    }
+
+    private void openNativeForm(Player player, DialogFormDefinition form) {
+        boolean opened = false;
+        if (preferNative(player) && nativeProvider.isAvailable()) {
+            try {
+                opened = nativeProvider.openForm(player, form);
+                if (opened) lastProviderName = nativeProvider.getName();
+            } catch (Throwable throwable) {
+                plugin.getLogger().warning("Native dialog form failed, using fallback: " + throwable.getMessage());
+            }
+        }
+        if (!opened) {
+            fallbackProvider.openForm(player, form);
+            lastProviderName = fallbackProvider.getName();
+        }
+    }
+
+    private void openDistrictProjectForm(Player player) {
+        DistrictData.District district = getDistrict(player); DistrictService districts = getDistrictService();
+        if (district == null || districts == null || !districts.canManageDevelopment(player.getUniqueId(), district)) {
+            render(player, new DialogResult(DialogResultType.LOCKED, "Project Creation Locked",
+                "Required role: MAYOR, CO_MAYOR, or an authorized development role.", List.of(backItem("district.development"), homeItem(), closeItem()))); return;
+        }
+        List<DialogFormField.Option> types = List.of(option("BUILD_MARKET","Build Market"),option("BUILD_STATION","Build Station"),
+            option("BUILD_TOWN_HALL","Build Town Hall"),option("BUILD_POLICE_STATION","Build Police Station"),
+            option("BUILD_ROAD","Build Road"),option("PUBLIC_WORKS","Public Works"));
+        openNativeForm(player, new DialogFormDefinition("Create District Project",
+            "Select a readable project type and enter positive whole-number requirements.", List.of(
+                DialogFormField.dropdown("type","Project type","BUILD_MARKET",types),
+                DialogFormField.number("cash","Physical cash required",5000),
+                DialogFormField.number("items","Material items required",128)), "Create Project",
+            "vsmenu apply district_project $(type) $(cash) $(items)", "vsmenu district.development"));
+    }
+
+    private void openStationRequestForm(Player player) {
+        DistrictData.District district=getDistrict(player);DistrictService districts=getDistrictService();
+        if(district==null||districts==null||!districts.canRequestStation(player.getUniqueId(),district)){
+            render(player,new DialogResult(DialogResultType.LOCKED,"Station Request Locked","Required: active district and MAYOR, CO_MAYOR, or DIPLOMAT role.",List.of(backItem("district.station"),homeItem(),closeItem())));return;}
+        long fee=plugin.getConfigManager().getConfig().getLong("rail.applicationFee",10000);
+        long balance=physicalTreasuryBalance(district);
+        if(balance<fee){render(player,new DialogResult(DialogResultType.LOCKED,"Insufficient Physical Treasury","Required: "+fee+" in a registered treasury vault. Current: "+balance+".",List.of(backItem("district.treasury"),homeItem(),closeItem())));return;}
+        openNativeForm(player,new DialogFormDefinition("Request District Station","Application fee: "+fee+". Physical treasury balance: "+balance+".",List.of(DialogFormField.text("name","Station name",district.getName()+" Station",32,false)),"Submit Application","vsmenu apply station_request $(name)","vsmenu district.station"));
+    }
+
+    private void applyStationRequestForm(Player player,String[] args){
+        String name=String.join(" ",args).trim();if(name.length()<3||name.length()>32){render(player,new DialogError("Invalid Station Name","Use 3 to 32 characters.").result());return;}
+        com.vaultsurvival.plugin.rail.RailService rail=getRailService();var station=rail==null?null:rail.requestStationSilently(player,name);
+        if(station==null){render(player,new DialogError("Station Not Requested","Check role, existing station state, and physical treasury balance.").result());return;}
+        render(player,new DialogResult(DialogResultType.SUCCESS,"Station Requested","Application #"+station.getId()+" was created and the physical application fee was debited.",List.of(DialogMenuItem.item("Set Platform","Select the exact platform area.","vsmenu input station_setplatform",null,Material.OAK_PLANKS),DialogMenuItem.item("Set Arrival","Use your current location as arrival point.","vsmenu input station_setarrival",null,Material.ENDER_PEARL),backItem("district.station"),homeItem(),closeItem())));
+    }
+
+    private void applyDistrictProjectForm(Player player, String[] args) {
+        if (args.length != 3) { render(player, new DialogError("Invalid Project", "No project was created.").result()); return; }
+        if (!Set.of("BUILD_MARKET","BUILD_STATION","BUILD_TOWN_HALL","BUILD_POLICE_STATION","BUILD_ROAD","PUBLIC_WORKS").contains(args[0])) {
+            render(player, new DialogError("Invalid Project Type", "Choose a type from the dropdown.").result()); return;
+        }
+        var cashError = formValidation.boundedLong(args[1], "Cash requirement", 1, 1_000_000_000L);
+        var itemError = formValidation.boundedLong(args[2], "Item requirement", 1, 1_000_000L);
+        if (cashError.isPresent() || itemError.isPresent()) { render(player, new DialogError("Invalid Requirements", cashError.orElseGet(itemError::get)).result()); return; }
+        com.vaultsurvival.plugin.districts.DistrictDevelopmentService development;
+        try { development = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.districts.DistrictDevelopmentService.class); }
+        catch (RuntimeException unavailable) { render(player, new DialogError("Development Unavailable", "No project was created.").result()); return; }
+        var result = development.createProject(player, args[0], Long.parseLong(args[1]), Integer.parseInt(args[2]));
+        if (!result.success()) { render(player, new DialogError("Project Not Created", result.message()).result()); return; }
+        render(player, new DialogResult(DialogResultType.SUCCESS, "Project Created", result.message(), List.of(
+            DialogMenuItem.item("View Development", "Return to project and maintenance overview.", "vsmenu district.development", null, Material.BRICKS),
+            DialogMenuItem.item("Create Another", "Open the typed project form again.", "vsmenu form district_project", null, Material.EMERALD_BLOCK), homeItem(), closeItem())));
+    }
+
     private List<DialogMenuItem> buildItems(Player player, DialogMenuType menuType) {
         return switch (menuType) {
             case MAIN -> mainMenu(player);
@@ -176,6 +699,7 @@ public class DialogService {
             case PLAYER_ORDERS -> playerOrdersMenu(player);
             case PLAYER_RISK -> playerRiskMenu(player);
             case DISTRICTS -> districtMenu(player);
+            case DISTRICT_DIRECTORY -> districtDirectoryMenu(player);
             case DISTRICT_CURRENT -> currentDistrictMenu(player);
             case DISTRICT_LAWS -> activeLawsMenu(player);
             case DISTRICT_PENDING_LAWS -> pendingLawsMenu(player);
@@ -192,7 +716,7 @@ public class DialogService {
                 DialogMenuItem.item("Project Board", "View active district projects.", "district projects", null, Material.WRITABLE_BOOK),
                 DialogMenuItem.item("Maintenance", "View district maintenance state.", "district maintenance", null, Material.ANVIL),
                 DialogMenuItem.item("Contributors", "View district contributors.", "district contributors", null, Material.PLAYER_HEAD),
-                DialogMenuItem.item("Create Project", "Create a project with cash and material requirements.", "vsmenu input district_project_create", null, Material.EMERALD_BLOCK),
+                DialogMenuItem.item("Create Project", "Choose a project type and validated requirements.", "vsmenu form district_project", null, Material.EMERALD_BLOCK),
                 DialogMenuItem.item("Contribute", "Contribute physical cash or held materials.", "vsmenu input district_project_contribute", null, Material.HOPPER),
                 DialogMenuItem.item("Kingdom Support", "Request or track staff-assigned development support.", "civic support list", null, Material.BELL),
                 backItem("district"), homeItem(), closeItem());
@@ -242,11 +766,9 @@ public class DialogService {
         List<DialogMenuItem> items = new ArrayList<>(List.of(
             DialogMenuItem.item("Current Area", "Show current area information.", "vsmenu current", null, Material.COMPASS),
             DialogMenuItem.item("Rail", "Browse stations, routes, tickets, and journeys.", "vsmenu rail", null, Material.RAIL),
-            DialogMenuItem.item("Jobs", "Browse Spawn City and district jobs.", "vsmenu jobs", null, Material.IRON_PICKAXE),
             DialogMenuItem.item("Orders", "Browse merchant orders and Auction Hall listings.", "vsmenu orders", null, Material.WRITABLE_BOOK),
-            DialogMenuItem.item("Settings", "Open player settings.", "vsmenu settings", null, Material.COMPARATOR),
-            DialogMenuItem.item("Guides", "Open guides.", "vsmenu guides", null, Material.BOOK),
-            DialogMenuItem.item("Vaults", "Open vault management shortcuts.", "vsmenu vaults", "vs.vault.use", Material.BARREL)
+            DialogMenuItem.item("Settings", "Use native controls for preferences and visualization.", "vsmenu settings", null, Material.COMPARATOR),
+            DialogMenuItem.item("Guides", "Open concise system guides.", "vsmenu guides", null, Material.BOOK)
         ));
 
         if (plugin.isStaffModeActive(player.getUniqueId())) {
@@ -257,7 +779,7 @@ public class DialogService {
         DistrictData.District district = getDistrict(player);
         if (district == null) {
             items.add(1, DialogMenuItem.item("Start District", "Apply to found a new district.", "vsmenu input district_apply", null, Material.WRITABLE_BOOK));
-            items.add(2, DialogMenuItem.item("Join District", "Browse official districts and ask for an invite.", "district list", null, Material.FILLED_MAP));
+            items.add(2, DialogMenuItem.item("Browse Districts", "View official districts and request membership.", "vsmenu district.directory", null, Material.FILLED_MAP));
         } else {
             items.add(1, DialogMenuItem.item("My District", "Open tools for " + district.getName() + ".", "vsmenu district", null, Material.MAP));
             DistrictService service = getDistrictService();
@@ -276,15 +798,13 @@ public class DialogService {
         if (district == null) {
             return List.of(
                 DialogMenuItem.item("Start District", "Apply to found a new district.", "vsmenu input district_apply", null, Material.WRITABLE_BOOK),
-                DialogMenuItem.item("Join District", "Browse official districts and ask for an invite.", "district list", null, Material.FILLED_MAP),
+                DialogMenuItem.item("Join District", "Browse official districts and ask for an invite.", "vsmenu district.directory", null, Material.FILLED_MAP),
                 backItem(), homeItem(), closeItem());
         }
-        items.add(DialogMenuItem.item("Current", "Show live district, law, market, job, and station context.", "vsmenu district.current", null, Material.COMPASS));
-        items.add(DialogMenuItem.item("My District", "Show your district information.", "district info", null, Material.OAK_SIGN));
-        items.add(DialogMenuItem.item("Member Overview", "List district members and roles.", "district members", null, Material.PLAYER_HEAD));
-        if (districtService != null && districtService.canManageLaws(player.getUniqueId(), district)) {
-            items.add(DialogMenuItem.item("Laws", "View and propose district laws.", "vsmenu district.laws", null, Material.LECTERN));
-        }
+        items.add(DialogMenuItem.item("Overview", "Show live district, market, station, and role context.", "vsmenu district.current", null, Material.COMPASS));
+        items.add(DialogMenuItem.item("District Home", "Teleport to the mayor-defined district home.", "district home", null, Material.ENDER_PEARL));
+        items.add(DialogMenuItem.item("Laws", "View readable laws or edit them with toggles when authorized.", "vsmenu district.laws", null, Material.LECTERN));
+        items.add(DialogMenuItem.item("Market", "Open market-zone, merchant, and order controls.", "vsmenu district.market", null, Material.EMERALD_BLOCK));
         if (districtService != null && districtService.canManageTreasury(player.getUniqueId(), district)) {
             items.add(DialogMenuItem.item("Treasury", "Manage physical district treasury cash.", "vsmenu district.treasury", null, Material.GOLD_BLOCK));
         }
@@ -294,40 +814,13 @@ public class DialogService {
         if (districtService != null && districtService.canRequestStation(player.getUniqueId(), district)) {
             items.add(DialogMenuItem.item("Station", "Manage your district station application.", "vsmenu district.station", null, Material.RAIL));
         }
-        if (districtService != null && districtService.canManageDevelopment(player.getUniqueId(), district)) items.add(DialogMenuItem.item("Builder Tools", "Development planning.", "vsmenu district.development", null, Material.BRICKS));
-        items.add(DialogMenuItem.item("District Market", "Open the market-zone, shop, and order dashboard.", "vsmenu district.market", null, Material.EMERALD_BLOCK));
-        items.add(DialogMenuItem.item("Diplomacy", "View alliances, requests, hostility, and ally chat.", "vsmenu district.diplomacy", null, Material.WHITE_BANNER));
-        if (districtService != null && districtService.canCreateMerchantNpc(player.getUniqueId(), district)) items.add(DialogMenuItem.item("Merchant Tools", "Merchant NPC and market tools.", "vsmenu merchant", null, Material.EMERALD));
-        if (districtService != null && districtService.canCreateDistrictJob(player.getUniqueId(), district)) items.add(DialogMenuItem.item("District Jobs", "Create and manage district jobs.", "vsmenu district.jobs", null, Material.IRON_PICKAXE));
-        items.add(DialogMenuItem.item("District Chat", "Switch to your district member channel.", "chat district", null, Material.WRITABLE_BOOK));
-        if (districtService != null && districtService.canPolice(player.getUniqueId(), district)) items.add(DialogMenuItem.item("Police Chat", "Switch to local police channel.", "chat police", null, Material.SHIELD));
-        if (districtService != null && (districtService.canCreateMerchantNpc(player.getUniqueId(), district) || districtService.canManageTreasury(player.getUniqueId(), district))) items.add(DialogMenuItem.item("Merchant Chat", "Switch to merchant channel.", "chat merchant", null, Material.EMERALD));
-
-        if (district != null) {
-            if (district.isCouncil(player.getUniqueId())) {
-                items.add(DialogMenuItem.item("Invite Member", "Invite an online player to your district.", "vsmenu input district_invite", null, Material.PLAYER_HEAD));
-                items.add(DialogMenuItem.item("Set Law", "Toggle a local district law.", "vsmenu input district_law", null, Material.LECTERN));
-                items.add(DialogMenuItem.item("Kick Member", "Remove a member from your district.", "vsmenu input district_kick", null, Material.LEATHER_BOOTS));
-            }
-            if (district.isPolice(player.getUniqueId())) {
-                items.add(DialogMenuItem.item("Wanted", "List wanted players in your district.", "crime wanted", null, Material.CROSSBOW));
-                items.add(DialogMenuItem.item("Crime Record", "Open a player crime record.", "vsmenu input crime_record", null, Material.PAPER));
-                items.add(DialogMenuItem.item("Arrest", "Arrest a wanted nearby player.", "vsmenu input crime_arrest", null, Material.IRON_BARS));
-                items.add(DialogMenuItem.item("Fine", "Fine a wanted player.", "vsmenu input crime_fine", null, Material.GOLD_NUGGET));
-                items.add(DialogMenuItem.item("Release", "Release a jailed player.", "vsmenu input crime_release", null, Material.TRIPWIRE_HOOK));
-                items.add(DialogMenuItem.item("Jailed", "List district jail records.", "crime jailed", null, Material.IRON_DOOR));
-            }
-            if (district.isMayor(player.getUniqueId())) {
-                items.add(DialogMenuItem.adminItem("Set Role", "Set a member district role.", "vsmenu input district_role", null, Material.NAME_TAG));
-                items.add(DialogMenuItem.adminItem("Set Jail", "Set district jail to your location.", "crime setjail", null, Material.IRON_BLOCK));
-                items.add(DialogMenuItem.adminItem("Disband", "Usage help for district disband command.", "district disband", null, Material.TNT));
-            }
-            if (district.isTreasurer(player.getUniqueId())) {
-                items.add(DialogMenuItem.item("Deposit Treasury", "Deposit physical cash into treasury.", "vsmenu input district_deposit", null, Material.GOLD_NUGGET));
-                items.add(DialogMenuItem.item("Withdraw Treasury", "Withdraw physical cash from treasury.", "vsmenu input district_withdraw", null, Material.CHEST));
-            }
+        if (districtService != null && districtService.canManageDevelopment(player.getUniqueId(), district)) {
+            items.add(DialogMenuItem.item("Development", "Open district projects and maintenance.", "vsmenu district.development", null, Material.BRICKS));
         }
-        items.add(DialogMenuItem.adminItem("Applications", "Review pending applications.", "district applications", "vs.district.admin", Material.PAPER));
+        if (district.hasRole(player.getUniqueId(), DistrictData.DistrictRole.MAYOR)) {
+            items.add(DialogMenuItem.item("Set District Home", "Save your current in-claim location as district home.", "district sethome", null, Material.RESPAWN_ANCHOR));
+        }
+        items.add(DialogMenuItem.item("Diplomacy", "View alliances, requests, and hostility.", "vsmenu district.diplomacy", null, Material.WHITE_BANNER));
         items.add(backItem());
         items.add(homeItem());
         items.add(closeItem());
@@ -338,23 +831,21 @@ public class DialogService {
         CurrentAreaContext context = getCurrentArea(player);
         String districtName = context.hasDistrict() ? context.district().getName() : "None";
         List<DialogMenuItem> items = new ArrayList<>();
-        items.add(DialogMenuItem.locked("Area Type", "Current area type.",
+        items.add(DialogMenuItem.status("Area Type", "Current area type.",
             context.areaType().name().replace('_', ' ') + " - " + context.areaName(), Material.COMPASS));
-        items.add(DialogMenuItem.locked("District", "Current district.",
+        items.add(DialogMenuItem.status("District", "Current district.",
             districtName, Material.MAP));
-        items.add(DialogMenuItem.locked("Your Status", "Your status in this district.",
+        items.add(DialogMenuItem.status("Your Status", "Your status in this district.",
             context.playerStatus(), Material.PLAYER_HEAD));
-        items.add(DialogMenuItem.locked("Active Flags", "Resolved region flags.",
+        items.add(DialogMenuItem.status("Active Flags", "Resolved region flags.",
             summarizeFlags(context), Material.REDSTONE_TORCH));
-        items.add(DialogMenuItem.locked("Law Summary", "Current law state.",
+        items.add(DialogMenuItem.status("Law Summary", "Current law state.",
             context.lawSummary(), Material.LECTERN));
-        items.add(DialogMenuItem.locked("Risk Summary", "Current risk state.",
+        items.add(DialogMenuItem.status("Risk Summary", "Current risk state.",
             context.riskSummary(), Material.CROSSBOW));
-        items.add(DialogMenuItem.locked("Market Summary", "Current trade context.",
+        items.add(DialogMenuItem.status("Market Summary", "Current trade context.",
             context.marketSummary(), Material.EMERALD));
-        items.add(DialogMenuItem.locked("Job Summary", "Current local and Spawn City work.",
-            context.jobSummary(), Material.IRON_PICKAXE));
-        items.add(DialogMenuItem.locked("Station Summary", "Current rail service context.",
+        items.add(DialogMenuItem.status("Station Summary", "Current rail service context.",
             context.stationSummary(), Material.RAIL));
 
         if (context.hasDistrict()) {
@@ -363,13 +854,9 @@ public class DialogService {
         }
 
         if (context.hasDistrict()) {
-            items.add(DialogMenuItem.item("District Info", "Show the current district details.",
-                "district info " + context.district().getId(), null, Material.OAK_SIGN));
             items.add(DialogMenuItem.item("Request Join", "Send a persistent request to this district's council.",
                 "civic join " + context.district().getId(), null, Material.WRITABLE_BOOK));
         } else {
-            items.add(DialogMenuItem.locked("District Info", "Show current district details.",
-                "No district applies here.", Material.OAK_SIGN));
             items.add(DialogMenuItem.locked("Request Join", "Request district membership.",
                 "No district applies here.", Material.WRITABLE_BOOK));
         }
@@ -393,7 +880,7 @@ public class DialogService {
             DialogMenuItem.item("My Accepted Jobs", "List your district job claims.", "district job list", null, Material.BOOK),
             DialogMenuItem.item("Deliver Items", "Enter a job id to deliver required items.", "vsmenu input district_job_deliver", null, Material.CHEST),
             DialogMenuItem.item("Submit Manual Job", "Enter a job id for manual submission.", "vsmenu input district_job_submit", null, Material.WRITABLE_BOOK),
-            DialogMenuItem.item("Claim Payout", "Claim pending payout locker cash.", "payouts claim", null, Material.GOLD_NUGGET),
+            DialogMenuItem.item("Shop Earnings", "Collect merchant-shop proceeds at your own shop NPC.", "vsmenu merchant.shops", null, Material.GOLD_NUGGET),
             backItem(), homeItem(), closeItem()
         );
     }
@@ -423,14 +910,17 @@ public class DialogService {
         if (district == null) {
             return unavailableMenu("Active Laws", "You are not a member of a district.", "district");
         }
+        DistrictData.District visibleDistrict = district;
         List<DialogMenuItem> items = new ArrayList<>();
-        for (DistrictData.LawKey law : DistrictData.LawKey.values()) {
-            boolean enabled = Boolean.TRUE.equals(district.getLaws().get(law.name()));
-            items.add(DialogMenuItem.locked(law.name(), "Active law state.",
-                enabled ? "ACTIVE" : "inactive", enabled ? Material.LIME_DYE : Material.GRAY_DYE));
+        long active = java.util.Arrays.stream(DistrictData.LawKey.values())
+            .filter(law -> Boolean.TRUE.equals(visibleDistrict.getLaws().get(law.name()))).count();
+        items.add(metric("Active Laws", active, Material.LIME_DYE));
+        items.add(metric("Pending Changes", district.getPendingLaws().size(), Material.PAPER));
+        for (LawGroup group : LawGroup.values()) {
+            items.add(DialogMenuItem.item(group.title, "View readable law explanations; authorized council members can edit toggles.",
+                "vsmenu form laws " + group.name(), null, Material.LECTERN));
         }
         items.add(DialogMenuItem.item("Pending Laws", "Show pending law changes.", "vsmenu district.pending_laws", null, Material.PAPER));
-        items.add(DialogMenuItem.item("Law Editor", "Open law proposal commands.", "vsmenu district.roles", null, Material.LECTERN));
         items.add(backItem("district"));
         items.add(homeItem());
         items.add(closeItem());
@@ -448,7 +938,8 @@ public class DialogService {
             items.add(DialogMenuItem.locked("No Pending Laws", "No law changes are queued.",
                 "Pending laws apply at the daily law reload.", Material.PAPER));
         } else {
-            district.getPendingLaws().forEach((law, enabled) -> items.add(DialogMenuItem.locked(law,
+            district.getPendingLaws().forEach((law, enabled) -> items.add(DialogMenuItem.locked(
+                LAW_UI.containsKey(parseLaw(law)) ? LAW_UI.get(parseLaw(law)).title() : readable(law),
                 "Pending law change visible to visitors.", "Will become " + enabled + " at daily reload.",
                 enabled ? Material.LIME_DYE : Material.RED_DYE)));
         }
@@ -460,25 +951,7 @@ public class DialogService {
     }
 
     private List<DialogMenuItem> lawEditorMenu(Player player) {
-        DistrictData.District district = getDistrict(player);
-        DistrictService districtService = getDistrictService();
-        if (district == null || districtService == null || !districtService.canManageLaws(player.getUniqueId(), district)) {
-            return List.of(
-                DialogMenuItem.locked("Law Editor", "Propose district law changes.",
-                    "Requires CO_MAYOR or MAYOR in your district.", Material.LECTERN),
-                backItem("district"), homeItem(), closeItem()
-            );
-        }
-        List<DialogMenuItem> items = new ArrayList<>();
-        items.add(DialogMenuItem.item("Propose Law", "Use: LAW true|false.", "vsmenu input district_law", null, Material.WRITABLE_BOOK));
-        items.add(DialogMenuItem.item("Active Laws", "Review active laws.", "vsmenu district.laws", null, Material.LECTERN));
-        items.add(DialogMenuItem.item("Pending Laws", "Review queued changes.", "vsmenu district.pending_laws", null, Material.PAPER));
-        items.add(DialogMenuItem.locked("Daily Limit", "Configured max pending changes per day.",
-            String.valueOf(plugin.getConfigManager().getDistrictMaxLawChangesPerDay()), Material.CLOCK));
-        items.add(backItem("district"));
-        items.add(homeItem());
-        items.add(closeItem());
-        return items;
+        return activeLawsMenu(player);
     }
 
     private List<DialogMenuItem> policeDeskMenu(Player player) {
@@ -516,20 +989,13 @@ public class DialogService {
             ? new CivicWorkflowService.Preferences("ALL", "AUTO", "PUBLIC")
             : getCivicWorkflow().preferences(player.getUniqueId());
         return List.of(
-            DialogMenuItem.locked("Current Channel", "Your active chat channel.",
-                active.displayName(), Material.PAPER),
-            DialogMenuItem.item("Global Channel", "Switch active chat to global.", "chat global", null, Material.GLOBE_BANNER_PATTERN),
-            DialogMenuItem.item("Local Channel", "Switch active chat to nearby players.", "chat local", null, Material.COMPASS),
-            chatItem(player, ChatChannel.DISTRICT, "District Channel", "Switch active chat to district members.", Material.MAP),
-            chatItem(player, ChatChannel.POLICE, "Police Channel", "Switch active chat to district police.", Material.SHIELD),
-            chatItem(player, ChatChannel.MERCHANT, "Merchant Channel", "Switch active chat to district merchants.", Material.EMERALD),
-            chatItem(player, ChatChannel.STAFF, "Staff Channel", "Switch active chat to staff.", Material.REDSTONE_TORCH),
-            DialogMenuItem.item("Chat Preview", "Preview your current chat channel.", "chatpreview", null, Material.SPYGLASS),
-            DialogMenuItem.item("Notification Settings", "Show current chat settings.", "chatsettings", null, Material.BELL),
-            DialogMenuItem.item("Notifications: " + preferences.notifications(), "Control routine and important workflow notifications.", "civic preferences notifications next", null, Material.BELL),
-            DialogMenuItem.item("Menu Style: " + preferences.menuStyle(), "Choose automatic, native Paper dialogs, or compact fallback menus.", "civic preferences menu next", null, Material.COMPARATOR),
-            DialogMenuItem.item("Privacy: " + preferences.privacy(), "Control public, friend-only, or private profile visibility.", "civic preferences privacy next", null, Material.ENDER_EYE),
-            DialogMenuItem.item("Public Profile Preview", "Preview the profile other players can request.", "civic profile " + player.getName(), null, Material.PLAYER_HEAD),
+            DialogMenuItem.locked("Current Settings", "Saved player preferences.",
+                "Notifications " + preferences.notifications() + " | Menu " + preferences.menuStyle()
+                    + " | Privacy " + preferences.privacy() + " | Chat " + active.displayName(), Material.COMPARATOR),
+            DialogMenuItem.item("Edit Player Settings", "Use dropdowns for notifications, menu style, privacy, and chat channel.",
+                "vsmenu form settings", null, Material.COMPARATOR),
+            DialogMenuItem.item("Region Visualization", "Use toggles and a duration dropdown for an active border.",
+                "vsmenu form visualization", null, Material.ENDER_EYE),
             backItem(), homeItem(), closeItem()
         );
     }
@@ -545,7 +1011,7 @@ public class DialogService {
 
     private List<DialogMenuItem> merchantMenu() {
         return List.of(
-            DialogMenuItem.item("Show Market Zone", "Display your district's market-zone chunk borders.", "district marketzone borders", null, Material.LIME_DYE),
+            DialogMenuItem.item("Show Market Zone", "Display your district's exact market-zone block borders.", "district marketzone borders", null, Material.LIME_DYE),
             DialogMenuItem.item("My Buy Orders", "View your merchant buy orders.", "merchant orders", null, Material.WRITABLE_BOOK),
             DialogMenuItem.item("Create Buy Order", "Create a new buy order (hold the item).", "vsmenu input merchant_create", null, Material.EMERALD),
             DialogMenuItem.item("Active Buy Orders", "Browse all active buy orders.", "merchant order list", null, Material.BOOKSHELF),
@@ -553,7 +1019,7 @@ public class DialogService {
             DialogMenuItem.item("Cancel Order", "Cancel your buy order.", "vsmenu input merchant_cancel", null, Material.BARRIER),
             DialogMenuItem.item("Order Storage", "View delivered items in storage.", "vsmenu merchant.earnings", null, Material.BARREL),
             DialogMenuItem.item("My NPC Shops", "Manage your merchant NPC shops.", "vsmenu merchant.shops", null, Material.VILLAGER_SPAWN_EGG),
-            DialogMenuItem.item("Claim Payout", "Claim pending payout locker cash.", "payouts claim", null, Material.GOLD_NUGGET),
+            DialogMenuItem.item("Collect Shop Earnings", "Shop proceeds are physical: collect them at your own shop NPC.", "merchant shop edit", null, Material.GOLD_NUGGET),
             backItem(), homeItem(), closeItem()
         );
     }
@@ -597,10 +1063,10 @@ public class DialogService {
             for (var shop : shops) {
                 var shopItems = shopService.getShopItems(shop.getId());
                 int totalStock = shopItems.stream().mapToInt(com.vaultsurvival.plugin.merchant.shop.MerchantShopData.ShopItem::getStock).sum();
-                items.add(DialogMenuItem.locked(
+                items.add(DialogMenuItem.item(
                     shop.getName() + " (#" + shop.getId() + ")",
                     "NPC #" + shop.getNpcId() + " | Items: " + shopItems.size() + " | Stock: " + totalStock,
-                    "Use commands to manage: /merchant shop stock|prices " + shop.getId(),
+                    "merchant shop edit " + shop.getId(), null,
                     Material.EMERALD));
             }
             if (items.isEmpty()) {
@@ -609,8 +1075,8 @@ public class DialogService {
             }
             items.add(DialogMenuItem.item("Create Shop NPC", "Create a new merchant shop NPC at your location.",
                 "vsmenu input merchant_shop_create", null, Material.VILLAGER_SPAWN_EGG));
-            items.add(DialogMenuItem.item("Claim Payout", "Claim pending payout locker cash.",
-                "payouts claim", null, Material.GOLD_NUGGET));
+            items.add(DialogMenuItem.item("Edit by NPC", "Right-click one of your shop NPCs to choose Browse, Edit, or Collect.",
+                "merchant shop edit", null, Material.CRAFTING_TABLE));
             items.add(backItem("merchant"));
             items.add(homeItem());
             items.add(closeItem());
@@ -780,22 +1246,27 @@ public class DialogService {
         try {
             var railService = plugin.getServiceRegistry().get(
                 com.vaultsurvival.plugin.rail.RailService.class);
-            var station = railService.getStationStatus(player);
+            DistrictData.District district = getDistrict(player);
+            var station = district == null ? null : railService.getStationByDistrict(district.getId());
             List<DialogMenuItem> items = new ArrayList<>();
             if (station == null) {
                 items.add(DialogMenuItem.item("Request Station", "Apply for a district train station.",
-                    "vsmenu input station_request", null, Material.RAIL));
+                    "vsmenu form station_request", null, Material.RAIL));
                 items.add(DialogMenuItem.locked("Requirements", "District must be active and you need MAYOR/CO_MAYOR/DIPLOMAT role.",
                     "Active district + council/diplomat role required.", Material.PAPER));
             }
-            items.add(DialogMenuItem.item("View Status", "View your district station status.",
-                "district station status", null, Material.COMPASS));
+            if (station != null) {
+                items.add(DialogMenuItem.locked("Station Status", "Current district station.",
+                    station.getStatus() + " | Ticket price " + station.getTicketPrice(), Material.COMPASS));
+                items.add(DialogMenuItem.item("Ticket Price", "Set a validated whole-number ticket price.",
+                    "vsmenu form ticket", null, Material.GOLD_NUGGET));
+            }
             items.add(DialogMenuItem.item("Set Platform", "Set station platform at your location.",
                 "vsmenu input station_setplatform", null, Material.OAK_PLANKS));
             items.add(DialogMenuItem.item("Set Arrival", "Set arrival point at your location.",
                 "vsmenu input station_setarrival", null, Material.ENDER_PEARL));
             items.add(DialogMenuItem.item("Submit Application", "Submit station application.",
-                "vsmenu input station_request", null, Material.WRITABLE_BOOK));
+                "vsmenu form station_request", null, Material.WRITABLE_BOOK));
             items.add(backItem("district"));
             items.add(homeItem());
             items.add(closeItem());
@@ -1026,7 +1497,7 @@ public class DialogService {
             DialogMenuItem.item("My Merchant Orders", "View status, escrow, fills, and storage.", "vsmenu merchant.orders", null, Material.EMERALD),
             DialogMenuItem.item("Create Buy Order", "Hold the target item and enter price and quantity.", "vsmenu merchant.create_order", null, Material.WRITABLE_BOOK),
             DialogMenuItem.item("Auction Hall Listings", "Browse active player listings.", "ah listings", "vs.market.buy", Material.GOLD_BLOCK),
-            DialogMenuItem.item("Claim Payouts", "Collect pending merchant and job payouts.", "payouts claim", null, Material.GOLD_NUGGET),
+            DialogMenuItem.item("Claim Non-Shop Payouts", "Collect pending job and contract payouts; shop proceeds stay at the shop NPC.", "payouts claim", null, Material.GOLD_NUGGET),
             backItem(), homeItem(), closeItem());
     }
 
@@ -1043,6 +1514,27 @@ public class DialogService {
         return items;
     }
 
+    private List<DialogMenuItem> districtDirectoryMenu(Player player) {
+        DistrictService service = getDistrictService();
+        if (service == null) return unavailableMenu("District Directory", "District service is unavailable.", "main");
+        List<DialogMenuItem> items = new ArrayList<>();
+        service.getAllDistricts().stream()
+            .filter(district -> district.getStatus() == DistrictData.DistrictStatus.ACTIVE)
+            .limit(10)
+            .forEach(district -> items.add(DialogMenuItem.item(
+                district.getName() + " (#" + district.getId() + ")",
+                district.getMemberCount() + " member(s). Send a persistent council-reviewed join request.",
+                "vsmenu action district_join " + district.getId(), null, Material.FILLED_MAP)));
+        if (items.isEmpty()) {
+            items.add(DialogMenuItem.locked("No Active Districts", "There are no active districts to join.",
+                "You can submit a district application from the main menu.", Material.MAP));
+        }
+        items.add(backItem());
+        items.add(homeItem());
+        items.add(closeItem());
+        return items;
+    }
+
     private List<DialogMenuItem> currentDistrictMenu(Player player) {
         CurrentAreaContext context = getCurrentArea(player);
         DistrictData.District district = context.district() != null ? context.district() : getDistrict(player);
@@ -1052,13 +1544,11 @@ public class DialogService {
             backItem("district"), homeItem(), closeItem());
         DistrictService districtService = getDistrictService();
         List<DialogMenuItem> items = new ArrayList<>();
-        items.add(DialogMenuItem.locked(district.getName(), "District #" + district.getId(), district.getStatus() + " | " + district.getMemberCount() + " member(s) | your roles " + (districtService == null ? district.getRoles(player.getUniqueId()) : districtService.getDistrictRoles(player.getUniqueId(), district)), Material.MAP));
-        items.add(DialogMenuItem.locked("Treasury", "Physical district treasury balance.", String.valueOf(district.getTreasuryBalance()), Material.GOLD_BLOCK));
-        items.add(DialogMenuItem.locked("Market", "Live current-area market context.", context.marketSummary(), Material.EMERALD));
-        items.add(DialogMenuItem.locked("Jobs", "Live current-area job context.", context.jobSummary(), Material.IRON_PICKAXE));
-        items.add(DialogMenuItem.locked("Station", "Live rail context.", context.stationSummary(), Material.RAIL));
+        items.add(DialogMenuItem.status(district.getName(), "District #" + district.getId(), district.getStatus() + " | " + district.getMemberCount() + " member(s) | your roles " + (districtService == null ? district.getRoles(player.getUniqueId()) : districtService.getDistrictRoles(player.getUniqueId(), district)), Material.MAP));
+        items.add(DialogMenuItem.status("Treasury", "Physical district treasury balance.", String.valueOf(physicalTreasuryBalance(district)), Material.GOLD_BLOCK));
+        items.add(DialogMenuItem.status("Market", "Live current-area market context.", context.marketSummary(), Material.EMERALD));
+        items.add(DialogMenuItem.status("Station", "Live rail context.", context.stationSummary(), Material.RAIL));
         items.add(DialogMenuItem.item("Active Laws", "Review active district laws.", "vsmenu district.laws", null, Material.LECTERN));
-        items.add(DialogMenuItem.item("Member Overview", "List members and role assignments.", "district members", null, Material.PLAYER_HEAD));
         if (district.isCouncil(player.getUniqueId())) items.add(DialogMenuItem.item("Join Requests", "Review persistent membership requests.", "civic joins", null, Material.PAPER));
         items.add(backItem("district")); items.add(homeItem()); items.add(closeItem());
         return items;
@@ -1070,10 +1560,9 @@ public class DialogService {
         return List.of(
             metric("District Shops", count("SELECT COUNT(*) FROM merchant_shops WHERE district_id=" + district.getId()), Material.VILLAGER_SPAWN_EGG),
             metric("Network Buy Orders", count("SELECT COUNT(*) FROM merchant_orders WHERE status IN ('ACTIVE','PARTIALLY_FILLED')"), Material.WRITABLE_BOOK),
-            DialogMenuItem.item("Show Market Border", "Display market-zone chunk borders.", "district marketzone borders", null, Material.LIME_DYE),
+            DialogMenuItem.item("Show Market Border", "Display exact market-zone block borders.", "district marketzone borders", null, Material.LIME_DYE),
             DialogMenuItem.item("Merchant Dashboard", "Manage shops, orders, storage, and payouts.", "vsmenu district.merchant", null, Material.EMERALD),
             DialogMenuItem.item("Browse Buy Orders", "Browse and fulfill active orders.", "merchant order list", null, Material.BOOKSHELF),
-            DialogMenuItem.item("Market Supply Jobs", "Browse active district supply jobs.", "district jobs", null, Material.CHEST),
             backItem("district"), homeItem(), closeItem());
     }
 
@@ -1082,13 +1571,12 @@ public class DialogService {
         if (district == null) return unavailableMenu("District Treasury", "Join a district to view treasury controls.", "district");
         boolean allowed = service != null && service.canManageTreasury(player.getUniqueId(), district);
         List<DialogMenuItem> items = new ArrayList<>();
-        items.add(DialogMenuItem.locked("Balance", "Physical cash stored in the district treasury.", String.valueOf(district.getTreasuryBalance()), Material.GOLD_BLOCK));
-        items.add(allowed ? DialogMenuItem.item("Deposit", "Deposit physical cash.", "vsmenu input district_deposit", null, Material.HOPPER)
-            : DialogMenuItem.locked("Deposit", "Deposit physical cash.", "Requires MAYOR, CO_MAYOR, or TREASURER.", Material.HOPPER));
-        items.add(allowed ? DialogMenuItem.adminItem("Withdraw", "Withdraw physical treasury cash.", "vsmenu input district_withdraw", null, Material.DROPPER)
-            : DialogMenuItem.locked("Withdraw", "Withdraw physical treasury cash.", "Requires MAYOR, CO_MAYOR, or TREASURER.", Material.DROPPER));
+        items.add(DialogMenuItem.status("Balance", "Physical cash stored in the district treasury.", String.valueOf(physicalTreasuryBalance(district)), Material.GOLD_BLOCK));
+        items.add(allowed ? DialogMenuItem.locked("Physical Access", "Deposit or withdraw at a registered treasury block.",
+                "Right-click the district treasury vault while nearby. Remote banking is disabled.", Material.HOPPER)
+            : DialogMenuItem.locked("Physical Access", "Deposit or withdraw at a registered treasury block.",
+                "Requires MAYOR, CO_MAYOR, or TREASURER, plus physical proximity.", Material.HOPPER));
         items.add(DialogMenuItem.item("Development Projects", "View treasury-backed development work.", "vsmenu district.development", null, Material.BRICKS));
-        items.add(DialogMenuItem.item("District Jobs", "View treasury-funded job escrow.", "vsmenu district.jobs", null, Material.IRON_PICKAXE));
         items.add(backItem("district")); items.add(homeItem()); items.add(closeItem());
         return items;
     }
@@ -1298,8 +1786,13 @@ public class DialogService {
         catch (RuntimeException ignored) { return new CurrencyStats(0, 0, 0, 0, 0, 0, 0, 0, 0); }
     }
 
+    private long physicalTreasuryBalance(DistrictData.District district) {
+        try { return plugin.getServiceRegistry().get(com.vaultsurvival.plugin.districts.DistrictTreasuryService.class).getDistrictBalance(district.getId()); }
+        catch (RuntimeException unavailable) { return 0; }
+    }
+
     private DialogMenuItem metric(String label, long value, Material material) {
-        return DialogMenuItem.locked(label, "Live count/value: " + value, "Read-only dashboard metric.", material);
+        return DialogMenuItem.status(label, "Live count/value", String.valueOf(value), material);
     }
 
     private long count(String sql) {
@@ -1365,6 +1858,67 @@ public class DialogService {
         } catch (RuntimeException ignored) {
             return null;
         }
+    }
+
+    private RegionVisualizationService getVisualizationService() {
+        try {
+            return plugin.getServiceRegistry().get(RegionVisualizationService.class);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private com.vaultsurvival.plugin.rail.RailService getRailService() {
+        try {
+            return plugin.getServiceRegistry().get(com.vaultsurvival.plugin.rail.RailService.class);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private List<Map.Entry<DistrictData.LawKey, LawUi>> lawsIn(LawGroup group) {
+        return java.util.Arrays.stream(DistrictData.LawKey.values())
+            .filter(key -> LAW_UI.containsKey(key) && LAW_UI.get(key).group() == group)
+            .map(key -> Map.entry(key, LAW_UI.get(key)))
+            .toList();
+    }
+
+    private DialogFormField dropdown(String key, String label, String initial, String... values) {
+        return DialogFormField.dropdown(key, label, initial,
+            java.util.Arrays.stream(values).map(value -> option(value, readable(value))).toList());
+    }
+
+    private DialogFormField.Option option(String value, String label) {
+        return new DialogFormField.Option(value, label);
+    }
+
+    private boolean isOneOf(String value, String... accepted) {
+        return java.util.Arrays.stream(accepted).anyMatch(option -> option.equalsIgnoreCase(value));
+    }
+
+    private boolean isBoolean(String value) {
+        return "true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value);
+    }
+
+    private boolean hasNpcJobBoardAccess(Player player) {
+        if (player.hasPermission("vs.admin")) return true;
+        try {
+            return plugin.getServiceRegistry().get(com.vaultsurvival.plugin.npc.NpcService.class)
+                .hasJobBoardSession(player.getUniqueId());
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private DistrictData.LawKey parseLaw(String value) {
+        try { return DistrictData.LawKey.valueOf(value.toUpperCase(Locale.ROOT)); }
+        catch (RuntimeException ignored) { return null; }
+    }
+
+    private String readable(String value) {
+        if (value == null || value.isBlank()) return "";
+        String lower = value.toLowerCase(Locale.ROOT).replace('_', ' ');
+        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
 
     private boolean preferNative(Player player) {
@@ -1569,5 +2123,34 @@ public class DialogService {
     private DialogInputDefinition input(String id, String title, String description, String label,
                                         String commandTemplate, String permission, boolean adminSensitive) {
         return new DialogInputDefinition(id, title, description, label, commandTemplate, permission, adminSensitive);
+    }
+
+    private static Map<DistrictData.LawKey, LawUi> buildLawUi() {
+        Map<DistrictData.LawKey, LawUi> laws = new EnumMap<>(DistrictData.LawKey.class);
+        laws.put(DistrictData.LawKey.TRESPASSING_ILLEGAL, new LawUi(LawGroup.VISITORS, "Trespassing", "Entering restricted district land without permission creates evidence."));
+        laws.put(DistrictData.LawKey.VISITOR_PVP_ILLEGAL, new LawUi(LawGroup.VISITORS, "Visitor PvP", "Visitors may not attack players inside the district."));
+        laws.put(DistrictData.LawKey.VISITOR_BLOCK_DAMAGE_ILLEGAL, new LawUi(LawGroup.VISITORS, "Visitor Block Damage", "Visitors damaging district blocks create evidence."));
+        laws.put(DistrictData.LawKey.VISITOR_BLOCK_PLACEMENT_ILLEGAL, new LawUi(LawGroup.VISITORS, "Visitor Block Placement", "Visitors placing blocks without build access create evidence."));
+        laws.put(DistrictData.LawKey.ARMED_VISITORS_ILLEGAL, new LawUi(LawGroup.VISITORS, "Armed Visitors", "Visitors carrying configured weapons may be reported."));
+        laws.put(DistrictData.LawKey.ENEMY_TRESPASSING_ILLEGAL, new LawUi(LawGroup.VISITORS, "Enemy Trespassing", "Members of hostile districts entering this district create evidence."));
+
+        laws.put(DistrictData.LawKey.MARKET_PVP_ILLEGAL, new LawUi(LawGroup.SECURITY, "Market PvP", "Player combat in the market zone creates evidence."));
+        laws.put(DistrictData.LawKey.TOWN_HALL_PVP_ILLEGAL, new LawUi(LawGroup.SECURITY, "Town Hall PvP", "Player combat in the town hall zone creates evidence."));
+        laws.put(DistrictData.LawKey.ASSAULT_POLICE_ILLEGAL, new LawUi(LawGroup.SECURITY, "Assaulting Police", "Attacking an on-duty district officer creates evidence."));
+        laws.put(DistrictData.LawKey.RESISTING_ARREST_ILLEGAL, new LawUi(LawGroup.SECURITY, "Resisting Arrest", "Evading a valid arrest creates additional evidence."));
+        laws.put(DistrictData.LawKey.BOUNTY_HUNTERS_ALLOWED, new LawUi(LawGroup.SECURITY, "Bounty Hunters Allowed", "Authorized bounty hunters may pursue wanted players here."));
+        laws.put(DistrictData.LawKey.MERCENARIES_ALLOWED, new LawUi(LawGroup.SECURITY, "Mercenaries Allowed", "Mercenary activity is permitted under district law."));
+
+        laws.put(DistrictData.LawKey.CHEST_THEFT_ILLEGAL, new LawUi(LawGroup.ECONOMY, "Container Theft", "Taking protected container contents creates theft evidence."));
+        laws.put(DistrictData.LawKey.VAULT_BREACH_ILLEGAL, new LawUi(LawGroup.ECONOMY, "Vault Breaching", "Attempting to breach a vault creates evidence."));
+        laws.put(DistrictData.LawKey.TREASURY_LOITERING_ILLEGAL, new LawUi(LawGroup.ECONOMY, "Treasury Loitering", "Unauthorized loitering around the district treasury is prohibited."));
+        laws.put(DistrictData.LawKey.UNLICENSED_MERCHANT_ILLEGAL, new LawUi(LawGroup.ECONOMY, "Unlicensed Trading", "Trading without the required district merchant role is prohibited."));
+        laws.put(DistrictData.LawKey.MARKET_OBSTRUCTION_ILLEGAL, new LawUi(LawGroup.ECONOMY, "Market Obstruction", "Blocking market access or stalls creates evidence."));
+
+        laws.put(DistrictData.LawKey.JAIL_ESCAPE_ILLEGAL, new LawUi(LawGroup.PUBLIC_ORDER, "Jail Escape", "Leaving district jail before release creates evidence."));
+        laws.put(DistrictData.LawKey.ROAD_BLOCKING_ILLEGAL, new LawUi(LawGroup.PUBLIC_ORDER, "Road Blocking", "Obstructing configured public roads is prohibited."));
+        laws.put(DistrictData.LawKey.FIRE_LAVA_PLACEMENT_ILLEGAL, new LawUi(LawGroup.PUBLIC_ORDER, "Fire & Lava Placement", "Unsafe fire or lava placement creates evidence."));
+        laws.put(DistrictData.LawKey.EXPLOSION_USE_ILLEGAL, new LawUi(LawGroup.PUBLIC_ORDER, "Explosion Use", "Causing explosions inside the district creates evidence."));
+        return Map.copyOf(laws);
     }
 }

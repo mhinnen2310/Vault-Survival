@@ -11,4 +11,6 @@ public interface PayoutLockerService {
     List<ContractData.PayoutLockerEntry> getAllPending();
     long getPendingTotal(UUID playerUuid);
     boolean claim(Player player);
+    /** Claims only merchant-shop proceeds; intended for an owned shop NPC interaction. */
+    boolean claimMerchantShop(Player player);
 }

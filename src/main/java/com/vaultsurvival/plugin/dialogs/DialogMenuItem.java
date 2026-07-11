@@ -15,15 +15,16 @@ public class DialogMenuItem {
     private final boolean adminSensitive;
     private final boolean locked;
     private final String lockedExplanation;
+    private final boolean status;
 
     public DialogMenuItem(String label, String description, String command, String permission,
                           Material material, boolean adminSensitive) {
-        this(label, description, command, permission, material, adminSensitive, false, null);
+        this(label, description, command, permission, material, adminSensitive, false, null, false);
     }
 
     private DialogMenuItem(String label, String description, String command, String permission,
                            Material material, boolean adminSensitive, boolean locked,
-                           String lockedExplanation) {
+                           String lockedExplanation, boolean status) {
         this.label = label;
         this.description = description;
         this.command = command;
@@ -32,6 +33,7 @@ public class DialogMenuItem {
         this.adminSensitive = adminSensitive;
         this.locked = locked;
         this.lockedExplanation = lockedExplanation;
+        this.status = status;
     }
 
     public static DialogMenuItem item(String label, String description, String command, String permission,
@@ -46,12 +48,17 @@ public class DialogMenuItem {
 
     public static DialogMenuItem locked(String label, String description, String explanation, Material material) {
         return new DialogMenuItem(label, description, "vsmenu locked " + sanitize(explanation), null,
-            material, false, true, explanation);
+            material, false, true, explanation, false);
+    }
+
+    public static DialogMenuItem status(String label, String description, String value, Material material) {
+        return new DialogMenuItem(label, description, "vsmenu locked " + sanitize(value), null,
+            material, false, true, value, true);
     }
 
     public DialogMenuItem lockedCopy(String explanation) {
         return new DialogMenuItem(label, description, "vsmenu locked " + sanitize(explanation), permission,
-            material, adminSensitive, true, explanation);
+            material, adminSensitive, true, explanation, false);
     }
 
     public String label() {
@@ -85,6 +92,7 @@ public class DialogMenuItem {
     public String lockedExplanation() {
         return lockedExplanation;
     }
+    public boolean status() { return status; }
 
     public boolean isAllowed(Player player) {
         return !locked && (permission == null || permission.isBlank() || player.hasPermission(permission));
@@ -97,7 +105,8 @@ public class DialogMenuItem {
         String reason = lockedExplanation != null && !lockedExplanation.isBlank()
             ? lockedExplanation
             : "No permission";
-        return List.of("&7" + description, "&cLocked", "&7" + reason);
+        return status ? List.of("&7" + description, "&f" + reason)
+            : List.of("&7" + description, "&cLocked", "&7" + reason);
     }
 
     private static String sanitize(String text) {

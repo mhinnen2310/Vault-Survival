@@ -75,10 +75,32 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleConfigCheck(CommandSender sender) {
+        var config = plugin.getConfigManager().getConfig();
         List<String> missing = new java.util.ArrayList<>();
-        for (String key : List.of("currency.material", "vaults.vault_material", "chat.channels.default", "districtDevelopment.scaling.enabled", "updates.githubOwner", "dialogs.enabled")) if (!plugin.getConfigManager().getConfig().contains(key)) missing.add(key);
+        for (String key : List.of(
+            "configVersion", "server.name", "database.file", "staffSandbox.transfer.testPort",
+            "staffmode.utilities.breaker.allowedSizes", "spawn.blockClaim.maxAreaBlocks",
+            "dialogs.enabled", "chat.channels.default", "security.anticheat.enabled",
+            "currency.material", "vaults.vault_material", "districtTreasury.enabled",
+            "districts.selection.requiredAreaBlocks", "districts.selection.areaBlocksByLevel.0",
+            "districtDevelopment.scaling.enabled", "districtMarket.requireMarketZone",
+            "merchant.max_active_orders", "rail.defaultTicketPrice",
+            "regions.visualization.enabled", "vsWorldEdit.patterns.maxPatternEntries",
+            "vsworldedit.schematics.enabled", "updates.githubOwner")) {
+            if (!config.contains(key)) missing.add(key);
+        }
+        List<String> invalid = new java.util.ArrayList<>();
+        if (config.getInt("configVersion", 0) < 3) invalid.add("configVersion must be at least 3");
+        if (config.getLong("spawn.blockClaim.maxAreaBlocks", 0) < 1) invalid.add("spawn.blockClaim.maxAreaBlocks must be positive");
+        if (config.getLong("districts.selection.requiredAreaBlocks", 0) < 1) invalid.add("districts.selection.requiredAreaBlocks must be positive");
+        if (config.getDouble("districts.marketZone.maxPercentOfDistrict", -1) <= 0 || config.getDouble("districts.marketZone.maxPercentOfDistrict", -1) > 1) invalid.add("districts.marketZone.maxPercentOfDistrict must be > 0 and <= 1");
+        if (config.getDouble("market.tax_percent", -1) < 0 || config.getDouble("market.tax_percent", -1) > 100) invalid.add("market.tax_percent must be between 0 and 100");
+        if (config.getInt("vsWorldEdit.safety.maxBlocksPerOperation", 0) < 1) invalid.add("vsWorldEdit.safety.maxBlocksPerOperation must be positive");
+        if (config.getInt("vsworldedit.schematics.maxBlocks", 0) < 1) invalid.add("vsworldedit.schematics.maxBlocks must be positive");
         sender.sendMessage(fmt.header("Config Check"));
-        sender.sendMessage(missing.isEmpty() ? fmt.success("Configuration is complete.") : fmt.error("Missing config keys: " + String.join(", ", missing)));
+        if (!missing.isEmpty()) sender.sendMessage(fmt.error("Missing config keys: " + String.join(", ", missing)));
+        if (!invalid.isEmpty()) invalid.forEach(issue -> sender.sendMessage(fmt.error(issue)));
+        if (missing.isEmpty() && invalid.isEmpty()) sender.sendMessage(fmt.success("Configuration v" + config.getInt("configVersion") + " is complete and valid."));
         return true;
     }
 

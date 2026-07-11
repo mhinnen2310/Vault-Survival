@@ -5,6 +5,7 @@ import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.logging.Level;
@@ -739,6 +740,10 @@ public class DatabaseManager {
                 "min_chunk_z INTEGER NOT NULL," +
                 "max_chunk_x INTEGER NOT NULL," +
                 "max_chunk_z INTEGER NOT NULL," +
+                "min_block_x INTEGER NOT NULL," +
+                "min_block_z INTEGER NOT NULL," +
+                "max_block_x INTEGER NOT NULL," +
+                "max_block_z INTEGER NOT NULL," +
                 "updated_at TEXT NOT NULL DEFAULT (datetime('now'))" +
             ")",
             "CREATE TABLE IF NOT EXISTS district_development (district_id INTEGER PRIMARY KEY, level INTEGER NOT NULL DEFAULT 0, economy INTEGER NOT NULL DEFAULT 0, infrastructure INTEGER NOT NULL DEFAULT 0, security INTEGER NOT NULL DEFAULT 0, community INTEGER NOT NULL DEFAULT 0, trade_score INTEGER NOT NULL DEFAULT 0, law_and_order INTEGER NOT NULL DEFAULT 0, maintenance INTEGER NOT NULL DEFAULT 0, maintenance_state TEXT NOT NULL DEFAULT 'STABLE', updated_at INTEGER NOT NULL DEFAULT 0)",
@@ -863,18 +868,50 @@ public class DatabaseManager {
                 "resolved_at INTEGER NOT NULL DEFAULT 0" +
             ")",
             "CREATE INDEX IF NOT EXISTS idx_staff_alerts_queue ON staff_alerts(status, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_player_reports_queue ON player_reports(status, created_at DESC)"
+            "CREATE INDEX IF NOT EXISTS idx_player_reports_queue ON player_reports(status, created_at DESC)",
+            "CREATE TABLE IF NOT EXISTS player_homes (player_uuid TEXT NOT NULL,name TEXT NOT NULL,world TEXT NOT NULL,x REAL NOT NULL,y REAL NOT NULL,z REAL NOT NULL,yaw REAL NOT NULL,pitch REAL NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(player_uuid,name))",
+            "CREATE TABLE IF NOT EXISTS district_homes (district_id INTEGER PRIMARY KEY REFERENCES districts(id) ON DELETE CASCADE,world TEXT NOT NULL,x REAL NOT NULL,y REAL NOT NULL,z REAL NOT NULL,yaw REAL NOT NULL,pitch REAL NOT NULL,set_by TEXT NOT NULL,updated_at INTEGER NOT NULL)"
         };
 
         try (Statement stmt = connection.createStatement()) {
             for (String sql : statements) {
                 stmt.execute(sql);
             }
+            migrateDistrictClaimsToBlockBounds(stmt);
             logger.info("Database schema initialized successfully (" + statements.length + " tables)");
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Failed to initialize database schema", e);
             throw new RuntimeException("Database schema initialization failed", e);
         }
+    }
+
+    /**
+     * Keep the old chunk columns for rollback/import compatibility, while making exact
+     * block bounds the authoritative representation. Existing claims retain precisely
+     * the same outer border they had before this migration.
+     */
+    private void migrateDistrictClaimsToBlockBounds(Statement stmt) throws SQLException {
+        addColumnIfMissing(stmt, "district_claims", "min_block_x", "INTEGER");
+        addColumnIfMissing(stmt, "district_claims", "min_block_z", "INTEGER");
+        addColumnIfMissing(stmt, "district_claims", "max_block_x", "INTEGER");
+        addColumnIfMissing(stmt, "district_claims", "max_block_z", "INTEGER");
+        stmt.executeUpdate("UPDATE district_claims SET " +
+            "min_block_x=min_chunk_x*16,min_block_z=min_chunk_z*16," +
+            "max_block_x=max_chunk_x*16+15,max_block_z=max_chunk_z*16+15 " +
+            "WHERE min_block_x IS NULL OR min_block_z IS NULL OR max_block_x IS NULL OR max_block_z IS NULL");
+    }
+
+    private void addColumnIfMissing(Statement stmt, String table, String column, String definition) throws SQLException {
+        boolean present = false;
+        try (ResultSet columns = stmt.executeQuery("PRAGMA table_info(" + table + ")")) {
+            while (columns.next()) {
+                if (column.equalsIgnoreCase(columns.getString("name"))) {
+                    present = true;
+                    break;
+                }
+            }
+        }
+        if (!present) stmt.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
     }
 
     /**

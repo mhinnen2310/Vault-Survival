@@ -455,6 +455,8 @@ public class AccessServiceImpl implements AccessService {
 
         // Staff permissions
         addGroupPermission("helper", "vs.staff.chat");
+        addGroupPermission("helper", "vs.staffmode.use");
+        addGroupPermission("helper", "vs.staff.utility");
         addGroupPermission("mod", "vs.staff.chat");
         addGroupPermission("mod", "vs.police.use");
         addGroupPermission("mod", "vs.district.admin.approve");
@@ -481,6 +483,8 @@ public class AccessServiceImpl implements AccessService {
             addGroupPermission("default", "vs.menu");
             addGroupPermission("helper", "vs.staffinspect");
             addGroupPermission("helper", "vs.staff.alerts");
+            addGroupPermission("helper", "vs.staffmode.use");
+            addGroupPermission("helper", "vs.staff.utility");
             addGroupPermission("mod", "vs.staffinspect.freeze");
             loadGroups();
             logger.info("Normalized strict default access hierarchy");

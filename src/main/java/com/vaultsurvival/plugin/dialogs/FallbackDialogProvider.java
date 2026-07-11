@@ -103,7 +103,7 @@ public class FallbackDialogProvider implements DialogProvider {
         player.sendMessage(fmt.header(title));
         player.sendMessage(fmt.info(body));
         for (DialogMenuItem item : items) {
-            String prefix = item.locked() ? "- [Locked] " : "- ";
+            String prefix = item.locked() && !item.status() ? "- [Locked] " : "- ";
             player.sendMessage(Component.text(prefix + item.label())
                 .clickEvent(ClickEvent.runCommand("/" + item.command()))
                 .hoverEvent(Component.text(item.locked() ? item.lockedExplanation() : item.description())));
@@ -118,6 +118,15 @@ public class FallbackDialogProvider implements DialogProvider {
         player.sendMessage(Component.text("Type " + input.exampleCommand())
             .clickEvent(ClickEvent.suggestCommand(input.exampleCommand().replace("<value>", "")))
             .hoverEvent(Component.text("Click to put the command in chat.")));
+        return true;
+    }
+
+    @Override
+    public boolean openForm(Player player, DialogFormDefinition form) {
+        open(player, DialogMenuType.MAIN, form.title(),
+            form.body() + "\n\nNative controls are unavailable on this server/client. No values were changed.",
+            List.of(DialogMenuItem.item("Back", "Return without changing settings.",
+                form.cancelCommand(), null, Material.ARROW)));
         return true;
     }
 

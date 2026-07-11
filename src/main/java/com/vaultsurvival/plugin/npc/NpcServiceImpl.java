@@ -37,6 +37,8 @@ import java.util.logging.Logger;
  */
 public class NpcServiceImpl implements NpcService {
 
+    private static final long JOB_BOARD_SESSION_MILLIS = 120_000L;
+
     private final VaultSurvivalPlugin plugin;
     private final AuditLogger audit;
     private final MessageFormatter fmt;
@@ -48,6 +50,8 @@ public class NpcServiceImpl implements NpcService {
     private final Map<UUID, Set<Integer>> playerNpcEntities = new ConcurrentHashMap<>();
     // Cached skin textures (username → texture value + signature)
     private final Map<String, SkinTexture> skinCache = new ConcurrentHashMap<>();
+    // Physical job-board NPC access window (player UUID -> expiry millis)
+    private final Map<UUID, Long> jobBoardSessions = new ConcurrentHashMap<>();
 
     // NMS reflection
     private Method sendPacket;
@@ -138,6 +142,8 @@ public class NpcServiceImpl implements NpcService {
         } catch (SQLException e) {
             logger.log(Level.WARNING, "Failed to delete NPC from DB", e);
         }
+
+        Bukkit.getPluginManager().callEvent(new NpcRemovedEvent(npc));
 
         return true;
     }
@@ -575,6 +581,7 @@ public class NpcServiceImpl implements NpcService {
             case COMMAND -> {
                 String cmd = npc.getActionData()
                     .replace("%player%", player.getName());
+                if (isJobBoardCommand(cmd)) grantJobBoardSession(player.getUniqueId());
                 player.performCommand(cmd.startsWith("/") ? cmd.substring(1) : cmd);
                 audit.log(player.getUniqueId(), player.getName(), "NPC_COMMAND",
                     "NPC_" + npc.getId(), cmd, "");
@@ -597,6 +604,31 @@ public class NpcServiceImpl implements NpcService {
                 // Do nothing — decoration NPC
             }
         }
+    }
+
+    @Override
+    public void grantJobBoardSession(UUID playerUuid) {
+        if (playerUuid != null) jobBoardSessions.put(playerUuid, System.currentTimeMillis() + JOB_BOARD_SESSION_MILLIS);
+    }
+
+    @Override
+    public boolean hasJobBoardSession(UUID playerUuid) {
+        if (playerUuid == null) return false;
+        Long expiresAt = jobBoardSessions.get(playerUuid);
+        if (expiresAt == null) return false;
+        if (expiresAt < System.currentTimeMillis()) {
+            jobBoardSessions.remove(playerUuid, expiresAt);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isJobBoardCommand(String rawCommand) {
+        String command = rawCommand == null ? "" : rawCommand.stripLeading();
+        if (command.startsWith("/")) command = command.substring(1);
+        command = command.toLowerCase(java.util.Locale.ROOT);
+        return command.equals("spawnjobs") || command.startsWith("spawnjobs ")
+            || command.equals("district jobs") || command.startsWith("district job ");
     }
 
     private void openShopGui(Player player, NpcData.Npc npc) {

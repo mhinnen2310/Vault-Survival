@@ -1,6 +1,7 @@
 package com.vaultsurvival.plugin.regions;
 
 import org.bukkit.Location;
+import org.bukkit.entity.Player;
 
 import java.util.Collection;
 import java.util.UUID;
@@ -57,6 +58,13 @@ public interface RegionService {
      * Convenience method for quick checks.
      */
     boolean isAllowed(Location location, RegionData.RuleFlag flag);
+
+    /**
+     * Resolve a build rule for a specific actor. This keeps narrow role-based
+     * exceptions in the region policy instead of teaching unrelated listeners
+     * about region naming or district ownership.
+     */
+    boolean isBuildAllowed(Player player, Location location, RegionData.RuleFlag flag);
 
     /**
      * Load all regions from the database.

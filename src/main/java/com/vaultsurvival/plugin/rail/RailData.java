@@ -27,7 +27,7 @@ public class RailData {
         private final int platMaxX, platMaxY, platMaxZ;
         private final double arrX, arrY, arrZ;
         private final float arrYaw, arrPitch;
-        private final long ticketPrice;
+        private long ticketPrice;
         private final long upkeepCost;
         private final int kingdomTaxPercent;
         private StationStatus status;
@@ -73,6 +73,7 @@ public class RailData {
         public float getArrYaw() { return arrYaw; }
         public float getArrPitch() { return arrPitch; }
         public long getTicketPrice() { return ticketPrice; }
+        public void setTicketPrice(long ticketPrice) { this.ticketPrice = ticketPrice; }
         public long getUpkeepCost() { return upkeepCost; }
         public int getKingdomTaxPercent() { return kingdomTaxPercent; }
         public StationStatus getStatus() { return status; }

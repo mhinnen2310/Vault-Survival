@@ -45,17 +45,18 @@ public final class RegionVisualizationService implements Listener {
 
     public RegionVisualizationService(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
-        this.renderer = new RegionParticleRenderer(plugin.getConfig());
+        var config = plugin.getConfigManager().getConfig();
+        this.renderer = new RegionParticleRenderer(config);
         String p = "regions.visualization.";
-        enabled = plugin.getConfig().getBoolean(p + "enabled", true);
-        defaultDuration = plugin.getConfig().getInt(p + "defaultDurationSeconds", 30);
-        intervalTicks = Math.max(1, plugin.getConfig().getInt(p + "particles.renderIntervalTicks", 5));
-        labelsEnabled = plugin.getConfig().getBoolean(p + "labels.enabled", true);
-        showPos1 = plugin.getConfig().getBoolean(p + "labels.showPos1", true);
-        showPos2 = plugin.getConfig().getBoolean(p + "labels.showPos2", true);
-        showRegionType = plugin.getConfig().getBoolean(p + "labels.showRegionType", true);
-        showDimensions = plugin.getConfig().getBoolean(p + "labels.showDimensions", true);
-        showVolume = plugin.getConfig().getBoolean(p + "labels.showVolume", true);
+        enabled = config.getBoolean(p + "enabled", true);
+        defaultDuration = config.getInt(p + "defaultDurationSeconds", 30);
+        intervalTicks = Math.max(1, config.getInt(p + "particles.renderIntervalTicks", 5));
+        labelsEnabled = config.getBoolean(p + "labels.enabled", true);
+        showPos1 = config.getBoolean(p + "labels.showPos1", true);
+        showPos2 = config.getBoolean(p + "labels.showPos2", true);
+        showRegionType = config.getBoolean(p + "labels.showRegionType", true);
+        showDimensions = config.getBoolean(p + "labels.showDimensions", true);
+        showVolume = config.getBoolean(p + "labels.showVolume", true);
     }
 
     public void start() {
@@ -144,7 +145,7 @@ public final class RegionVisualizationService implements Listener {
     }
 
     public RegionVisualizationSession.Mode defaultMode() {
-        String configured = plugin.getConfig().getString("regions.visualization.defaultMode", "WHILE_EDITING");
+        String configured = plugin.getConfigManager().getConfig().getString("regions.visualization.defaultMode", "WHILE_EDITING");
         RegionVisualizationSession.Mode mode = RegionVisualizationSession.Mode.parse(configured == null ? "editing" : configured);
         if (mode != null) return mode;
         return switch (defaultDuration) {

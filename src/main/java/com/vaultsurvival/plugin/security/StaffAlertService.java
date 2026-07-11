@@ -64,13 +64,13 @@ public final class StaffAlertService extends Handler implements Listener {
         startupReport.clear();
         boolean database = plugin.getDatabase().isConnected();
         startupReport.add("Database: " + (database ? "OK" : "FAILED"));
-        startupReport.add("District claim: " + plugin.getConfigManager().getDistrictInitialClaimChunks()
-            + " chunks; Spawn distance: " + plugin.getConfigManager().getDistrictMinDistanceFromSpawn()
+        startupReport.add("District claim area: " + plugin.getConfigManager().getDistrictInitialClaimBlocks()
+            + " blocks; Spawn distance: " + plugin.getConfigManager().getDistrictMinDistanceFromSpawn()
             + "; district distance: " + plugin.getConfigManager().getDistrictMinDistanceBetween());
         startupReport.add("Anti-cheat: " + (plugin.getConfigManager().getConfig().getBoolean("security.anticheat.enabled", true) ? "enabled" : "disabled")
             + "; required Paper anti-xray engine: " + plugin.getConfigManager().getConfig().getInt("security.antiXray.requireEngineMode", 2));
         startupReport.add("Modules: " + plugin.getModuleManager().getModuleNames().size() + " registered");
-        if (!database || plugin.getConfigManager().getDistrictInitialClaimChunks() < 1) {
+        if (!database || plugin.getConfigManager().getDistrictInitialClaimBlocks() < 1) {
             recordAlert("STARTUP_AUDIT", "CRITICAL", null, null, "FAILED: " + String.join(" | ", startupReport), null);
             alertAdmins("Startup audit", "FAILED: " + String.join(" | ", startupReport));
         } else plugin.getLogger().info("[Audit] " + String.join(" | ", startupReport));

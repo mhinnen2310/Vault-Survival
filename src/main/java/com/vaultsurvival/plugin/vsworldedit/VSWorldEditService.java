@@ -56,6 +56,10 @@ public interface VSWorldEditService {
     boolean hollowSphere(Player player, int radius, Material material);
     /** Create a line from pos1 to pos2. */
     boolean line(Player player, Material material);
+    /** Queue or paste a validated vanilla structure through the VWE undo engine. */
+    boolean pasteSchematic(Player player, String schematicName,
+                           List<VSWorldEditData.SchematicPlacement> placements,
+                           boolean requireConfirmation);
 
     // --- Confirm / Cancel ---
     /** Confirm a pending operation (requires confirmation). */

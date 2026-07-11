@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
  * /staffmode - Toggle staff mode on/off
  * /staffmode * - Toggle owner bypass mode (overrides all restrictions)
  * /staffmode * <player> - Toggle bypass for another staff member (owner only)
+ * /staffmode build <player> <on|off> - Grant session-only persistent build access (owner only)
  */
 public class StaffmodeCommand implements CommandExecutor, TabCompleter {
 
@@ -48,7 +49,13 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
 
         if (!hasVsPermission(player, "vs.staffmode.use")) {
             player.sendMessage(fmt.permissionDenied());
+            plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "STAFFMODE_DENIED", "PLAYER",
+                player.getUniqueId().toString(), "missing=vs.staffmode.use");
             return true;
+        }
+
+        if (args.length >= 1 && args[0].equalsIgnoreCase("build")) {
+            return handleBuildPermission(player, args);
         }
 
         if (args.length >= 1 && args[0].equalsIgnoreCase("test")) {
@@ -84,6 +91,8 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
 
     private void enableStaffMode(Player player, StaffmodeData data) {
         data.setStaffModeActive(true);
+        data.setBreakerSize(0);
+        listener.setBuildPermission(player, data, false);
         data.setGameplayLocation(player.getLocation().clone());
 
         // Store gameplay inventory if config says to separate
@@ -116,6 +125,8 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(fmt.info("Your gameplay inventory is stored safely."));
         player.sendMessage(fmt.info("Use &e/staffmode *&7 for testing bypass."));
         player.sendMessage(fmt.info("Use &e/staffmode test&7 to enter the isolated staff test world."));
+        plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "STAFFMODE_ENABLE", "PLAYER",
+            player.getUniqueId().toString(), "gamemode=" + player.getGameMode());
     }
 
     private void disableStaffMode(Player player, StaffmodeData data) {
@@ -142,14 +153,18 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
         player.displayName(null);
         player.playerListName(null);
 
+        listener.setBuildPermission(player, data, false);
         data.setStaffModeActive(false);
         data.setBypassMode(false);
+        data.setBreakerSize(0);
         data.clearBlockChanges();
 
         player.setGameMode(GameMode.SURVIVAL);
         if (data.getGameplayLocation() != null) player.teleport(data.getGameplayLocation());
         data.setGameplayLocation(null);
         player.sendMessage(fmt.success("Staff mode disabled. Gameplay inventory restored."));
+        plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "STAFFMODE_DISABLE", "PLAYER",
+            player.getUniqueId().toString(), "inventoryRestored=true");
     }
 
     private boolean handleBypass(Player player, String[] args) {
@@ -198,7 +213,89 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
             target.sendMessage(fmt.success("Bypass mode DISABLED. Restrictions active."));
         }
 
+        plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "STAFFMODE_BYPASS_"
+            + (data.isBypassMode() ? "ENABLE" : "DISABLE"), "PLAYER", targetUuid.toString(),
+            "target=" + target.getName());
+
         return true;
+    }
+
+    private boolean handleBuildPermission(Player owner, String[] args) {
+        if (!hasVsPermission(owner, "vs.staffmode.build.grant") || !isOwnerRank(owner)) {
+            owner.sendMessage(fmt.error("Only the owner can grant persistent staffmode build access."));
+            plugin.getAuditLogger().log(owner.getUniqueId(), owner.getName(), "STAFF_BUILD_GRANT_DENIED", "PLAYER",
+                owner.getUniqueId().toString(), "requiredGroup=owner requiredPermission=vs.staffmode.build.grant");
+            return true;
+        }
+        if (args.length < 2) {
+            owner.sendMessage(fmt.info("Usage: &e/staffmode build <player> <on|off>&7."));
+            owner.sendMessage(fmt.info("For yourself: &e/staffmode build <on|off>&7."));
+            return true;
+        }
+
+        Player target;
+        String stateToken;
+        if (isToggleToken(args[1])) {
+            target = owner;
+            stateToken = args[1];
+        } else {
+            target = Bukkit.getPlayerExact(args[1]);
+            if (target == null) {
+                owner.sendMessage(fmt.playerNotFound(args[1]));
+                return true;
+            }
+            stateToken = args.length >= 3 ? args[2] : "toggle";
+        }
+        if (!isToggleToken(stateToken)) {
+            owner.sendMessage(fmt.error("Choose on, off, or toggle."));
+            return true;
+        }
+
+        StaffmodeData targetData = staffData.get(target.getUniqueId());
+        if (targetData == null || !targetData.isStaffModeActive()) {
+            owner.sendMessage(fmt.error(target.getName() + " must be in staffmode first."));
+            return true;
+        }
+
+        boolean enabled = switch (stateToken.toLowerCase(Locale.ROOT)) {
+            case "on", "enable", "enabled", "true" -> true;
+            case "off", "disable", "disabled", "false" -> false;
+            default -> !targetData.isBuildPermissionEnabled();
+        };
+        listener.setBuildPermission(target, targetData, enabled);
+
+        String status = enabled ? "enabled" : "disabled";
+        owner.sendMessage(fmt.success("Persistent staffmode build access " + status + " for " + target.getName() + "."));
+        if (target != owner) {
+            target.sendMessage(enabled
+                ? fmt.warn("The owner enabled persistent build access. Your block changes will NOT revert on exit.")
+                : fmt.info("The owner disabled persistent build access. New changes are temporary again."));
+        }
+        plugin.getAuditLogger().log(owner.getUniqueId(), owner.getName(), "STAFF_BUILD_"
+            + (enabled ? "GRANT" : "REVOKE"), "PLAYER", target.getUniqueId().toString(),
+            "target=" + target.getName() + " staffmode=true permissionNodes="
+                + config.getStaffModeBuildPermissionNodes().size());
+        return true;
+    }
+
+    private boolean isToggleToken(String value) {
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "on", "off", "toggle", "enable", "disable", "enabled", "disabled", "true", "false" -> true;
+            default -> false;
+        };
+    }
+
+    private boolean isOwnerRank(Player player) {
+        if (config.isStaffSandbox() && config.getStaffSandboxAllowedUuids().contains(player.getUniqueId())) {
+            return true;
+        }
+        try {
+            AccessService accessService = plugin.getServiceRegistry().get(AccessService.class);
+            return Arrays.stream(accessService.getPlayerGroups(player.getUniqueId()))
+                .anyMatch(group -> group.equalsIgnoreCase("owner"));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private boolean transferToSandbox(Player player) {
@@ -257,7 +354,7 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return config.isStaffSandbox() ? List.of("return") : List.of("test", "*");
+            return config.isStaffSandbox() ? List.of("return", "build") : List.of("test", "*", "build");
         }
         if (args.length == 2 && args[0].equals("*")) {
             return Bukkit.getOnlinePlayers().stream()
@@ -266,6 +363,18 @@ public class StaffmodeCommand implements CommandExecutor, TabCompleter {
                 .map(Player::getName)
                 .filter(n -> n.toLowerCase().startsWith(args[1].toLowerCase()))
                 .collect(Collectors.toList());
+        }
+        if (args[0].equalsIgnoreCase("build")) {
+            if (args.length == 2) {
+                List<String> suggestions = new ArrayList<>(List.of("on", "off"));
+                staffData.forEach((uuid, data) -> {
+                    Player player = Bukkit.getPlayer(uuid);
+                    if (player != null && data.isStaffModeActive()) suggestions.add(player.getName());
+                });
+                String prefix = args[1].toLowerCase(Locale.ROOT);
+                return suggestions.stream().filter(value -> value.toLowerCase(Locale.ROOT).startsWith(prefix)).toList();
+            }
+            if (args.length == 3) return List.of("on", "off", "toggle");
         }
         return List.of();
     }

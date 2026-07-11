@@ -4,6 +4,7 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.npc.NpcData;
 import com.vaultsurvival.plugin.npc.NpcService;
+import com.vaultsurvival.plugin.npc.NpcRemovedEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -12,8 +13,10 @@ import org.bukkit.block.BlockState;
 import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -24,6 +27,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -107,7 +112,7 @@ public final class DistrictNpcPlanningService implements Listener {
         if (message) player.sendMessage(fmt.info("District NPC planning cancelled; marker blocks were restored."));
     }
 
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
         PlanSession session = sessions.get(event.getPlayer().getUniqueId());
         if (session == null || event.getItemInHand().getItemMeta() == null) return;
@@ -117,11 +122,47 @@ public final class DistrictNpcPlanningService implements Listener {
         try { type = NpcPlanType.valueOf(raw); } catch (IllegalArgumentException ignored) { event.setCancelled(true); return; }
         if (session.markers.containsKey(type)) { event.setCancelled(true); event.getPlayer().sendMessage(fmt.error("That NPC marker is already placed.")); return; }
         if (!event.getBlockPlaced().getWorld().getName().equals(session.district.getWorldName())) { event.setCancelled(true); return; }
+        DistrictData.BlockClaim claim = districts.getClaim(session.district.getId());
+        if (claim == null || !claim.contains(event.getBlockPlaced().getX(), event.getBlockPlaced().getZ())) {
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(fmt.error("District NPC markers must be placed inside the exact district border."));
+            return;
+        }
         float yaw = yawFor(event.getBlockPlaced().getBlockData());
         Location location = event.getBlockPlaced().getLocation().add(.5, 0, .5);
         location.setYaw(yaw);
         session.markers.put(type, new PlacedMarker(location, event.getBlockReplacedState()));
         event.getPlayer().sendMessage(fmt.success(type.displayName + " marker placed. It will face the same direction."));
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBreak(BlockBreakEvent event) {
+        PlanSession session = sessions.get(event.getPlayer().getUniqueId());
+        if (session == null) return;
+        Map.Entry<NpcPlanType, PlacedMarker> match = session.markers.entrySet().stream()
+            .filter(entry -> entry.getValue().location.getWorld() != null
+                && entry.getValue().location.getWorld().equals(event.getBlock().getWorld())
+                && entry.getValue().location.getBlockX() == event.getBlock().getX()
+                && entry.getValue().location.getBlockY() == event.getBlock().getY()
+                && entry.getValue().location.getBlockZ() == event.getBlock().getZ())
+            .findFirst().orElse(null);
+        if (match == null) return;
+        event.setCancelled(true);
+        session.markers.remove(match.getKey());
+        match.getValue().original.update(true, false);
+        giveMarker(event.getPlayer(), match.getKey());
+        event.getPlayer().sendMessage(fmt.info(match.getKey().displayName + " marker removed. Its placement item was returned."));
+    }
+
+    @EventHandler
+    public void onNpcRemoved(NpcRemovedEvent event) {
+        try {
+            plugin.getDatabase().executeUpdate(
+                "UPDATE district_npc_plans SET status='MISSING',npc_id=NULL WHERE npc_id=?",
+                event.getNpc().getId());
+        } catch (Exception error) {
+            plugin.getLogger().warning("Could not mark removed district NPC #" + event.getNpc().getId() + " as replaceable: " + error.getMessage());
+        }
     }
 
     @EventHandler public void onQuit(PlayerQuitEvent event) { cancel(event.getPlayer(), false); }
@@ -152,16 +193,30 @@ public final class DistrictNpcPlanningService implements Listener {
 
     private Set<NpcPlanType> missingUnlockedTypes(DistrictData.District district) throws Exception {
         Set<NpcPlanType> placedTypes = EnumSet.noneOf(NpcPlanType.class);
+        List<Integer> staleActivePlans = new ArrayList<>();
+        NpcService npcService = plugin.getServiceRegistry().get(NpcService.class);
         try (Connection connection = plugin.getDatabase().getConnection();
-             PreparedStatement statement = connection.prepareStatement("SELECT npc_type FROM district_npc_plans WHERE district_id=?")) {
+             PreparedStatement statement = connection.prepareStatement("SELECT id,npc_type,status,npc_id FROM district_npc_plans WHERE district_id=?")) {
             statement.setInt(1, district.getId());
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
                     try {
-                        placedTypes.add(NpcPlanType.valueOf(results.getString("npc_type")));
+                        NpcPlanType type = NpcPlanType.valueOf(results.getString("npc_type"));
+                        String status = results.getString("status");
+                        Object rawNpcId = results.getObject("npc_id");
+                        Integer npcId = rawNpcId instanceof Number number ? number.intValue() : null;
+                        if ("PLANNED".equalsIgnoreCase(status)
+                            || ("ACTIVE".equalsIgnoreCase(status) && npcId != null && npcService.getNpc(npcId) != null)) {
+                            placedTypes.add(type);
+                        } else if ("ACTIVE".equalsIgnoreCase(status)) {
+                            staleActivePlans.add(results.getInt("id"));
+                        }
                     } catch (IllegalArgumentException ignored) { }
                 }
             }
+        }
+        for (int planId : staleActivePlans) {
+            plugin.getDatabase().executeUpdate("UPDATE district_npc_plans SET status='MISSING',npc_id=NULL WHERE id=?", planId);
         }
         int level = developmentLevel(district.getId());
         Set<NpcPlanType> missing = EnumSet.noneOf(NpcPlanType.class);

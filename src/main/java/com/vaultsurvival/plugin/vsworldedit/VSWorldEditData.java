@@ -33,7 +33,7 @@ public class VSWorldEditData {
     public enum OperationType {
         FILL, REPLACE, PATTERN_FILL, PATTERN_REPLACE, WALLS, OUTLINE,
         FLOOR, CEILING, HOLLOW,
-        CYLINDER, CIRCLE, SPHERE, HSPHERE, LINE
+        CYLINDER, CIRCLE, SPHERE, HSPHERE, LINE, SCHEMATIC_PASTE
     }
 
     /**
@@ -49,6 +49,17 @@ public class VSWorldEditData {
             this.y = y;
             this.z = z;
             this.material = material;
+        }
+    }
+
+    /**
+     * One absolute target block copied from a vanilla structure palette.
+     * Keeping the detached BlockState preserves signs, containers and other
+     * tile-state data instead of reducing a structure to material names.
+     */
+    public record SchematicPlacement(int x, int y, int z, BlockState templateState) {
+        public SchematicPlacement {
+            Objects.requireNonNull(templateState, "templateState");
         }
     }
 

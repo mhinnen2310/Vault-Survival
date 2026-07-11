@@ -51,6 +51,7 @@ public class StaffmodeModule extends Module {
         for (var entry : staffData.entrySet()) {
             var player = plugin.getServer().getPlayer(entry.getKey());
             if (player != null && entry.getValue().isStaffModeActive()) {
+                listener.setBuildPermission(player, entry.getValue(), false);
                 listener.removeVisibilityEffects(player);
                 player.getInventory().clear();
                 if (entry.getValue().getGameplayInventory() != null) {
@@ -68,5 +69,11 @@ public class StaffmodeModule extends Module {
 
     public Map<UUID, StaffmodeData> getStaffData() {
         return staffData;
+    }
+
+    public boolean hasBuildPermission(UUID playerUuid) {
+        StaffmodeData data = staffData.get(playerUuid);
+        return data != null && data.isStaffModeActive()
+            && (data.isBuildPermissionEnabled() || data.isBypassMode());
     }
 }

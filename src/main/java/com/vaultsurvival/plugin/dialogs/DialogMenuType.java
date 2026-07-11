@@ -12,6 +12,7 @@ public enum DialogMenuType {
     PLAYER_RISK("player.risk", "Risk", "Computed local risk, evidence, wanted state, and report tools."),
 
     DISTRICTS("district.home", "Districts", "District actions for your current role."),
+    DISTRICT_DIRECTORY("district.directory", "District Directory", "Browse active districts and request membership."),
     DISTRICT_CURRENT("district.current", "Current District", "Current district status, membership, laws, market, jobs, and station context."),
     DISTRICT_LAWS("district.laws", "District Laws", "Active district law states."),
     DISTRICT_PENDING_LAWS("district.pending_laws", "Pending Laws", "Law changes queued for daily activation."),

@@ -6,6 +6,7 @@ import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.currency.CurrencyService;
 import com.vaultsurvival.plugin.districts.DistrictService;
 import com.vaultsurvival.plugin.districts.DistrictData;
+import com.vaultsurvival.plugin.districts.DistrictTreasuryService;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -34,6 +35,7 @@ public class RailServiceImpl implements RailService {
     private final ConcurrentHashMap<Integer, RailData.Station> stations = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, RailData.Route> routes = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, RailJourneyData.Journey> journeys = new ConcurrentHashMap<>();
+    private final java.util.Set<UUID> silentApplications = ConcurrentHashMap.newKeySet();
 
     // Configurable journey timing (ticks)
     private final int boardingWindowTicks;
@@ -65,37 +67,40 @@ public class RailServiceImpl implements RailService {
         try {
             districtService = plugin.getServiceRegistry().get(DistrictService.class);
         } catch (Exception e) {
-            requester.sendMessage(fmt.error("District service is not available."));
+            stationMessage(requester, fmt.error("District service is not available."));
             return null;
         }
 
         DistrictData.District district = districtService.getPlayerDistrict(requester.getUniqueId());
         if (district == null || district.getStatus() != DistrictData.DistrictStatus.ACTIVE) {
-            requester.sendMessage(fmt.error("You must be in an active district to request a station."));
+            stationMessage(requester, fmt.error("You must be in an active district to request a station."));
             return null;
         }
 
         if (!districtService.canRequestStation(requester.getUniqueId(), district)) {
-            requester.sendMessage(fmt.error("Only MAYOR, CO_MAYOR, or DIPLOMAT can request a station."));
+            stationMessage(requester, fmt.error("Only MAYOR, CO_MAYOR, or DIPLOMAT can request a station."));
             return null;
         }
 
         // Check if district already has a station
         var existing = getStationByDistrict(district.getId());
         if (existing != null && existing.getStatus() != RailData.StationStatus.DENIED) {
-            requester.sendMessage(fmt.error("Your district already has a station (#" + existing.getId() +
+            stationMessage(requester, fmt.error("Your district already has a station (#" + existing.getId() +
                 " - " + existing.getStatus().name() + ")."));
             return null;
         }
 
         // Check application fee
         long appFee = plugin.getConfigManager().getConfig().getLong("rail.applicationFee", 10000);
-        long treasuryBalance = 0;
-        try {
-            treasuryBalance = getDistrictTreasury(district.getId());
-        } catch (Exception ignored) {}
+        DistrictTreasuryService treasury;
+        try { treasury = plugin.getServiceRegistry().get(DistrictTreasuryService.class); }
+        catch (RuntimeException unavailable) {
+            stationMessage(requester, fmt.error("Physical treasury service is unavailable."));
+            return null;
+        }
+        long treasuryBalance = treasury.getDistrictBalance(district.getId());
         if (treasuryBalance < appFee) {
-            requester.sendMessage(fmt.error("District treasury needs &6" + fmt.formatMoney(appFee,
+            stationMessage(requester, fmt.error("District treasury needs &6" + fmt.formatMoney(appFee,
                 plugin.getConfigManager().getCurrencyName(),
                 plugin.getConfigManager().getCurrencyNamePlural()) +
                 " &cfor the application fee. Current balance: &6" +
@@ -106,8 +111,12 @@ public class RailServiceImpl implements RailService {
         }
 
         // Deduct application fee from district treasury
-        if (appFee > 0 && districtService != null) {
-            deductFromTreasury(district.getId(), appFee);
+        if (appFee > 0) {
+            var debit = treasury.debitSystem(district.getId(), appFee, "RAIL_STATION_APPLICATION", requester.getUniqueId());
+            if (!debit.success()) {
+                stationMessage(requester, fmt.error(debit.message()));
+                return null;
+            }
         }
 
         // Create a PENDING station with staging coordinates.
@@ -150,20 +159,21 @@ public class RailServiceImpl implements RailService {
                     "STATION", String.valueOf(id),
                     "name=" + name + " district=" + district.getId() + " fee=" + appFee);
 
-                requester.sendMessage(fmt.success("Station application created! ID: #" + id));
-                requester.sendMessage(fmt.info("Fee paid: &6" + fmt.formatMoney(appFee,
+                stationMessage(requester, fmt.success("Station application created! ID: #" + id));
+                stationMessage(requester, fmt.info("Fee paid: &6" + fmt.formatMoney(appFee,
                     plugin.getConfigManager().getCurrencyName(),
                     plugin.getConfigManager().getCurrencyNamePlural())));
-                requester.sendMessage(fmt.info("Use &e/district station setplatform " + id +
+                stationMessage(requester, fmt.info("Use &e/district station setplatform " + id +
                     " &7to set the platform area."));
-                requester.sendMessage(fmt.info("Use &e/district station setarrival " + id +
+                stationMessage(requester, fmt.info("Use &e/district station setarrival " + id +
                     " &7to set the arrival point."));
 
                 return station;
             }
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Failed to create station application", e);
-            requester.sendMessage(fmt.error("Failed to create application."));
+            if (appFee > 0) treasury.creditSystem(district.getId(), appFee, "RAIL_APPLICATION_REFUND", requester.getUniqueId());
+            stationMessage(requester, fmt.error("Failed to create application."));
         }
         return null;
     }
@@ -171,6 +181,16 @@ public class RailServiceImpl implements RailService {
     @Override
     public RailData.Station requestStation(Player requester, String name) {
         return createApplication(requester, name);
+    }
+
+    @Override public RailData.Station requestStationSilently(Player requester, String name) {
+        silentApplications.add(requester.getUniqueId());
+        try { return createApplication(requester, name); }
+        finally { silentApplications.remove(requester.getUniqueId()); }
+    }
+
+    private void stationMessage(Player requester, String message) {
+        if (!silentApplications.contains(requester.getUniqueId())) requester.sendMessage(message);
     }
 
     /**
@@ -208,8 +228,14 @@ public class RailServiceImpl implements RailService {
         return true;
     }
 
-    /** Set a pending station platform from a validated whole-chunk district selection. */
+    /** Compatibility bridge for callers using the former whole-chunk selector. */
+    @Deprecated
     public boolean setPlatformChunks(int stationId, Player player, DistrictData.ChunkClaim claim) {
+        return setPlatformBlocks(stationId, player, claim == null ? null : claim.toBlockClaim());
+    }
+
+    /** Set a pending station platform from a validated exact-block district selection. */
+    public boolean setPlatformBlocks(int stationId, Player player, DistrictData.BlockClaim claim) {
         RailData.Station station = stations.get(stationId);
         if (station == null || !station.getRequesterUuid().equals(player.getUniqueId())
             || station.getStatus() != RailData.StationStatus.PENDING || claim == null
@@ -224,11 +250,11 @@ public class RailServiceImpl implements RailService {
                 station.getArrX(), station.getArrY(), station.getArrZ(), station.getArrYaw(), station.getArrPitch(), station.getTicketPrice(),
                 station.getUpkeepCost(), station.getKingdomTaxPercent(), station.getStatus(), station.getTotalRevenue(), station.getCreatedAt());
             stations.put(stationId, updated);
-            player.sendMessage(fmt.success("Station platform set to &e" + claim.chunkCount() + " chunks&a."));
-            audit.log(player.getUniqueId(), player.getName(), "RAIL_PLATFORM_CHUNKS_SET", "STATION", String.valueOf(stationId), "chunks=" + claim.chunkCount());
+            player.sendMessage(fmt.success("Station platform set to &e" + claim.widthBlocks() + "x" + claim.depthBlocks() + " blocks&a."));
+            audit.log(player.getUniqueId(), player.getName(), "RAIL_PLATFORM_BLOCKS_SET", "STATION", String.valueOf(stationId), "areaBlocks=" + claim.areaBlocks());
             return true;
         } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to set chunk station platform", e);
+            logger.log(Level.WARNING, "Failed to set block station platform", e);
             return false;
         }
     }
@@ -273,13 +299,22 @@ public class RailServiceImpl implements RailService {
 
     @Override
     public boolean setTicketPrice(int stationId, Player player, long price) {
+        return setTicketPriceInternal(stationId, player, price, true);
+    }
+
+    @Override
+    public boolean setTicketPriceSilently(int stationId, Player player, long price) {
+        return setTicketPriceInternal(stationId, player, price, false);
+    }
+
+    private boolean setTicketPriceInternal(int stationId, Player player, long price, boolean notifyPlayer) {
         RailData.Station station = stations.get(stationId);
         if (station == null || !station.getRequesterUuid().equals(player.getUniqueId())) {
-            player.sendMessage(fmt.error("Station not found or not yours to manage."));
+            if (notifyPlayer) player.sendMessage(fmt.error("Station not found or not yours to manage."));
             return false;
         }
         if (price < 0) {
-            player.sendMessage(fmt.error("Ticket price cannot be negative."));
+            if (notifyPlayer) player.sendMessage(fmt.error("Ticket price cannot be negative."));
             return false;
         }
         try {
@@ -289,9 +324,14 @@ public class RailServiceImpl implements RailService {
             logger.log(Level.WARNING, "Failed to set ticket price", e);
             return false;
         }
-        player.sendMessage(fmt.success("Ticket price set to &6" + fmt.formatMoney(price,
-            plugin.getConfigManager().getCurrencyName(),
-            plugin.getConfigManager().getCurrencyNamePlural())));
+        station.setTicketPrice(price);
+        audit.log(player.getUniqueId(), player.getName(), "RAIL_TICKET_PRICE_SET", "STATION",
+            String.valueOf(stationId), "price=" + price);
+        if (notifyPlayer) {
+            player.sendMessage(fmt.success("Ticket price set to &6" + fmt.formatMoney(price,
+                plugin.getConfigManager().getCurrencyName(),
+                plugin.getConfigManager().getCurrencyNamePlural())));
+        }
         return true;
     }
 
@@ -564,6 +604,16 @@ public class RailServiceImpl implements RailService {
 
         long price = route.getTicketPrice();
         if (price > 0) {
+            DistrictTreasuryService treasury;
+            try { treasury = plugin.getServiceRegistry().get(DistrictTreasuryService.class); }
+            catch (RuntimeException unavailable) {
+                player.sendMessage(fmt.error("Physical treasury service is unavailable."));
+                return false;
+            }
+            if (treasury.getVaults(fromStation.getDistrictId()).isEmpty()) {
+                player.sendMessage(fmt.error("The departure district has no registered physical treasury vault."));
+                return false;
+            }
             long playerCash = currency.getPlayerCashTotal(player.getUniqueId());
             if (playerCash < price) {
                 player.sendMessage(fmt.error("You need &6" + fmt.formatMoney(price,
@@ -585,41 +635,30 @@ public class RailServiceImpl implements RailService {
             try (Connection conn = plugin.getDatabase().getConnection()) {
                 conn.setAutoCommit(false);
                 try {
-                    for (var cashItem : withdrawn) {
-                        UUID cashUuid = currency.getCashUuid(cashItem);
-                        plugin.getDatabase().executeUpdate(
-                            "UPDATE cash_items SET state = 'SPENT' WHERE cash_uuid = ?",
-                            cashUuid.toString());
+                    try (PreparedStatement spend = conn.prepareStatement(
+                            "UPDATE cash_items SET state='SPENT',location_type='RAIL_TICKET',location_id=?,owner_uuid=NULL,last_seen_at=datetime('now') WHERE cash_uuid=?")) {
+                        for (var cashItem : withdrawn) {
+                            spend.setString(1, String.valueOf(routeId));
+                            spend.setString(2, currency.getCashUuid(cashItem).toString());
+                            if (spend.executeUpdate() != 1) throw new SQLException("Ticket cash changed concurrently");
+                        }
                     }
 
                     long kingdomCut = (price * route.getKingdomTaxPercent()) / 100;
                     long districtRevenue = price - kingdomCut;
 
-                    if (districtRevenue > 0) {
-                        var districtCash = currency.mintCash(districtRevenue, player.getUniqueId(), null);
-                        UUID dcUuid = currency.getCashUuid(districtCash);
-                        plugin.getDatabase().executeUpdate(
-                            "UPDATE cash_items SET state = 'IN_DISTRICT_TREASURY', " +
-                            "location_type = 'TREASURY', location_id = ?, owner_uuid = NULL " +
-                            "WHERE cash_uuid = ?",
-                            String.valueOf(fromStation.getDistrictId()), dcUuid.toString());
+                    try (PreparedStatement revenue = conn.prepareStatement(
+                            "UPDATE rail_stations SET total_revenue=total_revenue+? WHERE id=?")) {
+                        revenue.setLong(1, districtRevenue); revenue.setInt(2, fromStation.getId()); revenue.executeUpdate();
                     }
-
-                    if (kingdomCut > 0) {
-                        var kingdomCash = currency.mintCash(kingdomCut, player.getUniqueId(), null);
-                        UUID kcUuid = currency.getCashUuid(kingdomCash);
-                        plugin.getDatabase().executeUpdate(
-                            "UPDATE cash_items SET state = 'IN_DISTRICT_TREASURY', " +
-                            "location_type = 'TREASURY', location_id = 'SPAWN_CITY', owner_uuid = NULL " +
-                            "WHERE cash_uuid = ?",
-                            kcUuid.toString());
-                    }
-
-                    plugin.getDatabase().executeUpdate(
-                        "UPDATE rail_stations SET total_revenue = total_revenue + ? WHERE id = ?",
-                        districtRevenue, fromStation.getId());
 
                     conn.commit();
+
+                    if (districtRevenue > 0) {
+                        var credit = treasury.creditSystem(fromStation.getDistrictId(), districtRevenue,
+                            "RAIL_TICKET_REVENUE", player.getUniqueId());
+                        if (!credit.success()) logger.severe("Ticket revenue could not be credited: " + credit.message());
+                    }
 
                     audit.log(player.getUniqueId(), player.getName(), "RAIL_TICKET_BUY",
                         "ROUTE", String.valueOf(routeId),

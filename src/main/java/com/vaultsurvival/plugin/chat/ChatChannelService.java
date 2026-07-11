@@ -50,9 +50,14 @@ public class ChatChannelService {
     }
 
     public boolean setActiveChannel(Player player, ChatChannel channel) {
+        return setActiveChannel(player, channel, true);
+    }
+
+    /** Changes channel without forcing chat output, for dialog-driven settings flows. */
+    public boolean setActiveChannel(Player player, ChatChannel channel, boolean notifyPlayer) {
         String denial = getAccessDenial(player, channel);
         if (denial != null) {
-            player.sendMessage(fmt.error(denial));
+            if (notifyPlayer) player.sendMessage(fmt.error(denial));
             return false;
         }
         if (config.shouldRememberLastChatChannel()) {
@@ -62,7 +67,7 @@ public class ChatChannelService {
             plugin.getAuditLogger().logAdminAction(player.getUniqueId(), player.getName(),
                 "CHAT_CHANNEL_SWITCH", "SELF", "channel=STAFF");
         }
-        player.sendMessage(fmt.success("Active chat channel: " + channel.displayName()));
+        if (notifyPlayer) player.sendMessage(fmt.success("Active chat channel: " + channel.displayName()));
         return true;
     }
 

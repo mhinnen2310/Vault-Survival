@@ -11,21 +11,41 @@ import java.util.UUID;
 
 public class DistrictData {
 
-    /**
-     * A rectangular claim expressed in whole chunks. Keeping the source of truth
-     * in chunks avoids accidental partial-chunk district borders.
-     */
-    public record ChunkClaim(String worldName, int minChunkX, int minChunkZ, int maxChunkX, int maxChunkZ) {
-        public int chunkCount() {
-            return (maxChunkX - minChunkX + 1) * (maxChunkZ - minChunkZ + 1);
+    /** A rectangular district claim whose persisted source of truth is exact block coordinates. */
+    public record BlockClaim(String worldName, int minBlockX, int minBlockZ, int maxBlockX, int maxBlockZ) {
+        public BlockClaim {
+            if (worldName == null || worldName.isBlank()) throw new IllegalArgumentException("worldName");
+            int lowX = Math.min(minBlockX, maxBlockX);
+            int highX = Math.max(minBlockX, maxBlockX);
+            int lowZ = Math.min(minBlockZ, maxBlockZ);
+            int highZ = Math.max(minBlockZ, maxBlockZ);
+            minBlockX = lowX;
+            maxBlockX = highX;
+            minBlockZ = lowZ;
+            maxBlockZ = highZ;
         }
 
-        public int minBlockX() { return minChunkX << 4; }
-        public int minBlockZ() { return minChunkZ << 4; }
-        public int maxBlockX() { return (maxChunkX << 4) + 15; }
-        public int maxBlockZ() { return (maxChunkZ << 4) + 15; }
-        public int centerBlockX() { return (minBlockX() + maxBlockX()) / 2; }
-        public int centerBlockZ() { return (minBlockZ() + maxBlockZ()) / 2; }
+        public int widthBlocks() { return maxBlockX - minBlockX + 1; }
+        public int depthBlocks() { return maxBlockZ - minBlockZ + 1; }
+        public long areaBlocks() { return (long) widthBlocks() * depthBlocks(); }
+        public int centerBlockX() { return minBlockX + (maxBlockX - minBlockX) / 2; }
+        public int centerBlockZ() { return minBlockZ + (maxBlockZ - minBlockZ) / 2; }
+        public boolean contains(int blockX, int blockZ) {
+            return blockX >= minBlockX && blockX <= maxBlockX && blockZ >= minBlockZ && blockZ <= maxBlockZ;
+        }
+        public boolean contains(BlockClaim other) {
+            return other != null && worldName.equals(other.worldName)
+                && contains(other.minBlockX, other.minBlockZ) && contains(other.maxBlockX, other.maxBlockZ);
+        }
+    }
+
+    /** Compatibility adapter for integrations compiled against the former whole-chunk model. */
+    @Deprecated
+    public record ChunkClaim(String worldName, int minChunkX, int minChunkZ, int maxChunkX, int maxChunkZ) {
+        public BlockClaim toBlockClaim() {
+            return new BlockClaim(worldName, minChunkX << 4, minChunkZ << 4,
+                (maxChunkX << 4) + 15, (maxChunkZ << 4) + 15);
+        }
     }
 
     public enum DistrictStatus {

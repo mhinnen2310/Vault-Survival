@@ -35,10 +35,9 @@ public final class DistrictTreasuryServiceImpl implements DistrictTreasuryServic
         if (block == null || block.getType().isAir() || !isVaultMaterial(block.getType())) return Result.error("Look at a barrel, chest, trapped chest, iron block, or vault block.");
         if (getVault(block) != null) return Result.error("That block is already a district treasury vault.");
         if (plugin.getConfigManager().getConfig().getBoolean("districtTreasury.requireInsideDistrict", true)) {
-            DistrictData.ChunkClaim claim = districts.getClaim(district.getId());
+            DistrictData.BlockClaim claim = districts.getClaim(district.getId());
             if (claim == null || !claim.worldName().equals(block.getWorld().getName())
-                || block.getChunk().getX() < claim.minChunkX() || block.getChunk().getX() > claim.maxChunkX()
-                || block.getChunk().getZ() < claim.minChunkZ() || block.getChunk().getZ() > claim.maxChunkZ()) {
+                || !claim.contains(block.getX(), block.getZ())) {
                 return Result.error("Treasury vaults must be inside your own district claim.");
             }
         }
@@ -176,7 +175,12 @@ public final class DistrictTreasuryServiceImpl implements DistrictTreasuryServic
         return Result.ok("Access granted.", 0, vault);
     }
 
-    @Override public long getDistrictBalance(int districtId) { return sum("SELECT IFNULL(SUM(c.amount),0) FROM cash_items c JOIN district_treasury_vaults v ON v.vault_uuid=c.location_id WHERE c.state='IN_DISTRICT_TREASURY' AND c.location_type='DISTRICT_TREASURY_VAULT' AND v.district_id=?", String.valueOf(districtId)); }
+    @Override public long getDistrictBalance(int districtId) {
+        long balance = sum("SELECT IFNULL(SUM(c.amount),0) FROM cash_items c JOIN district_treasury_vaults v ON v.vault_uuid=c.location_id WHERE c.state='IN_DISTRICT_TREASURY' AND c.location_type='DISTRICT_TREASURY_VAULT' AND v.district_id=?", String.valueOf(districtId));
+        DistrictData.District district = districts.getDistrict(districtId);
+        if (district != null) district.setTreasuryBalance(balance);
+        return balance;
+    }
     @Override public long getVaultBalance(UUID vaultUuid) { return sum("SELECT IFNULL(SUM(amount),0) FROM cash_items WHERE state='IN_DISTRICT_TREASURY' AND location_type='DISTRICT_TREASURY_VAULT' AND location_id=?", vaultUuid.toString()); }
 
     private long sum(String sql, String value) {
@@ -227,6 +231,102 @@ public final class DistrictTreasuryServiceImpl implements DistrictTreasuryServic
         try (Connection connection = plugin.getDatabase().getConnection(); PreparedStatement statement = connection.prepareStatement("SELECT location_id,SUM(amount) FROM cash_items WHERE state='IN_DISTRICT_TREASURY' AND (location_type IS NULL OR location_type!='DISTRICT_TREASURY_VAULT') GROUP BY location_id HAVING SUM(amount)>0"); ResultSet rs = statement.executeQuery()) {
             while (rs.next()) plugin.getLogger().warning("Legacy abstract district treasury cash: district/location " + rs.getString(1) + " amount=" + rs.getLong(2) + ". Use /vsadmin treasury migrate-district while standing at a physical treasury vault.");
         } catch (SQLException exception) { plugin.getLogger().log(Level.WARNING, "Failed to audit legacy district treasury cash", exception); }
+    }
+
+    @Override
+    public Result creditSystem(int districtId, long amount, String source, UUID actorUuid) {
+        if (amount <= 0) return Result.error("Treasury credit must be positive.");
+        List<TreasuryVault> vaults = getVaults(districtId);
+        if (vaults.isEmpty()) return Result.error("This district has no registered physical treasury vault.");
+        TreasuryVault vault = vaults.getFirst();
+        UUID cashUuid = UUID.randomUUID();
+        String normalizedSource = source == null || source.isBlank() ? "SYSTEM_REVENUE" : source;
+        try (Connection connection = plugin.getDatabase().getConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement cash = connection.prepareStatement(
+                    "INSERT INTO cash_items(cash_uuid,amount,state,location_type,location_id,owner_uuid,created_by) VALUES(?,?,'IN_DISTRICT_TREASURY','DISTRICT_TREASURY_VAULT',?,NULL,?)");
+                 PreparedStatement transaction = connection.prepareStatement(
+                    "INSERT INTO cash_transactions(cash_uuid,transaction_type,amount,actor_uuid,source_location,target_location,details) VALUES(?,'TREASURY_CREDIT',?,?,?,?,?)")) {
+                cash.setString(1, cashUuid.toString()); cash.setLong(2, amount);
+                cash.setString(3, vault.vaultUuid().toString());
+                cash.setString(4, actorUuid == null ? null : actorUuid.toString());
+                cash.executeUpdate();
+                transaction.setString(1, cashUuid.toString()); transaction.setLong(2, amount);
+                transaction.setString(3, actorUuid == null ? null : actorUuid.toString());
+                transaction.setString(4, normalizedSource);
+                transaction.setString(5, "DISTRICT_TREASURY_VAULT:" + vault.vaultUuid());
+                transaction.setString(6, normalizedSource);
+                transaction.executeUpdate();
+                connection.commit();
+            } catch (SQLException error) { connection.rollback(); throw error; }
+            finally { connection.setAutoCommit(true); }
+        } catch (SQLException error) {
+            plugin.getLogger().log(Level.WARNING, "Failed physical treasury credit", error);
+            return Result.error("Physical treasury credit failed.");
+        }
+        plugin.getAuditLogger().log(actorUuid, actorUuid == null ? "SYSTEM" : org.bukkit.Bukkit.getOfflinePlayer(actorUuid).getName(),
+            "DISTRICT_TREASURY_SYSTEM_CREDIT", "DISTRICT_TREASURY", String.valueOf(districtId),
+            "vault=" + vault.vaultUuid() + " cash=" + cashUuid + " amount=" + amount + " source=" + normalizedSource);
+        return Result.ok("Credited " + amount + " to the physical district treasury.", amount, vault);
+    }
+
+    @Override
+    public Result debitSystem(int districtId, long amount, String reason, UUID actorUuid) {
+        if (amount <= 0) return Result.error("Treasury debit must be positive.");
+        if (getDistrictBalance(districtId) < amount) return Result.error("The physical district treasury has insufficient cash.");
+        String normalizedReason = reason == null || reason.isBlank() ? "SYSTEM_FEE" : reason;
+        try (Connection connection = plugin.getDatabase().getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                long remaining = amount;
+                try (PreparedStatement select = connection.prepareStatement(
+                    "SELECT c.cash_uuid,c.amount,c.location_id FROM cash_items c JOIN district_treasury_vaults v ON v.vault_uuid=c.location_id " +
+                        "WHERE c.state='IN_DISTRICT_TREASURY' AND c.location_type='DISTRICT_TREASURY_VAULT' AND v.district_id=? ORDER BY c.amount ASC")) {
+                    select.setString(1, String.valueOf(districtId));
+                    try (ResultSet rows = select.executeQuery()) {
+                        while (rows.next() && remaining > 0) {
+                            String cashUuid = rows.getString("cash_uuid");
+                            long cashAmount = rows.getLong("amount");
+                            long consumed = Math.min(remaining, cashAmount);
+                            if (consumed == cashAmount) {
+                                try (PreparedStatement update = connection.prepareStatement(
+                                    "UPDATE cash_items SET state='SPENT',location_type='SYSTEM_FEE',location_id=NULL,owner_uuid=NULL,last_seen_at=datetime('now') WHERE cash_uuid=? AND state='IN_DISTRICT_TREASURY'")) {
+                                    update.setString(1, cashUuid); if (update.executeUpdate() != 1) throw new SQLException("Treasury cash changed concurrently");
+                                }
+                            } else {
+                                try (PreparedStatement reduce = connection.prepareStatement("UPDATE cash_items SET amount=amount-?,last_seen_at=datetime('now') WHERE cash_uuid=? AND amount>=?");
+                                     PreparedStatement spent = connection.prepareStatement("INSERT INTO cash_items(cash_uuid,amount,state,location_type,location_id,owner_uuid,created_by) VALUES(?,?,'SPENT','SYSTEM_FEE',NULL,NULL,?)")) {
+                                    reduce.setLong(1, consumed); reduce.setString(2, cashUuid); reduce.setLong(3, consumed);
+                                    if (reduce.executeUpdate() != 1) throw new SQLException("Treasury cash changed concurrently");
+                                    UUID spentUuid = UUID.randomUUID();
+                                    spent.setString(1, spentUuid.toString()); spent.setLong(2, consumed);
+                                    spent.setString(3, actorUuid == null ? null : actorUuid.toString()); spent.executeUpdate();
+                                    cashUuid = spentUuid.toString();
+                                }
+                            }
+                            try (PreparedStatement transaction = connection.prepareStatement(
+                                "INSERT INTO cash_transactions(cash_uuid,transaction_type,amount,actor_uuid,source_location,target_location,details) VALUES(?,'TREASURY_DEBIT',?,?,?,?,?)")) {
+                                transaction.setString(1, cashUuid); transaction.setLong(2, consumed);
+                                transaction.setString(3, actorUuid == null ? null : actorUuid.toString());
+                                transaction.setString(4, "DISTRICT_TREASURY:" + districtId);
+                                transaction.setString(5, "SYSTEM_FEE"); transaction.setString(6, normalizedReason); transaction.executeUpdate();
+                            }
+                            remaining -= consumed;
+                        }
+                    }
+                }
+                if (remaining != 0) throw new SQLException("Physical treasury changed during debit");
+                connection.commit();
+            } catch (SQLException error) { connection.rollback(); throw error; }
+            finally { connection.setAutoCommit(true); }
+        } catch (SQLException error) {
+            plugin.getLogger().log(Level.WARNING, "Failed physical treasury debit", error);
+            return Result.error("Physical treasury debit failed; no fee was taken.");
+        }
+        plugin.getAuditLogger().log(actorUuid, actorUuid == null ? "SYSTEM" : org.bukkit.Bukkit.getOfflinePlayer(actorUuid).getName(),
+            "DISTRICT_TREASURY_SYSTEM_DEBIT", "DISTRICT_TREASURY", String.valueOf(districtId),
+            "amount=" + amount + " reason=" + normalizedReason);
+        return Result.ok("Debited " + amount + " from the physical district treasury.", amount, null);
     }
 
     private void audit(Player actor, String action, int districtId, UUID vaultUuid, long amount, TreasuryVault vault) {

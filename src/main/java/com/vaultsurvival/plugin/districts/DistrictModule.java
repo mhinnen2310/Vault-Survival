@@ -29,7 +29,7 @@ public class DistrictModule extends Module {
 
     @Override
     public String[] getDependencies() {
-        return new String[] { "VS-Currency", "VS-Regions" };
+        return new String[] { "VS-Currency", "VS-Regions", "VS-NPC" };
     }
 
     @Override
@@ -41,6 +41,7 @@ public class DistrictModule extends Module {
         npcPlanningService = new DistrictNpcPlanningService(plugin, districtService);
         plugin.getServiceRegistry().register(DistrictNpcPlanningService.class, npcPlanningService);
         developmentService = new DistrictDevelopmentService(plugin);
+        plugin.getServiceRegistry().register(DistrictDevelopmentService.class, developmentService);
         treasuryService = new DistrictTreasuryServiceImpl(plugin, districtService);
         plugin.getServiceRegistry().register(DistrictTreasuryService.class, treasuryService);
         plugin.getLogger().info("District service registered");
@@ -70,6 +71,7 @@ public class DistrictModule extends Module {
         selectionService.shutdown();
         plugin.getServiceRegistry().unregister(DistrictNpcPlanningService.class);
         plugin.getServiceRegistry().unregister(DistrictTreasuryService.class);
+        plugin.getServiceRegistry().unregister(DistrictDevelopmentService.class);
         plugin.getServiceRegistry().unregister(DistrictSelectionService.class);
         plugin.getServiceRegistry().unregister(DistrictService.class);
     }

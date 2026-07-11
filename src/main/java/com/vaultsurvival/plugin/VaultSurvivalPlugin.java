@@ -42,6 +42,7 @@ import com.vaultsurvival.plugin.spawnjobs.SpawnJobModule;
 import com.vaultsurvival.plugin.updates.UpdateService;
 import com.vaultsurvival.plugin.vaults.VaultModule;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditModule;
+import com.vaultsurvival.plugin.travel.TravelService;
 import com.vaultsurvival.plugin.workflow.CivicWorkflowCommand;
 import com.vaultsurvival.plugin.workflow.CivicWorkflowService;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -257,6 +258,12 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         ChatChannelService chatChannelService = new ChatChannelService(this);
         serviceRegistry.register(ChatChannelService.class, chatChannelService);
 
+        TravelService travelService = new TravelService(this);
+        serviceRegistry.register(TravelService.class, travelService);
+        for (String commandName : java.util.List.of("tpa", "tpaccept", "tpdeny", "sethome", "home", "delhome", "homes")) {
+            if (getCommand(commandName) != null) getCommand(commandName).setExecutor(travelService);
+        }
+
         // Register /vs version command
         var vsCmd = new VSVersionCommand(this);
         getCommand("vs").setExecutor(vsCmd);
@@ -280,8 +287,9 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         getCommand("staffinspect").setExecutor(staffInspect);
         getCommand("staffinspect").setTabCompleter(staffInspect);
         getServer().getPluginManager().registerEvents(staffInspect, this);
-        var staffUtility = new StaffUtilityCommand(this);
-        for (String commandName : java.util.List.of("vstp", "vstphere", "vsback", "vsfly", "vsheal", "vsgamemode")) {
+        var staffUtility = new StaffUtilityCommand(this, staffmodeModule.getStaffData());
+        for (String commandName : java.util.List.of("vstp", "vstphere", "vsback", "vsfly", "vsheal", "vsgamemode",
+            "vstime", "vsweather", "vsspeed", "vsbreaker")) {
             getCommand(commandName).setExecutor(staffUtility);
             getCommand(commandName).setTabCompleter(staffUtility);
         }
@@ -339,6 +347,11 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         return staffmodeModule != null
             && staffmodeModule.getStaffData().containsKey(playerUuid)
             && staffmodeModule.getStaffData().get(playerUuid).isStaffModeActive();
+    }
+
+    /** Session-only owner grant used by region/build protection integrations. */
+    public boolean hasStaffBuildPermission(java.util.UUID playerUuid) {
+        return staffmodeModule != null && staffmodeModule.hasBuildPermission(playerUuid);
     }
 
     public SchedulerHelper getScheduler() {

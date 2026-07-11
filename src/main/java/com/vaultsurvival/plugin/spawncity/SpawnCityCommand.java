@@ -186,7 +186,7 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleClaim(CommandSender sender, String[] args) {
         if (!sender.hasPermission("vaultsurvival.spawncity.admin")) { sender.sendMessage(fmt.permissionDenied()); return true; }
-        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Only players can claim Spawn City chunks.")); return true; }
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Only players can select Spawn City's exact block border.")); return true; }
         DistrictSelectionService selection = plugin.getServiceRegistry().get(DistrictSelectionService.class);
         if (args.length >= 2 && args[1].equalsIgnoreCase("confirm")) selection.confirm(player);
         else if (args.length >= 2 && args[1].equalsIgnoreCase("cancel")) selection.cancel(player);
@@ -217,7 +217,7 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(fmt.info("/spawncity setcapitalregion &8- Save /vwe selection as capital"));
             sender.sendMessage(fmt.info("/spawncity setauctionhallregion &8- Save /vwe selection as AH"));
             sender.sendMessage(fmt.info("/spawncity setmintregion &8- Save /vwe selection as Mint"));
-            sender.sendMessage(fmt.info("/spawncity claim [confirm|cancel] &8- Claim Spawn City chunks"));
+            sender.sendMessage(fmt.info("/spawncity claim [confirm|cancel] &8- Select Spawn City's exact block border"));
             sender.sendMessage(fmt.info("/spawncity message <welcome|leave> <text> &8- Set area messages"));
         }
         sender.sendMessage(fmt.info("/spawncity regions &8- List all saved regions"));

@@ -76,7 +76,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "apply" -> handleApply(sender, args);
             case "confirm" -> handleSelectionConfirm(sender);
             case "cancel" -> handleSelectionCancel(sender);
-            case "selection", "chunks" -> handleSelectionStatus(sender);
+            case "selection", "blocks" -> handleSelectionStatus(sender);
             case "expand" -> handleExpansion(sender);
             case "borders", "border" -> handleBorders(sender, args);
             case "marketzone", "market" -> handleMarketZone(sender, args);
@@ -85,6 +85,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "message", "messages" -> handleDistrictMessage(sender, args);
             case "chat" -> handleDistrictChat(sender, args);
             case "current" -> handleCurrent(sender);
+            case "home" -> handleDistrictHome(sender, false);
+            case "sethome" -> handleDistrictHome(sender, true);
             case "approve" -> handleApprove(sender, args);
             case "reject" -> handleReject(sender, args);
             case "info" -> handleInfo(sender, args);
@@ -112,6 +114,16 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     private boolean handleDevelopment(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
         return development.handle(player, args[0].toLowerCase(), args);
+    }
+
+    private boolean handleDistrictHome(CommandSender sender, boolean set) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        try {
+            var travel = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.travel.TravelService.class);
+            return set ? travel.setDistrictHome(player) : travel.districtHome(player);
+        } catch (RuntimeException unavailable) {
+            player.sendMessage(fmt.error("Travel service is unavailable.")); return true;
+        }
     }
 
     private boolean handleApply(CommandSender sender, String[] args) {
@@ -648,6 +660,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleJobs(CommandSender sender) {
+        if (!hasJobBoardAccess(sender)) return true;
         if (!(sender instanceof Player player)) return true;
         if (plugin.getServiceRegistry().has(DialogService.class)) {
             plugin.getServiceRegistry().get(DialogService.class).openMenu(player, DialogMenuType.DISTRICT_JOBS);
@@ -665,6 +678,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleJob(CommandSender sender, String[] args) {
+        if (!hasJobBoardAccess(sender)) return true;
         DistrictJobService jobs = getJobService(sender);
         if (jobs == null) return true;
         if (args.length < 2) {
@@ -708,62 +722,82 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         if (job != null && plugin.getServiceRegistry().has(DialogService.class)) {
             plugin.getServiceRegistry().get(DialogService.class).openResult(player, "District Job Created",
                 "Job #" + job.getId() + "\n" + job.getTitle() + "\nReward: " + job.getReward() + "\nStatus: " + job.getStatus(),
-                List.of(DialogMenuItem.item("Job Detail", "Open the refreshed district job board.", "vsmenu district.jobs", null, Material.WRITABLE_BOOK),
-                    DialogMenuItem.item("Back", "Return to district jobs.", "vsmenu district.jobs", null, Material.ARROW)));
+                List.of(DialogMenuItem.locked("Job Board NPC", "Job-board access stays physical.",
+                        "Interact with the Job Board NPC again to browse this job.", Material.LECTERN),
+                    DialogMenuItem.item("Back to District", "Return to district controls.", "vsmenu district", null, Material.ARROW)));
         } else if (job != null) sender.sendMessage(fmt.success("Created active district job #" + job.getId() + " with treasury escrow."));
         return true;
     }
 
+    private boolean hasJobBoardAccess(CommandSender sender) {
+        if (!(sender instanceof Player player)) return sender.hasPermission("vs.admin");
+        if (player.hasPermission("vs.admin")) return true;
+        boolean active;
+        try {
+            active = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.npc.NpcService.class)
+                .hasJobBoardSession(player.getUniqueId());
+        } catch (RuntimeException unavailable) {
+            active = false;
+        }
+        if (active) return true;
+        if (plugin.getServiceRegistry().has(DialogService.class)) {
+            plugin.getServiceRegistry().get(DialogService.class).openResult(player, "Job Board NPC Required",
+                "Job boards are physical. Interact with a Job Board NPC to browse or manage district jobs.",
+                List.of(DialogMenuItem.item("Back to District", "Return without opening jobs.", "vsmenu district", null, Material.ARROW)));
+        } else {
+            player.sendMessage(fmt.error("Interact with a Job Board NPC first."));
+        }
+        return false;
+    }
+
     private boolean handleJobList(CommandSender sender, DistrictJobService jobs) {
         if (!(sender instanceof Player player)) return true;
-        var d = districtService.getPlayerDistrict(player.getUniqueId());
-        if (d == null) { sender.sendMessage(fmt.error("You are not in a district.")); return true; }
-        sender.sendMessage(fmt.header("Active District Jobs"));
-        jobs.getActiveJobs(d.getId()).forEach(job -> sendJobLine(sender, job));
-        sender.sendMessage(fmt.header("My Accepted Jobs"));
-        jobs.getClaimsFor(player).forEach(claim -> {
-            var job = jobs.getJob(claim.getJobId());
-            if (job != null) sender.sendMessage(fmt.info("&eClaim #" + claim.getId() + " &7job #" + job.getId() + " &8| &f" + job.getTitle() + " &8| &7" + claim.getStatus()));
-        });
-        if (districtService.canApproveDistrictJob(player.getUniqueId(), d)) {
-            sender.sendMessage(fmt.header("Submitted Jobs"));
-            jobs.getSubmittedClaims(d.getId()).forEach(claim -> {
-                var job = jobs.getJob(claim.getJobId());
-                if (job != null) sender.sendMessage(fmt.info("&eClaim #" + claim.getId() + " &7job #" + job.getId() + " &8| &f" + job.getTitle() + " &8| player " + claim.getPlayerUuid()));
-            });
-        }
+        if (plugin.getServiceRegistry().has(DialogService.class)) {
+            plugin.getServiceRegistry().get(DialogService.class).openMenu(player, DialogMenuType.DISTRICT_JOBS);
+        } else player.sendMessage(fmt.error("Dialog service is unavailable."));
         return true;
     }
 
     private boolean handleJobAccept(CommandSender sender, String[] args, DistrictJobService jobs) {
         if (!(sender instanceof Player player)) return true;
-        if (args.length < 3) { sender.sendMessage(fmt.error("Usage: /district job accept <id>")); return true; }
-        sender.sendMessage(jobs.acceptJob(player, parseInt(args[2])) ? fmt.success("Job accepted.") : fmt.error("Cannot accept job."));
+        if (args.length < 3) { openJobActionResult(player, "Accept Job", false, "Choose a job from the NPC board."); return true; }
+        openJobActionResult(player, "Accept Job", jobs.acceptJob(player, parseInt(args[2])), "Job accepted.");
         return true;
     }
     private boolean handleJobDeliver(CommandSender sender, String[] args, DistrictJobService jobs) {
         if (!(sender instanceof Player player)) return true;
-        if (args.length < 3) { sender.sendMessage(fmt.error("Usage: /district job deliver <id>")); return true; }
-        sender.sendMessage(jobs.deliverJob(player, parseInt(args[2])) ? fmt.success("Delivery complete. Payout pending.") : fmt.error("Cannot deliver. Check required item and amount."));
+        if (args.length < 3) { openJobActionResult(player, "Deliver Job", false, "Choose an accepted job from the NPC board."); return true; }
+        openJobActionResult(player, "Deliver Job", jobs.deliverJob(player, parseInt(args[2])), "Delivery complete; payout is pending.");
         return true;
     }
     private boolean handleJobSubmit(CommandSender sender, String[] args, DistrictJobService jobs) {
         if (!(sender instanceof Player player)) return true;
-        if (args.length < 3) { sender.sendMessage(fmt.error("Usage: /district job submit <id>")); return true; }
-        sender.sendMessage(jobs.submitJob(player, parseInt(args[2])) ? fmt.success("Job submitted for approval.") : fmt.error("Cannot submit job."));
+        if (args.length < 3) { openJobActionResult(player, "Submit Job", false, "Choose an accepted job from the NPC board."); return true; }
+        openJobActionResult(player, "Submit Job", jobs.submitJob(player, parseInt(args[2])), "Job submitted for approval.");
         return true;
     }
     private boolean handleJobApprove(CommandSender sender, String[] args, DistrictJobService jobs) {
         if (!(sender instanceof Player player)) return true;
-        if (args.length < 3) { sender.sendMessage(fmt.error("Usage: /district job approve <claimId>")); return true; }
-        sender.sendMessage(jobs.approveClaim(player, parseInt(args[2])) ? fmt.success("Claim approved. Payout locker entry created.") : fmt.error("Cannot approve claim."));
+        if (args.length < 3) { openJobActionResult(player, "Approve Claim", false, "Choose a submitted claim from the NPC board."); return true; }
+        openJobActionResult(player, "Approve Claim", jobs.approveClaim(player, parseInt(args[2])), "Claim approved; a payout locker entry was created.");
         return true;
     }
     private boolean handleJobDeny(CommandSender sender, String[] args, DistrictJobService jobs) {
         if (!(sender instanceof Player player)) return true;
-        if (args.length < 4) { sender.sendMessage(fmt.error("Usage: /district job deny <claimId> <reason>")); return true; }
-        sender.sendMessage(jobs.denyClaim(player, parseInt(args[2]), String.join(" ", Arrays.copyOfRange(args, 3, args.length))) ? fmt.success("Claim denied.") : fmt.error("Cannot deny claim."));
+        if (args.length < 4) { openJobActionResult(player, "Deny Claim", false, "A claim id and reason are required."); return true; }
+        openJobActionResult(player, "Deny Claim", jobs.denyClaim(player, parseInt(args[2]), String.join(" ", Arrays.copyOfRange(args, 3, args.length))), "Claim denied.");
         return true;
+    }
+
+    private void openJobActionResult(Player player, String title, boolean success, String successMessage) {
+        String body = success ? successMessage : "The job action could not be completed. Refresh the board and check its requirements.";
+        if (plugin.getServiceRegistry().has(DialogService.class)) {
+            plugin.getServiceRegistry().get(DialogService.class).openResult(player,
+                title + (success ? " — Success" : " — Failed"), body,
+                List.of(DialogMenuItem.item("Refresh Job Board", "Return to the NPC-opened district job board.",
+                        "district jobs", null, Material.LECTERN),
+                    DialogMenuItem.item("Back to District", "Leave the job board.", "vsmenu district", null, Material.ARROW)));
+        } else player.sendMessage(success ? fmt.success(body) : fmt.error(body));
     }
 
     private boolean handleDisband(CommandSender sender) {
@@ -904,8 +938,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     private void sendUsage(CommandSender sender) {
         sender.sendMessage(fmt.header("District Commands"));
         sender.sendMessage(fmt.info("/district apply <name> &8- Found a district"));
-        sender.sendMessage(fmt.info("/district confirm|cancel|selection &8- Complete or adjust chunk selection"));
-        sender.sendMessage(fmt.info("/district borders &8- Show nearby district chunk borders"));
+        sender.sendMessage(fmt.info("/district confirm|cancel|selection &8- Complete or adjust exact block selection"));
+        sender.sendMessage(fmt.info("/district borders &8- Show nearby district block borders"));
         sender.sendMessage(fmt.info("/district expand &8- Expand your level-gated district claim"));
         sender.sendMessage(fmt.info("/district marketzone [confirm|cancel] &8- Select the merchant market zone"));
         sender.sendMessage(fmt.info("/district marketzone borders &8- Show your district's market-zone borders"));
@@ -914,9 +948,11 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("/district chat prefix <text> &8- Mayor-only district chat prefix"));
         sender.sendMessage(fmt.info("/district chat rolecolor <role> <color> &8- Mayor-only role color"));
         sender.sendMessage(fmt.info("/district info [id] &8- District info"));
+        sender.sendMessage(fmt.info("/district home &8- Teleport to the district home"));
+        sender.sendMessage(fmt.info("/district sethome &8- Mayor-only district home location"));
         sender.sendMessage(fmt.info("/district station status &8- Station status"));
         sender.sendMessage(fmt.info("/district station request <name> &8- Request station"));
-        sender.sendMessage(fmt.info("/district station setplatform <id> &8- Select a chunk platform with the district wand"));
+        sender.sendMessage(fmt.info("/district station setplatform <id> &8- Select an exact block platform with the district wand"));
         sender.sendMessage(fmt.info("/district station setarrival <id> &8- Set arrival"));
         sender.sendMessage(fmt.info("/district invite <player> &8- Invite to your district"));
         sender.sendMessage(fmt.info("/district kick <player> &8- Kick member"));
@@ -946,8 +982,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
-            return Arrays.asList("apply", "confirm", "cancel", "selection", "chunks", "expand", "borders", "marketzone", "teleport", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
-                "role", "permissions", "members", "treasury", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
+            return Arrays.asList("apply", "confirm", "cancel", "selection", "blocks", "expand", "borders", "marketzone", "teleport", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
+                "role", "permissions", "members", "home", "sethome", "treasury", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("job")) {

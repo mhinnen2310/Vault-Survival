@@ -33,6 +33,11 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `/staffmode *` | Toggle permitted staff bypass testing mode. |
 | `/staffmode test` | Transfer from active staffmode to the isolated staff test world. |
 | `/staffmode return` | Return from the isolated test world to production. |
+| `/staffmode build <player> <on|off>` | Owner-only, audited, session-bound permission for persistent staff building. |
+| `/time <preset|set|add> [ticks]` | Set the current world's time while staffmode is active. |
+| `/weather <clear|rain|thunder> [seconds]` | Set bounded world weather while staffmode is active. |
+| `/speed <0-10|reset> [walk|fly]` | Set a safe movement speed while staffmode is active. |
+| `/breaker <3x3..9x9|off>` | Toggle the protected, audited staff area breaker. |
 | `/staffinspect <player>` | Open a player profile dialog. |
 | `/staffinspect search <query>` | Search players by name, UUID, rank, or district. |
 | `/staffinspect online|recent|wanted|frozen [page]` | Staff player lists. |
@@ -53,8 +58,8 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `/spawncity teleport` | Teleport to configured Spawn City. |
 | `/spawncity setname <name>` | Staff rename Spawn City. |
 | `/spawncity setspawn` | Staff set the Spawn City location. |
-| `/spawncity claim` | Staff start a whole-chunk Spawn City claim. |
-| `/spawncity claim confirm|cancel|status` | Confirm, cancel, or inspect a Spawn City chunk selection. |
+| `/spawncity claim` | Staff start an exact two-corner Spawn City block claim. |
+| `/spawncity claim confirm|cancel|status` | Confirm, cancel, or inspect a Spawn City block selection. |
 | `/spawncity message welcome <text>` | Staff set Spawn City entry message. |
 | `/spawncity message leave <text>` | Staff set Spawn City exit message. |
 | `/spawncity setcapitalregion` | Save VWE selection as capital region. |
@@ -66,8 +71,8 @@ This reference follows the plugin modules. Permission-protected commands use the
 
 | Command | Purpose |
 | --- | --- |
-| `/district apply <name>` | Start the required chunk claim for a new district. |
-| `/district confirm|cancel|selection` | Confirm, cancel, or inspect current chunk selection. |
+| `/district apply <name>` | Start the required exact block-area claim for a new district. |
+| `/district confirm|cancel|selection` | Confirm, cancel, or inspect the current block selection. |
 | `/district borders` | Show nearby district borders. |
 | `/district expand` | Start a level-gated district claim expansion. |
 | `/district current` | Current district context. |
@@ -78,16 +83,16 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `/district role list <player>` | List a member's district roles. |
 | `/district role set|remove <player> <role>` | Manage district roles. |
 | `/district permissions` | Show district-role capabilities. |
-| `/district deposit|withdraw <amount>` | District treasury physical cash actions. |
+| `/district treasury create|remove|list|balance` | Manage local physical district treasury vaults. Remote deposit/withdraw commands are disabled. |
 | `/district laws [pending]` | Active or pending district laws. |
 | `/district law propose <law> <true|false>` | Propose a daily law change. |
 | `/district message welcome <text>` | MAYOR-only entry message. |
 | `/district message leave <text>` | MAYOR-only exit message. |
 | `/district chat prefix <text>` | MAYOR-only district chat prefix. |
 | `/district chat rolecolor <role> <color>` | MAYOR-only district role chat color. |
-| `/district marketzone` | Start merchant market-zone chunk selection. |
+| `/district marketzone` | Start an exact-block merchant market-zone selection. |
 | `/district marketzone confirm|cancel|status` | Manage market-zone selection. |
-| `/district marketzone borders` | Show the saved market-zone chunk borders (merchant-capable roles). |
+| `/district marketzone borders` | Show the saved exact market-zone borders (merchant-capable roles). |
 | `/district npcs start|confirm|cancel|activate` | Place only missing, currently unlocked district NPCs and activate saved plans. |
 | `/district development|projects|maintenance|contributors` | District progression overview. |
 | `/district project create|list|info|pause|resume|contribute|support` | Project lifecycle. |
@@ -116,6 +121,9 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `//replace <from> <material|pattern>` | Replace matching blocks, including with `air` or `0`. |
 | `//replacegrid <from> <materials>` | Replace matching blocks with a deterministic grid. |
 | `/vwe pattern <pattern>` | Validate and preview parsed syntax without editing blocks. |
+| `/vwe schematic list` | List safe vanilla `.nbt` structures in `plugins/VaultSurvival/schematics`. |
+| `/vwe schematic preview <file>` | Validate a structure and show its target particle bounds. |
+| `/vwe schematic paste <file>` | Paste through VWE confirmation, cancellation, auditing, and undo. |
 | `/vwe operation` | Open the VWE operation, pattern preview, confirm, and cancel dialog. |
 | `//walls`, `//outline`, `//floor`, `//ceiling`, `//hollow` | Cuboid editing tools. |
 | `//cylinder`, `//hcylinder` | Solid or hollow vertical cylinders. |
@@ -179,3 +187,9 @@ This reference follows the plugin modules. Permission-protected commands use the
 | `/civic reports [category|claim|resolve|dismiss]` | Staff report queue and lifecycle. |
 | `/civic guide <vaults|districts|auction>` | Open complete gameplay guides. |
 | `/civic rail <revenue|travel>` | Staff rail revenue and journey logs. |
+# Travel and homes
+
+- `/tpa <player>`, `/tpaccept`, `/tpdeny` — consent-based player teleport requests.
+- `/sethome [name]`, `/home [name]`, `/delhome [name]`, `/homes` — persistent homes; default limit 1, rank-configurable to 2 or 3.
+- `/district home`, `/district sethome` — district teleport and MAYOR-only in-claim home setup.
+- `/merchant shop edit [id]` — right-click selection or direct inventory shop editor; shop earnings are collected at the owned NPC.

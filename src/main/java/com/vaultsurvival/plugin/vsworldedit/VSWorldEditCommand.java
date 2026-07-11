@@ -29,6 +29,7 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
     private final MessageFormatter fmt;
     private final RegionVisualizationService visualization;
     private final PatternParser patternParser;
+    private final VweSchematicService schematics;
 
     public VSWorldEditCommand(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
@@ -36,6 +37,7 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         this.fmt = plugin.getMessageFormatter();
         this.visualization = plugin.getServiceRegistry().get(RegionVisualizationService.class);
         this.patternParser = new PatternParser(plugin.getConfigManager().getConfig());
+        this.schematics = plugin.getServiceRegistry().get(VweSchematicService.class);
     }
 
     @Override
@@ -95,6 +97,7 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
             case "operation-submit" -> handleOperationForm(player, args, false);
             case "operation-preview" -> handleOperationForm(player, args, true);
             case "debugpatterns" -> handlePatternDiagnostics(player);
+            case "schematic", "schem" -> handleSchematic(player, args);
             case "walls" -> handleWalls(player, args);
             case "outline" -> handleOutline(player, args);
             case "floor" -> handleFloor(player, args);
@@ -207,6 +210,73 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(result.passed() ? fmt.success("PASS: " + result.checks() + " checks")
             : fmt.error("FAIL: " + String.join(", ", result.failures())));
         return true;
+    }
+
+    private boolean handleSchematic(Player player, String[] args) {
+        if (!player.hasPermission("vaultsurvival.vwe.schematic")
+            || !plugin.isStaffModeActive(player.getUniqueId())) {
+            player.sendMessage(fmt.error("Activate staffmode and obtain vaultsurvival.vwe.schematic."));
+            return true;
+        }
+        if (args.length < 2 || args[1].equalsIgnoreCase("list")) {
+            var files = schematics.list();
+            String body = "Supported format: vanilla structure .nbt\nFolder: " + schematics.getDirectory()
+                + "\nFiles: " + files.size() + "\nWorldEdit .schem/.schematic files are not accepted.";
+            if (plugin.getServiceRegistry().has(DialogService.class)) {
+                List<DialogMenuItem> items = new java.util.ArrayList<>();
+                files.stream().limit(20).forEach(file -> items.add(DialogMenuItem.adminItem(file.fileName(),
+                    file.fileBytes() + " bytes - validate and preview at your current block.",
+                    "vwe schematic preview " + file.fileName(), "vaultsurvival.vwe.schematic", Material.STRUCTURE_BLOCK)));
+                if (items.isEmpty()) items.add(DialogMenuItem.adminItem("Refresh", "Scan the dedicated folder again.",
+                    "vwe schematic list", "vaultsurvival.vwe.schematic", Material.CLOCK));
+                plugin.getServiceRegistry().get(DialogService.class).openResult(player, "VWE Structures", body, items);
+            } else {
+                player.sendMessage(fmt.header("VWE Structures"));
+                player.sendMessage(fmt.info(body.replace('\n', ' ')));
+                files.forEach(file -> player.sendMessage(fmt.info(file.fileName() + " &7- " + file.fileBytes() + " bytes")));
+            }
+            return true;
+        }
+        if (args.length < 3) {
+            player.sendMessage(fmt.error("/vwe schematic <list|preview|paste> <file.nbt>"));
+            return true;
+        }
+        String action = args[1].toLowerCase();
+        String fileName = args[2];
+        VweSchematicService.Result result = switch (action) {
+            case "preview", "inspect" -> schematics.preview(player, fileName);
+            case "paste", "load" -> schematics.paste(player, fileName);
+            default -> VweSchematicService.Result.failure("Unknown schematic action. Use list, preview, or paste.");
+        };
+        showSchematicResult(player, action, fileName, result);
+        return true;
+    }
+
+    private void showSchematicResult(Player player, String action, String fileName,
+                                     VweSchematicService.Result result) {
+        if (!plugin.getServiceRegistry().has(DialogService.class)) {
+            player.sendMessage(result.success() ? fmt.success(result.message()) : fmt.error(result.message()));
+            return;
+        }
+        List<DialogMenuItem> items = new java.util.ArrayList<>();
+        if (result.success() && action.equals("preview")) {
+            items.add(DialogMenuItem.adminItem("Paste at current block", "Loads through VWE with limits, confirmation, and undo.",
+                "vwe schematic paste " + result.info().fileName(), "vaultsurvival.vwe.schematic", Material.LIME_CONCRETE));
+        }
+        if (result.pendingConfirmation()) {
+            items.add(DialogMenuItem.adminItem("Confirm paste", "Dangerous action: begin the validated structure paste.",
+                "vwe confirm", "vaultsurvival.vwe.schematic", Material.RED_CONCRETE));
+            items.add(DialogMenuItem.adminItem("Cancel", "Discard the pending paste without changing blocks.",
+                "vwe cancel", "vaultsurvival.vwe.schematic", Material.BARRIER));
+        }
+        if (result.success() && !result.pendingConfirmation() && action.equals("paste")) {
+            items.add(DialogMenuItem.adminItem("Undo", "Restore every block changed by the paste.",
+                "vwe undo", "vaultsurvival.vwe.schematic", Material.RECOVERY_COMPASS));
+        }
+        items.add(DialogMenuItem.adminItem("Back to structures", "Return to the validated file list.",
+            "vwe schematic list", "vaultsurvival.vwe.schematic", Material.ARROW));
+        plugin.getServiceRegistry().get(DialogService.class).openResult(player,
+            result.success() ? "VWE Structure" : "VWE Structure Error", result.message(), items);
     }
 
     private boolean handleOperationForm(Player player, String[] args, boolean previewOnly) {
@@ -416,17 +486,26 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(fmt.info("/vwe cancel &8- Cancel pending/active"));
         player.sendMessage(fmt.info("/vwe undo &8- Undo last operation"));
         player.sendMessage(fmt.info("/vwe debugpatterns &8- Run live parser acceptance checks"));
+        player.sendMessage(fmt.info("/vwe schematic <list|preview|paste> [file.nbt] &8- Safe vanilla structure loader"));
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return Stream.of("wand","pos1","pos2","selection","visualize","hide","clearselection","operation","pattern","debugpatterns","fill","set","setgrid","replace","replacegrid","walls","outline",
+            return Stream.of("wand","pos1","pos2","selection","visualize","hide","clearselection","operation","pattern","debugpatterns","schematic","fill","set","setgrid","replace","replacegrid","walls","outline",
                 "floor","ceiling","hollow","cylinder","hcylinder","circle","hcircle","sphere","hsphere","line","confirm","cancel","undo")
                 .filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length >= 2) {
             String sub = args[0].toLowerCase();
+            if ((sub.equals("schematic") || sub.equals("schem")) && args.length == 2) {
+                return Stream.of("list", "preview", "paste").filter(value -> value.startsWith(args[1].toLowerCase())).toList();
+            }
+            if ((sub.equals("schematic") || sub.equals("schem")) && args.length == 3
+                && (args[1].equalsIgnoreCase("preview") || args[1].equalsIgnoreCase("paste"))) {
+                return schematics.list().stream().map(VweSchematicService.AvailableFile::fileName)
+                    .filter(value -> value.toLowerCase().startsWith(args[2].toLowerCase())).toList();
+            }
             if (sub.equals("fill") || sub.equals("set") || sub.equals("setgrid") || sub.equals("pattern") || sub.equals("walls") || sub.equals("outline")
                 || sub.equals("floor") || sub.equals("ceiling") || sub.equals("line"))
                 return blockTabComplete(args[args.length - 1]);

@@ -1,7 +1,10 @@
 package com.vaultsurvival.plugin.regions;
 
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
+import com.vaultsurvival.plugin.districts.DistrictData;
+import com.vaultsurvival.plugin.districts.DistrictService;
 import org.bukkit.Location;
+import org.bukkit.entity.Player;
 
 import java.sql.*;
 import java.util.*;
@@ -133,6 +136,51 @@ public class RegionServiceImpl implements RegionService {
     @Override
     public boolean isAllowed(Location location, RegionData.RuleFlag flag) {
         return getRules(location).isAllowed(flag);
+    }
+
+    @Override
+    public boolean isBuildAllowed(Player player, Location location, RegionData.RuleFlag flag) {
+        if (flag != RegionData.RuleFlag.BLOCK_PLACE && flag != RegionData.RuleFlag.BLOCK_BREAK) {
+            return isAllowed(location, flag);
+        }
+        // Owner-granted staff build access is session-only, staffmode-bound and
+        // audited by Staffmode. It deliberately bypasses static spawn/region
+        // build flags, but does not bypass dedicated vault/treasury listeners.
+        if (player != null && plugin.hasStaffBuildPermission(player.getUniqueId())) return true;
+        if (isAllowed(location, flag)) return true;
+        if (player == null) return false;
+
+        // DISTRICT_MARKET intentionally denies visitors through its ordinary
+        // BLOCK_* flags. A merchant exception is only valid for the market zone
+        // belonging to that player's own district; it grants nothing elsewhere.
+        RegionData.Region marketZone = getRegionsAt(location).stream()
+            .filter(region -> region.getType() == RegionData.RegionType.DISTRICT_MARKET)
+            .findFirst().orElse(null);
+        if (marketZone == null) return false;
+        Integer districtId = marketDistrictId(marketZone.getName());
+        if (districtId == null) return false;
+
+        try {
+            DistrictService districts = plugin.getServiceRegistry().get(DistrictService.class);
+            DistrictData.District district = districts.getDistrict(districtId);
+            if (district == null || district.getStatus() != DistrictData.DistrictStatus.ACTIVE
+                || !district.getWorldName().equals(location.getWorld().getName())) return false;
+            DistrictData.District ownDistrict = districts.getPlayerDistrict(player.getUniqueId());
+            if (ownDistrict == null || ownDistrict.getId() != districtId) return false;
+            return districts.canCreateMerchantNpc(player.getUniqueId(), district);
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private Integer marketDistrictId(String regionName) {
+        final String prefix = "district_market_";
+        if (regionName == null || !regionName.toLowerCase(Locale.ROOT).startsWith(prefix)) return null;
+        try {
+            return Integer.parseInt(regionName.substring(prefix.length()));
+        } catch (NumberFormatException invalid) {
+            return null;
+        }
     }
 
     // ========================================================================

@@ -40,6 +40,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     private final Map<UUID, List<VSWorldEditData.BlockPlacement>> pendingPlacementOps = new ConcurrentHashMap<>();
     private final Map<UUID, PendingPatternOperation> pendingPatternOps = new ConcurrentHashMap<>();
     private final Map<UUID, PendingPositionOperation> pendingPositionOps = new ConcurrentHashMap<>();
+    private final Map<UUID, PendingSchematicOperation> pendingSchematicOps = new ConcurrentHashMap<>();
     // Currently running operations
     private final Map<UUID, VSWorldEditData.ActiveOperation> activeOps = new ConcurrentHashMap<>();
     private final Set<UUID> undoing = ConcurrentHashMap.newKeySet();
@@ -336,6 +337,62 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         }
         return startPositionOp(player, VSWorldEditData.OperationType.LINE, material,
             computeLinePositions(p1, p2));
+    }
+
+    @Override
+    public boolean pasteSchematic(Player player, String schematicName,
+                                  List<VSWorldEditData.SchematicPlacement> placements,
+                                  boolean requireConfirmation) {
+        UUID uuid = player.getUniqueId();
+        if (activeOps.containsKey(uuid) || pendingOps.containsKey(uuid) || undoing.contains(uuid)) {
+            player.sendMessage(fmt.error("An operation is already pending or running."));
+            return false;
+        }
+        if (schematicName == null || schematicName.isBlank() || placements == null || placements.isEmpty()) {
+            player.sendMessage(fmt.error("The structure has no pasteable blocks."));
+            return false;
+        }
+        if (placements.size() > getMaxBlocksPerOperation()) {
+            player.sendMessage(fmt.error("Structure has " + placements.size() + " blocks (operation maximum: "
+                + getMaxBlocksPerOperation() + ")."));
+            return false;
+        }
+        World world = player.getWorld();
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        boolean containsAir = false;
+        for (VSWorldEditData.SchematicPlacement placement : placements) {
+            if (placement.y() < world.getMinHeight() || placement.y() >= world.getMaxHeight()) {
+                player.sendMessage(fmt.error("Structure would extend beyond this world's build height."));
+                return false;
+            }
+            Material material = placement.templateState().getType();
+            if ((!material.isBlock() && !material.isAir()) || material == Material.STRUCTURE_VOID) {
+                player.sendMessage(fmt.error("Structure contains an unsupported block: " + material.name()));
+                return false;
+            }
+            containsAir |= material.isAir();
+            minX = Math.min(minX, placement.x()); maxX = Math.max(maxX, placement.x());
+            minY = Math.min(minY, placement.y()); maxY = Math.max(maxY, placement.y());
+            minZ = Math.min(minZ, placement.z()); maxZ = Math.max(maxZ, placement.z());
+        }
+        var selection = new VSWorldEditData.Selection(uuid,
+            new Location(world, minX, minY, minZ), new Location(world, maxX, maxY, maxZ));
+        Material primary = placements.getFirst().templateState().getType();
+        var operation = new VSWorldEditData.ActiveOperation(uuid,
+            VSWorldEditData.OperationType.SCHEMATIC_PASTE, selection, primary, null);
+        operation.setTotalBlocks(placements.size());
+        var pending = new PendingSchematicOperation(schematicName, List.copyOf(placements));
+        if (requireConfirmation || placements.size() > getRequireConfirmationAbove()
+            || (containsAir && requireConfirmationForAirOperations())) {
+            pendingOps.put(uuid, operation);
+            pendingSchematicOps.put(uuid, pending);
+            player.sendMessage(fmt.warn("Structure paste pending: &e" + schematicName + " &7(" + placements.size() + " blocks)."));
+            player.sendMessage(fmt.warn("Use &e/vwe confirm &eto paste or &e/vwe cancel &eto abort."));
+            return false;
+        }
+        executeSchematicOperation(operation, player, pending);
+        return true;
     }
 
     private boolean startOperation(Player player, VSWorldEditData.OperationType type,
@@ -690,6 +747,67 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         }.runTaskTimer(plugin, 1L, 1L);
     }
 
+    /** Paste a vanilla structure in batches while retaining a complete VWE undo snapshot. */
+    private void executeSchematicOperation(VSWorldEditData.ActiveOperation op, Player player,
+                                           PendingSchematicOperation schematic) {
+        UUID uuid = player.getUniqueId();
+        World world = Bukkit.getWorld(op.getSelection().getWorldName());
+        if (world == null) {
+            player.sendMessage(fmt.error("Target world is no longer loaded."));
+            return;
+        }
+        List<VSWorldEditData.SchematicPlacement> placements = schematic.placements();
+        activeOps.put(uuid, op);
+        player.sendMessage(fmt.info("Pasting &e" + schematic.name() + "&7: " + placements.size()
+            + " blocks through the VWE undo engine..."));
+        new BukkitRunnable() {
+            int index;
+            int changed;
+            int lastPct = -1;
+
+            @Override public void run() {
+                if (!player.isOnline() || op.isCancelled()
+                    || !plugin.isStaffModeActive(uuid)
+                    || !player.hasPermission("vaultsurvival.vwe.schematic")) {
+                    rollbackPartial(player, op, changed);
+                    cancel();
+                    return;
+                }
+                int processed = 0;
+                while (processed++ < getBlocksPerTick() && index < placements.size()) {
+                    VSWorldEditData.SchematicPlacement placement = placements.get(index++);
+                    Location targetLocation = new Location(world, placement.x(), placement.y(), placement.z());
+                    op.getUndoEntry().addSnapshot(new VSWorldEditData.BlockSnapshot(targetLocation,
+                        targetLocation.getBlock().getType().name()));
+                    try {
+                        var copy = placement.templateState().copy(targetLocation);
+                        if (!copy.update(true, false)) {
+                            targetLocation.getBlock().setBlockData(placement.templateState().getBlockData(), false);
+                        }
+                    } catch (RuntimeException unsupportedTileState) {
+                        targetLocation.getBlock().setBlockData(placement.templateState().getBlockData(), false);
+                    }
+                    changed++;
+                }
+                if (index >= placements.size()) {
+                    activeOps.remove(uuid);
+                    if (changed > 0) pushUndo(player, op.getUndoEntry());
+                    player.sendMessage(fmt.success("Structure pasted: &e" + schematic.name() + " &7(" + changed + " blocks)."));
+                    plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_SCHEMATIC_PASTE",
+                        schematic.name(), "blocks=" + changed + " world=" + world.getName()
+                            + " origin=" + op.getSelection().getX1() + "," + op.getSelection().getY1() + "," + op.getSelection().getZ1());
+                    cancel();
+                    return;
+                }
+                int pct = index * 100 / placements.size();
+                if (pct >= lastPct + 10) {
+                    lastPct = pct - pct % 10;
+                    player.sendMessage(fmt.info("Structure paste: &e" + pct + "%&7 (" + changed + " blocks)"));
+                }
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
+    }
+
     /** A cancelled pattern operation restores every already changed block in reverse order. */
     private void rollbackPartial(Player player, VSWorldEditData.ActiveOperation op, int changed) {
         List<VSWorldEditData.BlockSnapshot> snapshots = op.getUndoEntry().getSnapshots();
@@ -785,14 +903,25 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             player.sendMessage(fmt.info("Nothing to confirm."));
             return false;
         }
+        if (op.getType() == VSWorldEditData.OperationType.SCHEMATIC_PASTE
+            && (!plugin.isStaffModeActive(uuid) || !player.hasPermission("vaultsurvival.vwe.schematic"))) {
+            pendingSchematicOps.remove(uuid);
+            player.sendMessage(fmt.error("Schematic confirmation requires active staffmode and vaultsurvival.vwe.schematic."));
+            plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_SCHEMATIC_CONFIRM_REJECTED",
+                op.getType().name(), "staffmode=" + plugin.isStaffModeActive(uuid));
+            return false;
+        }
         player.sendMessage(fmt.success("Confirmed. Starting " + op.getType().name() + "..."));
         plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_CONFIRM",
             op.getType().name(), "blocks=" + op.getTotalBlocks());
         List<VSWorldEditData.BlockPlacement> placements = pendingPlacementOps.remove(uuid);
         PendingPatternOperation patternOperation = pendingPatternOps.remove(uuid);
         PendingPositionOperation positionOperation = pendingPositionOps.remove(uuid);
+        PendingSchematicOperation schematicOperation = pendingSchematicOps.remove(uuid);
         if (patternOperation != null) {
             executePatternOperation(op, player, patternOperation.pattern(), patternOperation.replaceFrom());
+        } else if (schematicOperation != null) {
+            executeSchematicOperation(op, player, schematicOperation);
         } else if (placements != null) {
             executeOperationWithPlacements(op, player, placements);
         } else if (positionOperation != null) {
@@ -813,6 +942,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
             pendingPlacementOps.remove(uuid);
             pendingPatternOps.remove(uuid);
             pendingPositionOps.remove(uuid);
+            pendingSchematicOps.remove(uuid);
             player.sendMessage(fmt.info("Pending operation cancelled."));
             plugin.getAuditLogger().logAdminAction(uuid, player.getName(), "VWE_CANCEL_PENDING",
                 pending.getType().name(), "blocks=" + pending.getTotalBlocks());
@@ -847,6 +977,10 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
     public String getPendingDescription(Player player) {
         var op = pendingOps.get(player.getUniqueId());
         if (op == null) return null;
+        PendingSchematicOperation schematic = pendingSchematicOps.get(player.getUniqueId());
+        if (schematic != null) {
+            return "SCHEMATIC_PASTE " + schematic.name() + " (" + op.getTotalBlocks() + " blocks)";
+        }
         PendingPatternOperation pattern = pendingPatternOps.get(player.getUniqueId());
         if (pattern != null) {
             return op.getType().name() + " " + op.getTotalBlocks() + " blocks using " + pattern.pattern().describe();
@@ -940,7 +1074,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
                         case REPLACE -> loc.getBlock().getType() == op.getSecondaryMaterial();
                         case PATTERN_FILL, PATTERN_REPLACE -> true; // Executed by executePatternOperation.
                         case WALLS, OUTLINE, FLOOR, CEILING -> true; // Pre-filtered positions
-                        case HOLLOW, CYLINDER, CIRCLE, SPHERE, HSPHERE, LINE -> true; // Not reached via this path
+                        case HOLLOW, CYLINDER, CIRCLE, SPHERE, HSPHERE, LINE, SCHEMATIC_PASTE -> true; // Not reached via this path
                     };
 
                     if (shouldPlace) {
@@ -1035,12 +1169,14 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         pendingPlacementOps.remove(uuid);
         pendingPatternOps.remove(uuid);
         pendingPositionOps.remove(uuid);
+        pendingSchematicOps.remove(uuid);
         var active = activeOps.get(uuid);
         if (active != null) active.cancel();
     }
 
     private record PendingPositionOperation(List<int[]> positions, Material material) {}
     private record PendingPatternOperation(BlockPattern pattern, Material replaceFrom) {}
+    private record PendingSchematicOperation(String name, List<VSWorldEditData.SchematicPlacement> placements) {}
 
     // ========================================================================
     // Undo
