@@ -32,6 +32,12 @@ public final class PatternParser {
         defaultMode = configured;
     }
 
+    PatternParser(MaterialResolver materials, boolean normalizePercentages,
+                  boolean allowLegacyCommaWeights, int maxEntries, BlockPattern.Mode defaultMode) {
+        this.materials=materials;this.normalizePercentages=normalizePercentages;
+        this.allowLegacyCommaWeights=allowLegacyCommaWeights;this.maxEntries=maxEntries;this.defaultMode=defaultMode;
+    }
+
     public MaterialResolver materialResolver() { return materials; }
     public PatternValidationResult parse(String expression) { return parse(expression, null); }
 

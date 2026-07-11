@@ -80,8 +80,6 @@ public final class DistrictTreasuryListener implements Listener {
         for (String amount : List.of("1", "10", "100", "1k", "10k", "1m", "all")) {
             actions.add(DialogMenuItem.item("Deposit " + amount, "Take this exact amount from your physical cash.",
                 "district treasury deposit " + vault.vaultUuid() + " " + amount, null, Material.GOLD_NUGGET));
-        }
-        for (String amount : List.of("1", "10", "100", "1k", "10k", "1m", "all")) {
             actions.add(DialogMenuItem.item("Withdraw " + amount, "Create one physical cash item; one empty slot is required.",
                 "district treasury withdraw " + vault.vaultUuid() + " " + amount, null, Material.GOLD_INGOT));
         }

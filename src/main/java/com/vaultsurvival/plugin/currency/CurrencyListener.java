@@ -250,10 +250,17 @@ public class CurrencyListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        // Run async to avoid blocking the join
-        plugin.getScheduler().runAsync(() -> {
-            currencyService.scanInventory(player);
-        });
+        record SlotCash(int slot,CashSnapshot snapshot) { }
+        List<SlotCash> captured=new java.util.ArrayList<>();ItemStack[] contents=player.getInventory().getContents();
+        for(int slot=0;slot<contents.length;slot++){CashSnapshot snapshot=currencyService.snapshot(contents[slot]);if(snapshot!=null)captured.add(new SlotCash(slot,snapshot));}
+        List<CashSnapshot> snapshots=captured.stream().map(SlotCash::snapshot).toList();
+        currencyService.validateCashSnapshots(snapshots).whenComplete((records,failure)->plugin.getScheduler().runSync(()->{
+            if(!player.isOnline())return;if(failure!=null){plugin.getLogger().warning("Cash join validation failed for "+player.getUniqueId()+": "+failure.getMessage());return;}
+            int invalid=0;List<UUID> valid=new java.util.ArrayList<>();
+            for(SlotCash capturedCash:captured){ItemStack current=player.getInventory().getItem(capturedCash.slot());CashSnapshot currentSnapshot=currencyService.snapshot(current);if(!capturedCash.snapshot().equals(currentSnapshot))continue;CashRecord record=records.get(currentSnapshot.cashUuid());if(record==null||!record.matches(currentSnapshot)){player.getInventory().setItem(capturedCash.slot(),null);invalid++;}else valid.add(record.cashUuid());}
+            currencyService.updateCashLocations(valid,"INVENTORY",player.getUniqueId().toString());
+            if(invalid>0)player.sendMessage(plugin.getMessageFormatter().warn(invalid+" counterfeit coin(s) were removed from your inventory."));
+        }));
     }
 
     /**
@@ -262,16 +269,9 @@ public class CurrencyListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        // Quick scan to update locations
-        for (ItemStack item : player.getInventory().getContents()) {
-            if (item != null && currencyService.isCashItem(item)) {
-                UUID cashUuid = currencyService.getCashUuid(item);
-                if (cashUuid != null) {
-                    currencyService.updateCashLocation(cashUuid, "OFFLINE",
-                        player.getUniqueId().toString());
-                }
-            }
-        }
+        List<UUID> cash=java.util.Arrays.stream(player.getInventory().getContents()).map(currencyService::snapshot)
+            .filter(java.util.Objects::nonNull).map(CashSnapshot::cashUuid).toList();
+        currencyService.updateCashLocations(cash,"OFFLINE",player.getUniqueId().toString());
     }
 
     // ========================================================================

@@ -2,7 +2,7 @@
 # Vault Survival configuration
 # =============================================================================
 # Configuration version used by future migrations. Do not change manually.
-configVersion: 5
+configVersion: 7
 
 # Reload-safe settings can be applied with /vs reload. World, database, command,
 # schematic, and module lifecycle changes should be followed by a full restart.
@@ -21,6 +21,13 @@ server:
 database:
   # SQLite file inside plugins/VaultSurvival. Existing data is never discarded.
   file: "vault_survival.db"
+  # SQLite waits this long when another transaction temporarily owns the file.
+  busyTimeoutMillis: 5000
+  # All writes are serialized through this bounded queue.
+  writeQueueCapacity: 4096
+  # Independent read-only connections; SQLite normally benefits from 1-2 readers.
+  readThreads: 2
+  readQueueCapacity: 1024
 
 redis:
   # Reserved optional cross-server cache. The core plugin works without Redis.
@@ -274,8 +281,9 @@ districts:
   min_distance_from_spawn: 500
   min_distance_between: 350
   selection:
-    # Exact horizontal area required for a new two-corner block claim.
-    requiredAreaBlocks: 3840
+    # Minimum horizontal area for a new two-corner block claim. The initial
+    # development level controls the maximum; shapes no longer need an exact area.
+    requiredAreaBlocks: 2500
     wandMaterial: GOLDEN_AXE
     timeoutMinutes: 20
     overlay:
@@ -439,16 +447,18 @@ regions:
     # WHILE_EDITING, TEN_SECONDS, THIRTY_SECONDS, SIXTY_SECONDS, or UNTIL_HIDDEN.
     defaultMode: WHILE_EDITING
     particles:
-      perimeterSpacing: 0.5
-      verticalSpacing: 0.5
+      perimeterSpacing: 0.25
+      verticalSpacing: 0.25
       cornerDensityMultiplier: 2.0
       maxParticlesPerTickPerPlayer: 2500
+      maxParticlesPerTickPerWorld: 12000
+      distanceCullingBlocks: 128
       renderIntervalTicks: 5
     grid:
       sideGridEnabled: true
-      sideGridSpacing: 4
+      sideGridSpacing: 3
       floorGridEnabled: true
-      floorGridSpacing: 4
+      floorGridSpacing: 3
       topPerimeterEnabled: true
     scaling:
       dynamicSpacingEnabled: true

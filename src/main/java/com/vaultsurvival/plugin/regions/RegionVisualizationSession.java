@@ -8,6 +8,8 @@ import java.util.UUID;
 /** Per-player, cached state for one cuboid visualization. */
 public final class RegionVisualizationSession {
 
+    public enum Density { NORMAL, DENSE, EXTREME }
+
     public enum Mode {
         TEN_SECONDS(10), THIRTY_SECONDS(30), SIXTY_SECONDS(60),
         UNTIL_CANCELLED(-1), WHILE_EDITING(-1);
@@ -55,6 +57,9 @@ public final class RegionVisualizationSession {
     private boolean floorGrid;
     private boolean sharedNearby;
     private RegionParticleRenderer.RenderPlan renderPlan;
+    private Density density = Density.NORMAL;
+    private long startedAtMillis;
+    private long lastRenderedAtMillis;
 
     public RegionVisualizationSession(UUID viewerId, Bounds bounds, RegionData.RegionType type,
                                       String displayName, Mode mode, boolean sideGrid, boolean floorGrid,
@@ -75,6 +80,8 @@ public final class RegionVisualizationSession {
         this.expiresAtMillis = mode.seconds() < 0 ? Long.MAX_VALUE
             : System.currentTimeMillis() + mode.seconds() * 1000L;
         this.renderPlan = null;
+        this.startedAtMillis = System.currentTimeMillis();
+        this.lastRenderedAtMillis = 0;
     }
 
     public UUID viewerId() { return viewerId; }
@@ -96,4 +103,9 @@ public final class RegionVisualizationSession {
     }
     public void setSideGrid(boolean enabled) { sideGrid = enabled; renderPlan = null; }
     public void setFloorGrid(boolean enabled) { floorGrid = enabled; renderPlan = null; }
+    public Density density() { return density; }
+    public void setDensity(Density density) { this.density = density; this.renderPlan = null; }
+    public boolean inInitialPulse() { return System.currentTimeMillis() - startedAtMillis < 3000L; }
+    public long lastRenderedAtMillis() { return lastRenderedAtMillis; }
+    public void renderedNow() { lastRenderedAtMillis = System.currentTimeMillis(); }
 }

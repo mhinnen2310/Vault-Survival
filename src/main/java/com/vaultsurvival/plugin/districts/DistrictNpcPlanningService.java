@@ -181,7 +181,7 @@ public final class DistrictNpcPlanningService implements Listener {
     @EventHandler
     public void onNpcRemoved(NpcRemovedEvent event) {
         try {
-            plugin.getDatabase().executeUpdate(
+            plugin.getDatabase().executeUpdateAsync(
                 "UPDATE district_npc_plans SET status='MISSING',npc_id=NULL WHERE npc_id=?",
                 event.getNpc().getId());
         } catch (Exception error) {
@@ -260,7 +260,8 @@ public final class DistrictNpcPlanningService implements Listener {
                 NpcPlanType type = NpcPlanType.valueOf(results.getString("npc_type"));
                 var world = Bukkit.getWorld(results.getString("world")); if (world == null) continue;
                 Location location = new Location(world, results.getDouble("x"), results.getDouble("y"), results.getDouble("z"), results.getFloat("yaw"), results.getFloat("pitch"));
-                NpcData.Npc npc = npcs.createNpc(district.getName() + " " + type.displayName, skin, location, type.actionType, type.command);
+                String actionData=type==NpcPlanType.CLERK?"DISTRICT:"+district.getId():type.command;
+                NpcData.Npc npc = npcs.createNpc(district.getName() + " " + type.displayName, skin, location, type.actionType, actionData);
                 if (npc == null) continue;
                 plugin.getDatabase().executeUpdate("UPDATE district_npc_plans SET status='ACTIVE',npc_id=? WHERE id=?", npc.getId(), results.getInt("id"));
                 count++;
@@ -273,7 +274,7 @@ public final class DistrictNpcPlanningService implements Listener {
     private float yawFor(org.bukkit.block.data.BlockData data) { if (!(data instanceof Directional directional)) return 0; return switch(directional.getFacing()){case NORTH->180f;case SOUTH->0f;case EAST->-90f;case WEST->90f;default->0f;}; }
 
     private enum NpcPlanType {
-        CLERK("Town Clerk", Material.LECTERN, 0, NpcData.ActionType.COMMAND, "vsmenu district"),
+        CLERK("Town Clerk", Material.LECTERN, 0, NpcData.ActionType.TOWN_CLERK, ""),
         JOB_BOARD("Job Board", Material.LOOM, 0, NpcData.ActionType.COMMAND, "spawnjobs"),
         MARKET_STEWARD("Market Steward", Material.BARREL, 1, NpcData.ActionType.COMMAND, "merchant order list"),
         CONDUCTOR("Conductor", Material.BLAST_FURNACE, 2, NpcData.ActionType.NONE, "");

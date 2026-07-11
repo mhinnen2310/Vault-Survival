@@ -41,6 +41,8 @@ public final class RegionVisualizationService implements Listener {
     private final boolean showVolume;
     private final int defaultDuration;
     private final int intervalTicks;
+    private final int worldBudget;
+    private final double cullDistanceSquared;
     private BukkitTask renderTask;
 
     public RegionVisualizationService(VaultSurvivalPlugin plugin) {
@@ -51,6 +53,9 @@ public final class RegionVisualizationService implements Listener {
         enabled = config.getBoolean(p + "enabled", true);
         defaultDuration = config.getInt(p + "defaultDurationSeconds", 30);
         intervalTicks = Math.max(1, config.getInt(p + "particles.renderIntervalTicks", 5));
+        worldBudget = Math.max(1000, config.getInt(p + "particles.maxParticlesPerTickPerWorld", 12000));
+        double cullDistance = Math.max(32, config.getDouble(p + "particles.distanceCullingBlocks", 128));
+        cullDistanceSquared = cullDistance * cullDistance;
         labelsEnabled = config.getBoolean(p + "labels.enabled", true);
         showPos1 = config.getBoolean(p + "labels.showPos1", true);
         showPos2 = config.getBoolean(p + "labels.showPos2", true);
@@ -61,7 +66,7 @@ public final class RegionVisualizationService implements Listener {
 
     public void start() {
         if (!enabled || renderTask != null) return;
-        renderTask = Bukkit.getScheduler().runTaskTimer(plugin, this::renderAll, 1L, intervalTicks);
+        renderTask = Bukkit.getScheduler().runTaskTimer(plugin, this::renderAll, 1L, 2L);
     }
 
     public void shutdown() {
@@ -89,7 +94,7 @@ public final class RegionVisualizationService implements Listener {
         boolean floorGrid = old == null ? renderer.defaultFloorGridEnabled() : old.floorGrid();
         RegionVisualizationSession session = new RegionVisualizationSession(id, bounds, type, name, mode,
             sideGrid, floorGrid, sharedNearby);
-        session.renderPlan(renderer.build(bounds, sideGrid, floorGrid));
+        session.renderPlan(renderer.build(bounds, sideGrid, floorGrid, session.density()));
         sessions.put(id, session);
         removeLabels(id);
         createLabels(session);
@@ -139,6 +144,11 @@ public final class RegionVisualizationService implements Listener {
         return true;
     }
 
+    public boolean setDensity(UUID viewerId, RegionVisualizationSession.Density density) {
+        RegionVisualizationSession session=sessions.get(viewerId); if(session==null)return false;
+        session.setDensity(density); session.renderPlan(renderer.build(session.bounds(),session.sideGrid(),session.floorGrid(),density)); return true;
+    }
+
     public RegionParticleRenderer.RenderPlan debugPlan(RegionVisualizationSession.Bounds bounds,
                                                         boolean sideGrid, boolean floorGrid) {
         return renderer.build(bounds, sideGrid, floorGrid);
@@ -156,19 +166,29 @@ public final class RegionVisualizationService implements Listener {
     }
 
     private void renderAll() {
+        Map<org.bukkit.World,Integer> worldCounts = new java.util.HashMap<>();
         for (RegionVisualizationSession session : List.copyOf(sessions.values())) {
             Player owner = Bukkit.getPlayer(session.viewerId());
             if (owner == null || !owner.isOnline() || owner.getWorld() != session.bounds().world() || session.expired()) {
                 hide(session.viewerId());
                 continue;
             }
-            render(session);
+            int tpsMultiplier = Bukkit.getTPS()[0] < 17 ? 4 : Bukkit.getTPS()[0] < 19 ? 2 : 1;
+            long requiredMillis = session.inInitialPulse() ? 100L : intervalTicks * 50L * tpsMultiplier;
+            if (System.currentTimeMillis() - session.lastRenderedAtMillis() < requiredMillis) continue;
+            int remaining = worldBudget - worldCounts.getOrDefault(session.bounds().world(),0);
+            if(remaining<=0) continue;
+            int rendered=render(session,remaining); worldCounts.merge(session.bounds().world(),rendered,Integer::sum);
         }
     }
 
     private void render(RegionVisualizationSession session) {
+        render(session,worldBudget);
+    }
+
+    private int render(RegionVisualizationSession session, int budget) {
         Player owner = Bukkit.getPlayer(session.viewerId());
-        if (owner == null) return;
+        if (owner == null) return 0;
         List<Player> recipients = new ArrayList<>();
         recipients.add(owner);
         if (session.sharedNearby()) {
@@ -178,9 +198,14 @@ public final class RegionVisualizationService implements Listener {
             }
         }
         RegionTypeStyleRegistry.Style style = styles.style(session.type());
-        for (Player recipient : recipients) {
+        int rendered=0;
+        outer: for (Player recipient : recipients) {
             int pointIndex = 0;
             for (RegionParticleRenderer.Point point : session.renderPlan().points()) {
+                if(rendered>=budget) break outer;
+                double dx=recipient.getLocation().getX()-point.x(),dy=recipient.getLocation().getY()-point.y(),dz=recipient.getLocation().getZ()-point.z();
+                double distance=dx*dx+dy*dy+dz*dz;
+                if(distance>cullDistanceSquared && point.layer()!=RegionParticleRenderer.Layer.POS1 && point.layer()!=RegionParticleRenderer.Layer.POS2 && pointIndex++%4!=0) continue;
                 Particle.DustOptions dust = switch (point.layer()) {
                     case POS1 -> POS1_DUST;
                     case POS2 -> POS2_DUST;
@@ -192,13 +217,16 @@ public final class RegionVisualizationService implements Listener {
                     && pointIndex++ % 12 == 0) {
                     recipient.spawnParticle(Particle.END_ROD, point.x(), point.y(), point.z(), 1, 0, 0, 0, 0);
                 } else {
-                    recipient.spawnParticle(Particle.DUST, point.x(), point.y(), point.z(), 1, 0, 0, 0, 0, dust);
+                    recipient.spawnParticle(Particle.DUST, point.x(), point.y(), point.z(), session.inInitialPulse()?2:1, 0, 0, 0, 0, dust);
                 }
+                rendered++;
             }
             for (TextDisplay display : labels.getOrDefault(session.viewerId(), List.of())) {
                 recipient.showEntity(plugin, display);
             }
         }
+        session.renderedNow();
+        return rendered;
     }
 
     private void createLabels(RegionVisualizationSession session) {

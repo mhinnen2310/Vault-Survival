@@ -182,8 +182,11 @@ public final class DistrictSelectionService implements Listener {
                 return;
             }
         } else if (!selection.isMarketZone() && !selection.isStationPlatform() && !selection.isRestrictedLand() && !selection.isSpawnCityClaim()
-            && claim.areaBlocks() != selection.limit) {
-            player.sendMessage(fmt.error("This district application requires exactly " + selection.limit + " blocks of horizontal area."));
+            && (claim.areaBlocks() < plugin.getConfigManager().getConfig().getLong("districts.selection.requiredAreaBlocks", 2500)
+                || claim.areaBlocks() > selection.limit)) {
+            long minimum = plugin.getConfigManager().getConfig().getLong("districts.selection.requiredAreaBlocks", 2500);
+            player.sendMessage(fmt.error("A new district claim must contain between " + minimum + " and "
+                + selection.limit + " horizontal blocks."));
             return;
         } else if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand() || selection.isSpawnCityClaim())
             && claim.areaBlocks() > selection.limit) {

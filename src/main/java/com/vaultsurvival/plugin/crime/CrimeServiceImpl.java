@@ -14,6 +14,7 @@ import org.bukkit.scheduler.BukkitTask;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -31,6 +32,7 @@ public class CrimeServiceImpl implements CrimeService {
     private final Map<Integer, CrimeData.EvidenceRecord> evidence = new ConcurrentHashMap<>();
     private final Map<String, CrimeData.WantedStatus> wanted = new ConcurrentHashMap<>(); // key: "districtId:criminalUuid"
     private final Map<Integer, CrimeData.JailInfo> jails = new ConcurrentHashMap<>();
+    private final AtomicInteger temporaryIds = new AtomicInteger(-1);
     private BukkitTask jailTask = null;
 
     public CrimeServiceImpl(VaultSurvivalPlugin plugin) {
@@ -45,38 +47,9 @@ public class CrimeServiceImpl implements CrimeService {
     public CrimeData.CrimeRecord logCrime(UUID criminalUuid, int districtId, CrimeData.CrimeType type,
                                            CrimeData.CrimeSeverity severity, String blockType, String location) {
         long now = System.currentTimeMillis();
-        String sql = "INSERT INTO crime_log (district_id, criminal_uuid, type, severity, block_type, location, timestamp) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?)";
-        try (Connection conn = plugin.getDatabase().getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            ps.setInt(1, districtId);
-            ps.setString(2, criminalUuid.toString());
-            ps.setString(3, type.name());
-            ps.setString(4, severity.name());
-            ps.setString(5, blockType);
-            ps.setString(6, location);
-            ps.setLong(7, now);
-            ps.executeUpdate();
-
-            ResultSet keys = ps.getGeneratedKeys();
-            if (keys.next()) {
-                int id = keys.getInt(1);
-                var record = new CrimeData.CrimeRecord(id, districtId, criminalUuid, type, severity,
-                    blockType, location, now);
-                crimes.put(id, record);
-
-                // Update wanted status
-                upsertWanted(criminalUuid, districtId);
-
-                // Alert online police in that district
-                alertPolice(districtId, record);
-
-                return record;
-            }
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to log crime", e);
-        }
-        return null;
+        int temporaryId=temporaryIds.getAndDecrement();var pending=new CrimeData.CrimeRecord(temporaryId,districtId,criminalUuid,type,severity,blockType,location,now);crimes.put(temporaryId,pending);
+        plugin.getDatabase().write(connection->{try(PreparedStatement statement=connection.prepareStatement("INSERT INTO crime_log(district_id,criminal_uuid,type,severity,block_type,location,timestamp) VALUES(?,?,?,?,?,?,?)",Statement.RETURN_GENERATED_KEYS)){statement.setInt(1,districtId);statement.setString(2,criminalUuid.toString());statement.setString(3,type.name());statement.setString(4,severity.name());statement.setString(5,blockType);statement.setString(6,location);statement.setLong(7,now);statement.executeUpdate();try(ResultSet keys=statement.getGeneratedKeys()){if(!keys.next())throw new SQLException("Crime insert returned no id");return keys.getInt(1);}}}).whenComplete((id,failure)->Bukkit.getScheduler().runTask(plugin,()->{crimes.remove(temporaryId);if(failure!=null){logger.log(Level.WARNING,"Failed to log crime",failure);return;}var record=new CrimeData.CrimeRecord(id,districtId,criminalUuid,type,severity,blockType,location,now);crimes.put(id,record);upsertWanted(criminalUuid,districtId);alertPolice(districtId,record);}));
+        return pending;
     }
 
     @Override
@@ -84,37 +57,9 @@ public class CrimeServiceImpl implements CrimeService {
                                                    String location, CrimeData.CrimeSeverity severity, String details) {
         long now = System.currentTimeMillis();
         long expiresAt = now + plugin.getConfigManager().getEvidenceExpireDays() * 24L * 60L * 60L * 1000L;
-        String sql = "INSERT INTO district_evidence (district_id, player_uuid, law_key, action_type, location, timestamp, " +
-                     "severity, details, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)";
-        try (Connection conn = plugin.getDatabase().getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            ps.setInt(1, districtId);
-            ps.setString(2, playerUuid.toString());
-            ps.setString(3, lawKey);
-            ps.setString(4, actionType);
-            ps.setString(5, location);
-            ps.setLong(6, now);
-            ps.setString(7, severity.name());
-            ps.setString(8, details);
-            ps.setLong(9, expiresAt);
-            ps.executeUpdate();
-
-            ResultSet keys = ps.getGeneratedKeys();
-            if (keys.next()) {
-                int id = keys.getInt(1);
-                var record = new CrimeData.EvidenceRecord(id, districtId, playerUuid, lawKey, actionType,
-                    location, now, severity, details, CrimeData.EvidenceStatus.ACTIVE, expiresAt, null);
-                evidence.put(id, record);
-                plugin.getAuditLogger().log(playerUuid, Bukkit.getOfflinePlayer(playerUuid).getName(),
-                    "EVIDENCE_CREATE", "DISTRICT", String.valueOf(districtId),
-                    "evidence=" + id + " law=" + lawKey + " action=" + actionType);
-                alertEvidencePolice(districtId, record);
-                return record;
-            }
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to create evidence", e);
-        }
-        return null;
+        int temporaryId=temporaryIds.getAndDecrement();var pending=new CrimeData.EvidenceRecord(temporaryId,districtId,playerUuid,lawKey,actionType,location,now,severity,details,CrimeData.EvidenceStatus.ACTIVE,expiresAt,null);evidence.put(temporaryId,pending);
+        plugin.getDatabase().write(connection->{try(PreparedStatement statement=connection.prepareStatement("INSERT INTO district_evidence(district_id,player_uuid,law_key,action_type,location,timestamp,severity,details,status,expires_at) VALUES(?,?,?,?,?,?,?,?,'ACTIVE',?)",Statement.RETURN_GENERATED_KEYS)){statement.setInt(1,districtId);statement.setString(2,playerUuid.toString());statement.setString(3,lawKey);statement.setString(4,actionType);statement.setString(5,location);statement.setLong(6,now);statement.setString(7,severity.name());statement.setString(8,details);statement.setLong(9,expiresAt);statement.executeUpdate();try(ResultSet keys=statement.getGeneratedKeys()){if(!keys.next())throw new SQLException("Evidence insert returned no id");return keys.getInt(1);}}}).whenComplete((id,failure)->Bukkit.getScheduler().runTask(plugin,()->{evidence.remove(temporaryId);if(failure!=null){logger.log(Level.WARNING,"Failed to create evidence",failure);return;}var record=new CrimeData.EvidenceRecord(id,districtId,playerUuid,lawKey,actionType,location,now,severity,details,CrimeData.EvidenceStatus.ACTIVE,expiresAt,null);evidence.put(id,record);plugin.getAuditLogger().log(playerUuid,Bukkit.getOfflinePlayer(playerUuid).getName(),"EVIDENCE_CREATE","DISTRICT",String.valueOf(districtId),"evidence="+id+" law="+lawKey+" action="+actionType);alertEvidencePolice(districtId,record);}));
+        return pending;
     }
 
     @Override
@@ -213,10 +158,10 @@ public class CrimeServiceImpl implements CrimeService {
         record.setStatus(status);
         record.setHandledBy(handledBy);
         try {
-            plugin.getDatabase().executeUpdate(
+            plugin.getDatabase().executeUpdateAsync(
                 "UPDATE district_evidence SET status = ?, handled_by = ? WHERE evidence_id = ?",
                 status.name(), handledBy != null ? handledBy.toString() : null, record.getId());
-        } catch (SQLException e) {
+        } catch (RuntimeException e) {
             logger.log(Level.WARNING, "Failed to update evidence status", e);
         }
     }
@@ -260,11 +205,11 @@ public class CrimeServiceImpl implements CrimeService {
 
         // Persist
         try {
-            plugin.getDatabase().executeUpdate(
+            plugin.getDatabase().executeUpdateAsync(
                 "INSERT OR REPLACE INTO wanted_players (criminal_uuid, district_id, bounty, crime_count, last_crime_time, arrested) " +
                 "VALUES (?, ?, ?, ?, ?, 0)",
                 criminalUuid.toString(), districtId, ws.getBounty(), ws.getCrimeCount(), ws.getLastCrimeTime());
-        } catch (SQLException e) {
+        } catch (RuntimeException e) {
             logger.log(Level.WARNING, "Failed to persist wanted status", e);
         }
     }

@@ -600,6 +600,10 @@ public class NpcServiceImpl implements NpcService {
                     player.sendMessage(fmt.error("Merchant shop service is not available."));
                 }
             }
+            case TOWN_CLERK -> {
+                try { plugin.getServiceRegistry().get(com.vaultsurvival.plugin.districts.TownClerkNpcHandler.class).handle(player,npc.getActionData()); }
+                catch (RuntimeException invalid) { player.sendMessage(fmt.error("This Town Clerk is not configured safely.")); plugin.getLogger().warning("Rejected Town Clerk NPC #"+npc.getId()+": "+invalid.getMessage()); }
+            }
             case NONE -> {
                 // Do nothing — decoration NPC
             }

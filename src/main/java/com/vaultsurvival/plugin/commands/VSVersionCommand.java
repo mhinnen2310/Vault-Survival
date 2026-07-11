@@ -3,6 +3,7 @@ package com.vaultsurvival.plugin.commands;
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.access.AccessService;
 import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.core.DatabaseHealthService;
 import com.vaultsurvival.plugin.core.Module;
 import com.vaultsurvival.plugin.dialogs.DialogService;
 import com.vaultsurvival.plugin.updates.UpdateService;
@@ -55,6 +56,8 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
         if (args[0].equalsIgnoreCase("configcheck")) return handleConfigCheck(sender);
         if (args[0].equalsIgnoreCase("debugbundle")) return handleDebugBundle(sender);
         if (args[0].equalsIgnoreCase("audit")) return handleAudit(sender);
+        if (args[0].equalsIgnoreCase("dbmetrics") || (args[0].equalsIgnoreCase("database")
+            && args.length > 1 && args[1].equalsIgnoreCase("status"))) return handleDatabaseMetrics(sender);
         return handleVersion(sender);
     }
 
@@ -78,7 +81,7 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
         var config = plugin.getConfigManager().getConfig();
         List<String> missing = new java.util.ArrayList<>();
         for (String key : List.of(
-            "configVersion", "server.name", "database.file", "staffSandbox.transfer.testPort",
+            "configVersion", "server.name", "database.file", "database.writeQueueCapacity", "database.readThreads", "database.busyTimeoutMillis", "staffSandbox.transfer.testPort",
             "staffmode.utilities.breaker.allowedSizes", "spawn.blockClaim.maxAreaBlocks",
             "dialogs.enabled", "chat.channels.default", "security.anticheat.enabled",
             "currency.material", "vaults.vault_material", "districtTreasury.enabled",
@@ -125,6 +128,19 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
         } catch (RuntimeException unavailable) {
             sender.sendMessage(fmt.error("Operational alert service is unavailable."));
         }
+        return true;
+    }
+
+    private boolean handleDatabaseMetrics(CommandSender sender) {
+        if (!hasVsPermission(sender,"vs.admin")){sender.sendMessage(fmt.permissionDenied());return true;}
+        var metrics=plugin.getServiceRegistry().get(DatabaseHealthService.class).metrics();var writes=metrics.writes();
+        sender.sendMessage(fmt.header("Database Executor"));
+        sender.sendMessage(fmt.info("Write queue: &e"+writes.depth()+"/"+writes.capacity()+" &7| submitted &e"+writes.submitted()+" &7| completed &e"+writes.completed()));
+        sender.sendMessage(fmt.info("Write failures: &e"+writes.failed()+" &7| rejected &e"+writes.rejected()+" &7| average &e"+writes.averageQueryMicros()+"us"));
+        sender.sendMessage(fmt.info("Longest write: &e"+writes.longestQueryMicros()+"us &7| queue pressure: "
+            +(metrics.criticalQueuePressure()?"&cCRITICAL":"&aNORMAL")));
+        sender.sendMessage(fmt.info("Read queue: &e"+metrics.readQueueDepth()+"/"+metrics.readQueueCapacity()+" &7| completed &e"+metrics.readsCompleted()+" &7| failures &e"+metrics.readsFailed()+" &7| average &e"+metrics.averageReadMicros()+"us"));
+        sender.sendMessage(fmt.info("Longest read: &e"+metrics.longestReadMicros()+"us &7| accepting: &e"+metrics.acceptingWork()+" &7| shutdown flush: &e"+metrics.shutdownFlushStatus()));
         return true;
     }
 
@@ -261,7 +277,7 @@ public class VSVersionCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("version", "modules", "debug", "reload", "update", "checklist", "debugbundle", "permissions", "configcheck", "audit").stream()
+            return List.of("version", "modules", "debug", "dbmetrics", "reload", "update", "checklist", "debugbundle", "permissions", "configcheck", "audit").stream()
                 .filter(s -> s.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("update")) {

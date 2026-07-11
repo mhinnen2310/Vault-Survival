@@ -122,6 +122,8 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         // Register core services
         serviceRegistry.register(ConfigManager.class, configManager);
         serviceRegistry.register(DatabaseManager.class, databaseManager);
+        serviceRegistry.register(DatabaseExecutor.class, databaseManager.executor());
+        serviceRegistry.register(DatabaseHealthService.class, new DatabaseHealthService(databaseManager.executor()));
         serviceRegistry.register(AuditLogger.class, auditLogger);
         serviceRegistry.register(MessageFormatter.class, messageFormatter);
         serviceRegistry.register(SchedulerHelper.class, schedulerHelper);
@@ -143,6 +145,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
             moduleManager.disableAll();
         }
         if (databaseManager != null) {
+            if (auditLogger != null) auditLogger.shutdown();
             databaseManager.shutdown();
         }
         if (serviceRegistry != null) {

@@ -18,6 +18,7 @@ public class DistrictModule extends Module {
     private DistrictTreasuryServiceImpl treasuryService;
     private DistrictTreasuryListener treasuryListener;
     private DistrictRestrictedLandService restrictedLandService;
+    private TownClerkService townClerkService;
 
     public DistrictModule(VaultSurvivalPlugin plugin) {
         super(plugin);
@@ -47,6 +48,9 @@ public class DistrictModule extends Module {
         plugin.getServiceRegistry().register(DistrictTreasuryService.class, treasuryService);
         restrictedLandService = new DistrictRestrictedLandService(plugin, districtService);
         plugin.getServiceRegistry().register(DistrictRestrictedLandService.class, restrictedLandService);
+        townClerkService=new TownClerkService(plugin);
+        plugin.getServiceRegistry().register(TownClerkService.class,townClerkService);
+        plugin.getServiceRegistry().register(TownClerkNpcHandler.class,new TownClerkNpcHandler(townClerkService));
         plugin.getLogger().info("District service registered");
     }
 
@@ -76,6 +80,8 @@ public class DistrictModule extends Module {
         plugin.getServiceRegistry().unregister(DistrictNpcPlanningService.class);
         plugin.getServiceRegistry().unregister(DistrictTreasuryService.class);
         plugin.getServiceRegistry().unregister(DistrictRestrictedLandService.class);
+        plugin.getServiceRegistry().unregister(TownClerkNpcHandler.class);
+        plugin.getServiceRegistry().unregister(TownClerkService.class);
         plugin.getServiceRegistry().unregister(DistrictDevelopmentService.class);
         plugin.getServiceRegistry().unregister(DistrictSelectionService.class);
         plugin.getServiceRegistry().unregister(DistrictService.class);

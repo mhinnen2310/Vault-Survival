@@ -66,6 +66,7 @@ public final class RegionCommand implements CommandExecutor, TabCompleter {
             case "showtime" -> handleShowTime(sender, args);
             case "grid" -> handleGrid(sender, args, false);
             case "floorgrid" -> handleGrid(sender, args, true);
+            case "density" -> handleDensity(sender,args);
             case "debug" -> handleDebug(sender);
             default -> { sendUsage(sender); yield true; }
         };
@@ -304,6 +305,12 @@ public final class RegionCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private boolean handleDensity(CommandSender sender,String[] args){
+        if(!(sender instanceof Player player))return playerOnly(sender);
+        if(args.length<2){player.sendMessage(fmt.error("Usage: /region density <normal|dense|extreme>"));return true;}
+        try{var density=RegionVisualizationSession.Density.valueOf(args[1].toUpperCase());boolean changed=visualization.setDensity(player.getUniqueId(),density);if(changed)audit(player,"REGION_VISUALIZE_DENSITY",player.getUniqueId().toString(),"density="+density);openSelectionDialog(player,changed?"Visualization density set to "+density+".":"Start a visualization first.");}catch(IllegalArgumentException invalid){player.sendMessage(fmt.error("Density must be NORMAL, DENSE, or EXTREME."));}return true;
+    }
+
     private boolean handleDebug(CommandSender sender) {
         if (!(sender instanceof Player player)) return playerOnly(sender);
         var current = visualization.session(player.getUniqueId()).orElse(null);
@@ -352,6 +359,7 @@ public final class RegionCommand implements CommandExecutor, TabCompleter {
             "region grid " + (sideEnabled ? "off" : "on"), "vs.region.admin", Material.IRON_BARS));
         items.add(DialogMenuItem.adminItem("Toggle Floor Grid", "Currently " + (floorEnabled ? "ON" : "OFF") + "; click to toggle.",
             "region floorgrid " + (floorEnabled ? "off" : "on"), "vs.region.admin", Material.IRON_TRAPDOOR));
+        items.add(DialogMenuItem.adminItem("Density: "+(session==null?"NORMAL":session.density()), "Cycle visibility density with /region density.", "region density extreme", "vs.region.admin", Material.GLOWSTONE_DUST));
         items.add(DialogMenuItem.adminItem("Confirm Region", "Enter name, type and priority.", "vsmenu input region_create", "vs.region.admin", Material.EMERALD_BLOCK));
         items.add(DialogMenuItem.adminItem("Cancel selection", "Clear points and stop visualization.", "region cancel", "vs.region.admin", Material.BARRIER));
         plugin.getServiceRegistry().get(DialogService.class).openResult(player, "Region Selection", body, items);
@@ -383,7 +391,7 @@ public final class RegionCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("/region wand|pos1|pos2|type <type>|cancel"));
         sender.sendMessage(fmt.info("/region create <name> <type> [priority] | delete <id> [confirm]"));
         sender.sendMessage(fmt.info("/region show [id] [nearby] | hide | showtime <10|30|60|persistent>"));
-        sender.sendMessage(fmt.info("/region grid <on|off> | floorgrid <on|off> | debug"));
+        sender.sendMessage(fmt.info("/region grid <on|off> | floorgrid <on|off> | density <normal|dense|extreme> | debug"));
     }
 
     private void audit(CommandSender sender, String action, String target, String details) {
@@ -410,7 +418,7 @@ public final class RegionCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) return filter(List.of("wand", "pos1", "pos2", "type", "cancel", "create", "delete",
-            "info", "flag", "list", "here", "show", "hide", "showtime", "grid", "floorgrid", "debug"), args[0]);
+            "info", "flag", "list", "here", "show", "hide", "showtime", "grid", "floorgrid", "density", "debug"), args[0]);
         if (args.length == 2 && args[0].equalsIgnoreCase("type"))
             return filter(Arrays.stream(RegionData.RegionType.values()).map(Enum::name).toList(), args[1]);
         if (args.length == 3 && args[0].equalsIgnoreCase("create"))
@@ -419,6 +427,7 @@ public final class RegionCommand implements CommandExecutor, TabCompleter {
             return filter(Arrays.stream(RegionData.RuleFlag.values()).map(Enum::name).toList(), args[2]);
         if (args.length == 2 && args[0].equalsIgnoreCase("showtime")) return filter(List.of("10", "30", "60", "persistent"), args[1]);
         if (args.length == 2 && (args[0].equalsIgnoreCase("grid") || args[0].equalsIgnoreCase("floorgrid"))) return filter(List.of("on", "off"), args[1]);
+        if (args.length == 2 && args[0].equalsIgnoreCase("density")) return filter(List.of("normal","dense","extreme"),args[1]);
         if (args.length == 3 && args[0].equalsIgnoreCase("show")) return filter(List.of("nearby"), args[2]);
         if (args.length == 3 && args[0].equalsIgnoreCase("delete")) return filter(List.of("confirm"), args[2]);
         return List.of();

@@ -13,9 +13,15 @@ public final class MaterialResolver {
     }
 
     private final boolean allowNumericAirAlias;
+    private final boolean requireBlockValidation;
 
     public MaterialResolver(boolean allowNumericAirAlias) {
+        this(allowNumericAirAlias,true);
+    }
+
+    MaterialResolver(boolean allowNumericAirAlias, boolean requireBlockValidation) {
         this.allowNumericAirAlias = allowNumericAirAlias;
+        this.requireBlockValidation = requireBlockValidation;
     }
 
     public ResolveResult resolve(String input) {
@@ -33,7 +39,7 @@ public final class MaterialResolver {
         if (material == null && normalized.startsWith("minecraft:")) {
             material = Material.matchMaterial(normalized.substring("minecraft:".length()));
         }
-        if (material == null || (!material.isBlock() && !material.isAir())) {
+        if (material == null || (requireBlockValidation && !material.isBlock() && !material.isAir())) {
             String candidate = normalized.startsWith("minecraft:") ? normalized.substring("minecraft:".length()) : normalized;
             String suggestion = closest(candidate);
             return invalid("Unknown material: " + input, suggestion == null ? null : "Did you mean: " + suggestion + "?");
@@ -43,8 +49,8 @@ public final class MaterialResolver {
 
     private String closest(String input) {
         return Arrays.stream(Material.values())
-            .filter(material -> material.isBlock() || material.isAir())
-            .map(material -> material.getKey().getKey())
+            .filter(material -> !requireBlockValidation || material.isBlock() || material.isAir())
+            .map(material -> material.name().toLowerCase(Locale.ROOT))
             .min(Comparator.comparingInt(candidate -> distance(input, candidate)))
             .filter(candidate -> distance(input, candidate) <= Math.max(2, input.length() / 3))
             .orElse(null);

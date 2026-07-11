@@ -51,9 +51,16 @@ public final class RegionParticleRenderer {
     public int maxParticles() { return maxParticles; }
 
     public RenderPlan build(RegionVisualizationSession.Bounds b, boolean sideGrid, boolean floorGrid) {
+        return build(b, sideGrid, floorGrid, RegionVisualizationSession.Density.NORMAL);
+    }
+
+    public RenderPlan build(RegionVisualizationSession.Bounds b, boolean sideGrid, boolean floorGrid,
+                            RegionVisualizationSession.Density density) {
         List<Point> all = new ArrayList<>();
-        double multiplier = dynamicSpacing ? (b.volume() >= largeVolume ? largeMultiplier
+        double adaptive = dynamicSpacing ? (b.volume() >= largeVolume ? largeMultiplier
             : b.volume() >= mediumVolume ? mediumMultiplier : 1.0) : 1.0;
+        double densityMultiplier = switch (density) { case NORMAL -> 1.0; case DENSE -> 0.75; case EXTREME -> 0.5; };
+        double multiplier = adaptive * densityMultiplier;
         double perimeter = perimeterSpacing * multiplier;
         double vertical = verticalSpacing * multiplier;
         double x1 = b.minX(), y1 = b.minY(), z1 = b.minZ();

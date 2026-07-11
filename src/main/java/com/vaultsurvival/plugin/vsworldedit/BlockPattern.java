@@ -15,7 +15,8 @@ public interface BlockPattern {
     List<Entry> entries();
 
     default boolean containsAir() {
-        return entries().stream().anyMatch(entry -> entry.material().isAir());
+        return entries().stream().anyMatch(entry -> entry.material() == Material.AIR
+            || entry.material() == Material.CAVE_AIR || entry.material() == Material.VOID_AIR);
     }
 
     default String describe() {

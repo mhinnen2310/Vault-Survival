@@ -1,7 +1,6 @@
 package com.vaultsurvival.plugin.core;
 
 import java.io.File;
-import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -10,6 +9,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Manages the SQLite database connection.
@@ -20,8 +21,10 @@ public class DatabaseManager {
 
     private final Logger logger;
     private final File dataFolder;
-    private Connection connection;
     private String dbUrl;
+    private DatabaseExecutor executor;
+    private int busyTimeoutMillis = 5000;
+    private static final long LATEST_MIGRATION = 2026071202L;
 
     public DatabaseManager(Logger logger, File dataFolder) {
         this.logger = logger;
@@ -45,43 +48,28 @@ public class DatabaseManager {
             throw new SQLException("SQLite JDBC driver not found", e);
         }
 
-        connection = DriverManager.getConnection(dbUrl);
-
-        // Enable WAL mode for better concurrent read performance
-        // and enable foreign keys
-        try (Statement stmt = connection.createStatement()) {
+        busyTimeoutMillis = Math.max(100, config.getConfig().getInt("database.busyTimeoutMillis", 5000));
+        try (Connection connection = DriverManager.getConnection(dbUrl); Statement stmt = connection.createStatement()) {
             stmt.execute("PRAGMA journal_mode=WAL");
             stmt.execute("PRAGMA foreign_keys=ON");
-            stmt.execute("PRAGMA busy_timeout=5000");
+            stmt.execute("PRAGMA busy_timeout=" + busyTimeoutMillis);
         }
+        executor = new DatabaseExecutor(dbUrl, logger, busyTimeoutMillis,
+            config.getConfig().getInt("database.writeQueueCapacity", 4096),
+            config.getConfig().getInt("database.readThreads", 2),
+            config.getConfig().getInt("database.readQueueCapacity", 1024));
 
         logger.info("SQLite database connected: " + dbPath.getAbsolutePath());
     }
 
     /**
-     * Get a connection. SQLite uses a single shared connection;
-     * we return a no-close proxy wrapper so that try-with-resources
-     * patterns in service code don't accidentally close the shared connection.
-     * SQLite serializes writes internally.
+     * Compatibility connection for controlled reads and explicit legacy
+     * transactions. Every call returns an independent, genuinely closeable
+     * connection; transaction state is never shared.
      */
     public Connection getConnection() throws SQLException {
-        if (connection == null || connection.isClosed()) {
-            throw new SQLException("Database connection is not available");
-        }
-        // Return a proxy that intercepts close() as a no-op,
-        // preventing try-with-resources from killing the shared connection.
-        return (Connection) Proxy.newProxyInstance(
-            Connection.class.getClassLoader(),
-            new Class<?>[]{Connection.class},
-            (proxy, method, args) -> {
-                if ("close".equals(method.getName())) return null;
-                try {
-                    return method.invoke(connection, args);
-                } catch (java.lang.reflect.InvocationTargetException e) {
-                    throw e.getCause();
-                }
-            }
-        );
+        if (executor == null) throw new SQLException("Database connection is not available");
+        return executor.openConnection(false);
     }
 
     /**
@@ -876,11 +864,12 @@ public class DatabaseManager {
             ,"CREATE TABLE IF NOT EXISTS district_restricted_role_access (land_id INTEGER NOT NULL REFERENCES district_restricted_lands(id) ON DELETE CASCADE,role TEXT NOT NULL,allowed INTEGER NOT NULL,changed_by TEXT NOT NULL,changed_at INTEGER NOT NULL,PRIMARY KEY(land_id,role))"
         };
 
-        try (Statement stmt = connection.createStatement()) {
+        try (Connection connection = getConnection(); Statement stmt = connection.createStatement()) {
             for (String sql : statements) {
                 stmt.execute(sql);
             }
             migrateDistrictClaimsToBlockBounds(stmt);
+            runVersionedMigrations(connection);
             logger.info("Database schema initialized successfully (" + statements.length + " tables)");
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Failed to initialize database schema", e);
@@ -921,7 +910,7 @@ public class DatabaseManager {
      * Execute a SQL update (INSERT, UPDATE, DELETE).
      */
     public void executeUpdate(String sql, Object... params) throws SQLException {
-        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+        try (Connection connection = getConnection(); PreparedStatement ps = connection.prepareStatement(sql)) {
             for (int i = 0; i < params.length; i++) {
                 ps.setObject(i + 1, params[i]);
             }
@@ -929,17 +918,77 @@ public class DatabaseManager {
         }
     }
 
+    public CompletableFuture<Integer> executeUpdateAsync(String sql, Object... params) {
+        if (executor == null) return CompletableFuture.failedFuture(new SQLException("Database is unavailable"));
+        return executor.write(sql, params);
+    }
+
+    public <T> CompletableFuture<T> write(DatabaseTransaction<T> transaction) {
+        if (executor == null) return CompletableFuture.failedFuture(new SQLException("Database is unavailable"));
+        return executor.write(transaction);
+    }
+
+    public <T> CompletableFuture<T> read(DatabaseTransaction<T> operation) {
+        if (executor == null) return CompletableFuture.failedFuture(new SQLException("Database is unavailable"));
+        return executor.read(operation);
+    }
+
+    public DatabaseExecutor executor() { return executor; }
+
+    private void runVersionedMigrations(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at INTEGER NOT NULL)");
+        }
+        boolean applied;
+        try (PreparedStatement check = connection.prepareStatement("SELECT 1 FROM schema_migrations WHERE version=?")) {
+            check.setLong(1, LATEST_MIGRATION); try (ResultSet row = check.executeQuery()) { applied = row.next(); }
+        }
+        if (applied) return;
+        boolean autoCommit = connection.getAutoCommit(); connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_admin_audit_action_time ON admin_audit_log(action_type,timestamp DESC)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_cash_owner_state ON cash_items(owner_uuid,state)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_cash_uuid_state_amount ON cash_items(cash_uuid,state,amount)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_evidence_district_status ON district_evidence(district_id,status,timestamp DESC)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_reports_category_status ON player_reports(category,status,created_at DESC)");
+            ensureColumn(connection, "cash_items", "issued_by", "TEXT");
+            ensureColumn(connection, "cash_items", "original_owner", "TEXT");
+            ensureColumn(connection, "cash_items", "current_holder", "TEXT");
+            statement.execute("UPDATE cash_items SET issued_by=COALESCE(issued_by,created_by),original_owner=COALESCE(original_owner,owner_uuid),current_holder=COALESCE(current_holder,owner_uuid)");
+            statement.execute("CREATE TABLE IF NOT EXISTS cash_transaction_journal (id INTEGER PRIMARY KEY AUTOINCREMENT, transaction_uuid TEXT UNIQUE NOT NULL, idempotency_key TEXT UNIQUE NOT NULL, player_uuid TEXT NOT NULL, state TEXT NOT NULL, requested_amount INTEGER NOT NULL, change_amount INTEGER NOT NULL DEFAULT 0, destination_type TEXT NOT NULL, destination_id TEXT, plan_data TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, recovery_attempts INTEGER NOT NULL DEFAULT 0, failure_reason TEXT)");
+            statement.execute("CREATE TABLE IF NOT EXISTS cash_transaction_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, transaction_uuid TEXT NOT NULL, cash_uuid TEXT NOT NULL, entry_type TEXT NOT NULL, amount INTEGER NOT NULL, source_location_type TEXT, source_location_id TEXT, destination_location_type TEXT, destination_location_id TEXT, created_at INTEGER NOT NULL, UNIQUE(transaction_uuid,cash_uuid,entry_type))");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_cash_journal_state_updated ON cash_transaction_journal(state,updated_at)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_cash_current_holder_state ON cash_items(current_holder,state)");
+            statement.execute("CREATE TABLE IF NOT EXISTS district_founding_petitions (id INTEGER PRIMARY KEY AUTOINCREMENT, petition_uuid TEXT UNIQUE NOT NULL, founder_uuid TEXT NOT NULL, district_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'DRAFT', claim_world TEXT, claim_min_x INTEGER, claim_min_z INTEGER, claim_max_x INTEGER, claim_max_z INTEGER, contract_uuid TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, submitted_at INTEGER, approved_at INTEGER, founding_source TEXT NOT NULL DEFAULT 'PLAYER_CLERK', responsible_staff_uuid TEXT, idempotency_key TEXT UNIQUE)");
+            statement.execute("CREATE TABLE IF NOT EXISTS district_founding_participants (petition_uuid TEXT NOT NULL, player_uuid TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'MEMBER', status TEXT NOT NULL DEFAULT 'INVITED', invited_at INTEGER NOT NULL, responded_at INTEGER, PRIMARY KEY(petition_uuid,player_uuid))");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_founding_petition_status ON district_founding_petitions(status,expires_at)");
+            statement.execute("UPDATE npcs SET action_type='TOWN_CLERK',action_data='DISTRICT:'||(SELECT district_id FROM district_npc_plans WHERE npc_id=npcs.id) WHERE id IN (SELECT npc_id FROM district_npc_plans WHERE npc_type='CLERK' AND npc_id IS NOT NULL)");
+            try (PreparedStatement insert = connection.prepareStatement("INSERT INTO schema_migrations(version,name,applied_at) VALUES(?,?,?)")) {
+                insert.setLong(1, LATEST_MIGRATION); insert.setString(2, "atomic_cash_journal_and_executor_indexes"); insert.setLong(3, System.currentTimeMillis()); insert.executeUpdate();
+            }
+            connection.commit();
+        } catch (SQLException failure) {
+            connection.rollback(); throw failure;
+        } finally { connection.setAutoCommit(autoCommit); }
+    }
+
+    private static void ensureColumn(Connection connection, String table, String column, String definition) throws SQLException {
+        try (Statement statement=connection.createStatement(); ResultSet columns=statement.executeQuery("PRAGMA table_info("+table+")")) {
+            while(columns.next()) if(column.equalsIgnoreCase(columns.getString("name"))) return;
+        }
+        try (Statement statement=connection.createStatement()) { statement.execute("ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition); }
+    }
+
     /**
      * Close the database connection.
      */
     public void shutdown() {
-        if (connection != null) {
-            try {
-                // Checkpoint WAL before closing
+        if (executor != null) executor.shutdown(Duration.ofSeconds(30));
+        if (dbUrl != null) {
+            try (Connection connection = DriverManager.getConnection(dbUrl)) {
                 try (Statement stmt = connection.createStatement()) {
                     stmt.execute("PRAGMA wal_checkpoint(TRUNCATE)");
                 } catch (SQLException ignored) {}
-                connection.close();
                 logger.info("Database connection closed");
             } catch (SQLException e) {
                 logger.log(Level.WARNING, "Error closing database connection", e);
@@ -949,7 +998,8 @@ public class DatabaseManager {
 
     public boolean isConnected() {
         try {
-            return connection != null && !connection.isClosed();
+            if (dbUrl == null || executor == null) return false;
+            try (Connection ignored = executor.openConnection(true)) { return true; }
         } catch (SQLException e) {
             return false;
         }
