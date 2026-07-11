@@ -484,7 +484,7 @@ public class ConfigManager {
     }
     public boolean isDistrictSelectionOverlayEnabled() { return config.getBoolean("districts.selection.overlay.enabled", true); }
     public int getDistrictSelectionTimeoutMinutes() { return Math.max(1, config.getInt("districts.selection.timeoutMinutes", 20)); }
-    public int getDistrictMaxLawChangesPerDay() { return config.getInt("districts.laws.maxChangesPerDay", 5); }
+    public int getDistrictMaxLawChangesPerDay() { return Math.max(1, config.getInt("districtLaws.maxPendingChanges", config.getInt("districts.laws.maxChangesPerDay", 5))); }
     public int getEvidenceExpireDays() { return config.getInt("districts.evidence.expireDays", 14); }
 
     // Restoration

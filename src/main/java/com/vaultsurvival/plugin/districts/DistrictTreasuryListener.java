@@ -2,10 +2,12 @@ package com.vaultsurvival.plugin.districts;
 
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.currency.CurrencyService;
+import com.vaultsurvival.plugin.breach.BreachService;
 import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
 import com.vaultsurvival.plugin.dialogs.DialogService;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -14,11 +16,15 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class DistrictTreasuryListener implements Listener {
     private final VaultSurvivalPlugin plugin;
     private final DistrictTreasuryService treasuries;
     private final CurrencyService currency;
+    private final Set<UUID> activeBreaches = ConcurrentHashMap.newKeySet();
 
     public DistrictTreasuryListener(VaultSurvivalPlugin plugin, DistrictTreasuryService treasuries) {
         this.plugin = plugin;
@@ -34,7 +40,20 @@ public final class DistrictTreasuryListener implements Listener {
         event.setCancelled(true);
         Player player = event.getPlayer();
         if (!treasuries.canManage(player, vault)) {
-            player.sendMessage(plugin.getMessageFormatter().error("This locked district treasury requires MAYOR, CO_MAYOR, or TREASURER."));
+            BreachService breach;
+            try { breach = plugin.getServiceRegistry().get(BreachService.class); }
+            catch (RuntimeException unavailable) { player.sendMessage(plugin.getMessageFormatter().error("Breach service is unavailable.")); return; }
+            ItemStack held = player.getInventory().getItemInMainHand();
+            if (!breach.isBreachKit(held)) {
+                player.sendMessage(plugin.getMessageFormatter().error("This locked treasury requires MAYOR, CO_MAYOR, or TREASURER. Everyone else must use a breach kit."));
+                return;
+            }
+            if (!activeBreaches.add(player.getUniqueId())) { player.sendMessage(plugin.getMessageFormatter().warn("You already have a treasury breach in progress.")); return; }
+            held.setAmount(held.getAmount()-1);
+            int seconds=Math.max(1,plugin.getConfigManager().getConfig().getInt("districtTreasury.breach.channelSeconds",5));
+            player.sendMessage(plugin.getMessageFormatter().warn("Treasury breach started. Stay within 6 blocks for "+seconds+" seconds; the kit is consumed."));
+            plugin.getAuditLogger().log(player.getUniqueId(),player.getName(),"DISTRICT_TREASURY_BREACH_START","DISTRICT_TREASURY",vault.vaultUuid().toString(),"district="+vault.districtId());
+            plugin.getServer().getScheduler().runTaskLater(plugin,()->{activeBreaches.remove(player.getUniqueId());var result=treasuries.breach(player,vault.vaultUuid());player.sendMessage(result.success()?plugin.getMessageFormatter().success(result.message()):plugin.getMessageFormatter().error(result.message()));},seconds*20L);
             return;
         }
         if (currency.isCashItem(player.getInventory().getItemInMainHand())) {

@@ -105,7 +105,7 @@ public final class DistrictSelectionService implements Listener {
         try {
             RailService rail = plugin.getServiceRegistry().get(RailService.class);
             var station = rail.getStation(stationId);
-            if (station == null || station.getDistrictId() != district.getId() || !station.getRequesterUuid().equals(player.getUniqueId())) {
+            if (station == null || station.getDistrictId() != district.getId()) {
                 player.sendMessage(fmt.error("Station not found or not yours to configure."));
                 return;
             }
@@ -114,6 +114,19 @@ public final class DistrictSelectionService implements Listener {
             * plugin.getConfigManager().getConfig().getDouble("districts.stationPlatform.maxPercentOfDistrict", 0.25)));
         startOwnedSelection(player, new Selection(district.getName(), claim.worldName(), false, null, limit, null, district, stationId, false),
             "Station-platform block selection started", "/district station confirm");
+    }
+
+    public void startRestrictedLand(Player player, String landName) {
+        DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
+        DistrictData.BlockClaim claim = district == null ? null : districts.getClaim(district.getId());
+        if (district == null || claim == null || !district.hasRole(player.getUniqueId(), DistrictData.DistrictRole.MAYOR)) {
+            player.sendMessage(fmt.error("Only the district MAYOR can select restricted land.")); return;
+        }
+        long limit = Math.max(1L, (long)Math.floor(claim.areaBlocks()
+            * plugin.getConfigManager().getConfig().getDouble("districts.restrictedLand.maxPercentOfDistrict", 0.25)));
+        Selection selection = new Selection(landName, claim.worldName(), false, null, limit, null, null, -1, false);
+        selection.restrictedDistrict = district;
+        startOwnedSelection(player, selection, "Restricted-land block selection started", "/district restricted confirm");
     }
 
     public void startSpawnCityClaim(Player player) {
@@ -168,17 +181,17 @@ public final class DistrictSelectionService implements Listener {
                     + (selection.existing.areaBlocks() + 1) + " and " + selection.limit + " blocks."));
                 return;
             }
-        } else if (!selection.isMarketZone() && !selection.isStationPlatform() && !selection.isSpawnCityClaim()
+        } else if (!selection.isMarketZone() && !selection.isStationPlatform() && !selection.isRestrictedLand() && !selection.isSpawnCityClaim()
             && claim.areaBlocks() != selection.limit) {
             player.sendMessage(fmt.error("This district application requires exactly " + selection.limit + " blocks of horizontal area."));
             return;
-        } else if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isSpawnCityClaim())
+        } else if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand() || selection.isSpawnCityClaim())
             && claim.areaBlocks() > selection.limit) {
             player.sendMessage(fmt.error("The selected area is " + claim.areaBlocks() + " blocks; the maximum is " + selection.limit + "."));
             return;
         }
 
-        if ((selection.isMarketZone() || selection.isStationPlatform())) {
+        if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand())) {
             DistrictData.BlockClaim owner = districts.getClaim(selection.ownerDistrict().getId());
             if (owner == null || !owner.contains(claim)) {
                 player.sendMessage(fmt.error("Both corners and the complete selected rectangle must be inside your district claim."));
@@ -189,6 +202,7 @@ public final class DistrictSelectionService implements Listener {
         boolean completed;
         if (selection.isSpawnCityClaim()) completed = setSpawnCityClaim(player, claim);
         else if (selection.isStationPlatform()) completed = setStationPlatform(player, selection.stationId, claim);
+        else if (selection.isRestrictedLand()) completed = setRestrictedLand(player, selection.restrictedDistrict, selection.name, claim);
         else if (selection.isMarketZone()) completed = createMarketZone(player, selection.marketDistrict, claim);
         else if (selection.expansion) {
             DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
@@ -402,6 +416,15 @@ public final class DistrictSelectionService implements Listener {
         return false;
     }
 
+    private boolean setRestrictedLand(Player player, DistrictData.District district, String name, DistrictData.BlockClaim claim) {
+        try {
+            DistrictRestrictedLandService service = plugin.getServiceRegistry().get(DistrictRestrictedLandService.class);
+            var result = service.create(player, name, claim);
+            player.sendMessage(result.success() ? fmt.success(result.message()) : fmt.error(result.message()));
+            return result.success();
+        } catch (RuntimeException unavailable) { player.sendMessage(fmt.error("Restricted-land service is unavailable.")); return false; }
+    }
+
     private boolean setSpawnCityClaim(Player player, DistrictData.BlockClaim claim) {
         if (!player.hasPermission("vaultsurvival.spawncity.admin")) return false;
         try {
@@ -449,6 +472,7 @@ public final class DistrictSelectionService implements Listener {
         if (selection.isSpawnCityClaim()) return RegionData.RegionType.SPAWN_CITY;
         if (selection.isStationPlatform()) return RegionData.RegionType.STATION_PLATFORM;
         if (selection.isMarketZone()) return RegionData.RegionType.DISTRICT_MARKET;
+        if (selection.isRestrictedLand()) return RegionData.RegionType.CUSTOM;
         return RegionData.RegionType.DISTRICT;
     }
 
@@ -511,6 +535,7 @@ public final class DistrictSelectionService implements Listener {
         private final DistrictData.District stationDistrict;
         private final int stationId;
         private final boolean spawnCityClaim;
+        private DistrictData.District restrictedDistrict;
         private BlockPoint pos1;
         private BlockPoint pos2;
         private long lastTouched = System.currentTimeMillis();
@@ -532,6 +557,7 @@ public final class DistrictSelectionService implements Listener {
         private boolean isMarketZone() { return marketDistrict != null; }
         private boolean isStationPlatform() { return stationDistrict != null; }
         private boolean isSpawnCityClaim() { return spawnCityClaim; }
-        private DistrictData.District ownerDistrict() { return marketDistrict != null ? marketDistrict : stationDistrict; }
+        private boolean isRestrictedLand() { return restrictedDistrict != null; }
+        private DistrictData.District ownerDistrict() { return marketDistrict != null ? marketDistrict : stationDistrict != null ? stationDistrict : restrictedDistrict; }
     }
 }

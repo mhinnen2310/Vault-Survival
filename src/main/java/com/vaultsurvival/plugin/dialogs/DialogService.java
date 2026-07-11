@@ -248,6 +248,7 @@ public class DialogService {
     }
 
     public void runAction(Player player, String actionId, String[] args) {
+        if (actionId.equalsIgnoreCase("district_stats")) { openDistrictStats(player); return; }
         if (actionId.equalsIgnoreCase("district_join")) {
             if (args.length != 1) {
                 render(player, new DialogError("Invalid District", "Choose a district from the directory.").result());
@@ -668,7 +669,7 @@ public class DialogService {
         String name=String.join(" ",args).trim();if(name.length()<3||name.length()>32){render(player,new DialogError("Invalid Station Name","Use 3 to 32 characters.").result());return;}
         com.vaultsurvival.plugin.rail.RailService rail=getRailService();var station=rail==null?null:rail.requestStationSilently(player,name);
         if(station==null){render(player,new DialogError("Station Not Requested","Check role, existing station state, and physical treasury balance.").result());return;}
-        render(player,new DialogResult(DialogResultType.SUCCESS,"Station Requested","Application #"+station.getId()+" was created and the physical application fee was debited.",List.of(DialogMenuItem.item("Set Platform","Select the exact platform area.","vsmenu input station_setplatform",null,Material.OAK_PLANKS),DialogMenuItem.item("Set Arrival","Use your current location as arrival point.","vsmenu input station_setarrival",null,Material.ENDER_PEARL),backItem("district.station"),homeItem(),closeItem())));
+        render(player,new DialogResult(DialogResultType.SUCCESS,"Station Requested","Application #"+station.getId()+" was created and the physical application fee was debited.",List.of(DialogMenuItem.item("Select Platform Blocks","Select two exact block corners with the district wand.","district station setplatform "+station.getId(),null,Material.GOLDEN_AXE),DialogMenuItem.item("Set Arrival","Use your current location as arrival point.","district station setarrival "+station.getId(),null,Material.ENDER_PEARL),backItem("district.station"),homeItem(),closeItem())));
     }
 
     private void applyDistrictProjectForm(Player player, String[] args) {
@@ -712,7 +713,7 @@ public class DialogService {
             case DISTRICT_DIPLOMACY -> diplomacyMenu(player);
             case DISTRICT_JOBS -> districtJobsMenu(player);
             case DISTRICT_DEVELOPMENT -> List.of(
-                DialogMenuItem.item("Development Report", "View level and category progress.", "district development", null, Material.NETHER_STAR),
+                DialogMenuItem.item("District Level & Stats", "View level, category progress, maintenance, members and treasury.", "vsmenu action district_stats", null, Material.NETHER_STAR),
                 DialogMenuItem.item("Project Board", "View active district projects.", "district projects", null, Material.WRITABLE_BOOK),
                 DialogMenuItem.item("Maintenance", "View district maintenance state.", "district maintenance", null, Material.ANVIL),
                 DialogMenuItem.item("Contributors", "View district contributors.", "district contributors", null, Material.PLAYER_HEAD),
@@ -802,6 +803,7 @@ public class DialogService {
                 backItem(), homeItem(), closeItem());
         }
         items.add(DialogMenuItem.item("Overview", "Show live district, market, station, and role context.", "vsmenu district.current", null, Material.COMPASS));
+        items.add(DialogMenuItem.item("Level & Stats", "View development level, all category stats, maintenance and claim size.", "vsmenu action district_stats", null, Material.NETHER_STAR));
         items.add(DialogMenuItem.item("District Home", "Teleport to the mayor-defined district home.", "district home", null, Material.ENDER_PEARL));
         items.add(DialogMenuItem.item("Laws", "View readable laws or edit them with toggles when authorized.", "vsmenu district.laws", null, Material.LECTERN));
         items.add(DialogMenuItem.item("Market", "Open market-zone, merchant, and order controls.", "vsmenu district.market", null, Material.EMERALD_BLOCK));
@@ -819,6 +821,7 @@ public class DialogService {
         }
         if (district.hasRole(player.getUniqueId(), DistrictData.DistrictRole.MAYOR)) {
             items.add(DialogMenuItem.item("Set District Home", "Save your current in-claim location as district home.", "district sethome", null, Material.RESPAWN_ANCHOR));
+            items.add(DialogMenuItem.item("Restricted Land", "Select areas and manage player allow/deny access.", "district restricted list", null, Material.IRON_DOOR));
         }
         items.add(DialogMenuItem.item("Diplomacy", "View alliances, requests, and hostility.", "vsmenu district.diplomacy", null, Material.WHITE_BANNER));
         items.add(backItem());
@@ -912,6 +915,7 @@ public class DialogService {
         }
         DistrictData.District visibleDistrict = district;
         List<DialogMenuItem> items = new ArrayList<>();
+        items.add(DialogMenuItem.status("Pending Capacity", "Configured simultaneous pending-law limit.", district.getPendingLaws().size() + "/" + plugin.getConfigManager().getDistrictMaxLawChangesPerDay(), Material.COMPARATOR));
         long active = java.util.Arrays.stream(DistrictData.LawKey.values())
             .filter(law -> Boolean.TRUE.equals(visibleDistrict.getLaws().get(law.name()))).count();
         items.add(metric("Active Laws", active, Material.LIME_DYE));
@@ -1261,10 +1265,12 @@ public class DialogService {
                 items.add(DialogMenuItem.item("Ticket Price", "Set a validated whole-number ticket price.",
                     "vsmenu form ticket", null, Material.GOLD_NUGGET));
             }
-            items.add(DialogMenuItem.item("Set Platform", "Set station platform at your location.",
-                "vsmenu input station_setplatform", null, Material.OAK_PLANKS));
-            items.add(DialogMenuItem.item("Set Arrival", "Set arrival point at your location.",
-                "vsmenu input station_setarrival", null, Material.ENDER_PEARL));
+            if (station != null) {
+                items.add(DialogMenuItem.item("Select Platform Blocks", "Select two exact block corners with the district wand.",
+                    "district station setplatform " + station.getId(), null, Material.GOLDEN_AXE));
+                items.add(DialogMenuItem.item("Set Arrival", "Set arrival point at your location.",
+                    "district station setarrival " + station.getId(), null, Material.ENDER_PEARL));
+            }
             items.add(DialogMenuItem.item("Submit Application", "Submit station application.",
                 "vsmenu form station_request", null, Material.WRITABLE_BOOK));
             items.add(backItem("district"));
@@ -1791,6 +1797,16 @@ public class DialogService {
         catch (RuntimeException unavailable) { return 0; }
     }
 
+    public void openDistrictStats(Player player) {
+        DistrictData.District district=getDistrict(player);if(district==null){render(player,new DialogError("No District","Join a district to view its development stats.").result());return;}
+        int level=0,economy=0,infrastructure=0,security=0,community=0,trade=0,law=0,maintenance=0;String state="STABLE";
+        try(Connection c=plugin.getDatabase().getConnection();PreparedStatement s=c.prepareStatement("SELECT * FROM district_development WHERE district_id=?")){s.setInt(1,district.getId());ResultSet r=s.executeQuery();if(r.next()){level=r.getInt("level");economy=r.getInt("economy");infrastructure=r.getInt("infrastructure");security=r.getInt("security");community=r.getInt("community");trade=r.getInt("trade_score");law=r.getInt("law_and_order");maintenance=r.getInt("maintenance");state=r.getString("maintenance_state");}}catch(Exception ignored){}
+        String[] names={"CAMP","SETTLEMENT","VILLAGE","TOWN","CITY","CAPITAL","METROPOLIS"};String title=level>=0&&level<names.length?names[level]:"LEVEL "+level;
+        long area=getDistrictService().getClaim(district.getId())==null?0:getDistrictService().getClaim(district.getId()).areaBlocks();
+        String body="Level: "+level+" — "+title+"\nMembers: "+district.getMemberCount()+"\nClaim area: "+area+" blocks\nPhysical treasury: "+physicalTreasuryBalance(district)+"\nMaintenance: "+state+" ("+maintenance+")\n\nEconomy: "+economy+"\nInfrastructure: "+infrastructure+"\nSecurity: "+security+"\nCommunity: "+community+"\nTrade: "+trade+"\nLaw & Order: "+law;
+        render(player,new DialogResult(DialogResultType.NEXT,"District Level & Stats",body,List.of(DialogMenuItem.item("Projects","View project controls.","vsmenu district.development",null,Material.BRICKS),backItem("district"),homeItem(),closeItem())));
+    }
+
     private DialogMenuItem metric(String label, long value, Material material) {
         return DialogMenuItem.status(label, "Live count/value", String.valueOf(value), material);
     }
@@ -2109,7 +2125,7 @@ public class DialogService {
             input("staffinspect_search", "Search Player", "Search by player name, partial name, UUID, district, or rank.", "Search", "staffinspect search $(value)", "vs.staffinspect", true),
             input("staffinspect_profile", "Open Player Profile", "Enter a player name or UUID.", "Player", "staffinspect $(value)", "vs.staffinspect", true),
             input("station_request", "Request Station", "Enter station name.", "Station name", "district station request $(value)", null, false),
-            input("station_setplatform", "Set Platform", "Stand at platform center. Enter radius (e.g. 5).", "Radius", "district station setplatform $(value)", null, false),
+            input("station_setplatform", "Set Platform", "Enter the pending station ID, then select two exact block corners with the district wand.", "Station ID", "district station setplatform $(value)", null, false),
             input("station_setarrival", "Set Arrival", "Stand at arrival point.", "any", "district station setarrival", null, false),
             input("rail_travel", "Buy Ticket", "Enter the route ID to travel.", "Route ID", "rail travel $(value)", null, false)
         );

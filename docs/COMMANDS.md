@@ -192,4 +192,9 @@ This reference follows the plugin modules. Permission-protected commands use the
 - `/tpa <player>`, `/tpaccept`, `/tpdeny` — consent-based player teleport requests.
 - `/sethome [name]`, `/home [name]`, `/delhome [name]`, `/homes` — persistent homes; default limit 1, rank-configurable to 2 or 3.
 - `/district home`, `/district sethome` — district teleport and MAYOR-only in-claim home setup.
+- All normal teleports use `travel.teleportWarmupSeconds`, cancel on movement, and refuse physical cash.
+- `/district restricted start <name>` followed by `confirm` — exact-block restricted land.
+- `/district restricted allow|deny|clear <id> <player>` and `mode <id> <PUBLIC|MEMBERS|ALLOWLIST>` — mayor access policy.
+- `/district stats` — native district level, category, maintenance, claim and treasury overview.
+- `/district law force-activate-all` — audited staffmode command to activate every pending law.
 - `/merchant shop edit [id]` — right-click selection or direct inventory shop editor; shop earnings are collected at the owned NPC.

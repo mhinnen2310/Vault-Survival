@@ -237,7 +237,12 @@ public class RailServiceImpl implements RailService {
     /** Set a pending station platform from a validated exact-block district selection. */
     public boolean setPlatformBlocks(int stationId, Player player, DistrictData.BlockClaim claim) {
         RailData.Station station = stations.get(stationId);
-        if (station == null || !station.getRequesterUuid().equals(player.getUniqueId())
+        DistrictService districtService;
+        try { districtService = plugin.getServiceRegistry().get(DistrictService.class); }
+        catch (RuntimeException unavailable) { return false; }
+        DistrictData.District district = districtService.getPlayerDistrict(player.getUniqueId());
+        if (station == null || district == null || station.getDistrictId() != district.getId()
+            || !districtService.canRequestStation(player.getUniqueId(), district)
             || station.getStatus() != RailData.StationStatus.PENDING || claim == null
             || !station.getWorldName().equals(claim.worldName())) return false;
         var world = player.getWorld();

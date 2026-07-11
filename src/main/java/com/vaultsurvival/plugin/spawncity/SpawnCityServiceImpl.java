@@ -4,6 +4,7 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.ConfigManager;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditData;
+import com.vaultsurvival.plugin.travel.TravelService;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -53,8 +54,8 @@ public class SpawnCityServiceImpl implements SpawnCityService {
             player.sendMessage(fmt.error("Spawn location not set. Use /spawncity setspawn first."));
             return;
         }
-        player.teleport(spawn);
-        player.sendMessage(fmt.success("Teleported to " + getCityName() + "."));
+        try { plugin.getServiceRegistry().get(TravelService.class).beginTeleport(player, spawn, "spawn city"); }
+        catch (RuntimeException unavailable) { player.sendMessage(fmt.error("Travel service is unavailable.")); }
     }
 
     // ========================================================================

@@ -1,5 +1,5 @@
 ﻿name: VaultSurvival
-version: 1.0.31
+version: 1.0.32
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -317,6 +317,9 @@ permissions:
   vs.district.teleport:
     description: Allows teleporting to district centers
     default: false
+  vs.district.law.force:
+    description: Force-activate all pending district laws while in staffmode
+    default: op
   vs.damage.use:
     description: Allows viewing temporary damage info
     default: true

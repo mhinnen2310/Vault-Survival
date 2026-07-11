@@ -2,7 +2,7 @@
 # Vault Survival configuration
 # =============================================================================
 # Configuration version used by future migrations. Do not change manually.
-configVersion: 3
+configVersion: 4
 
 # Reload-safe settings can be applied with /vs reload. World, database, command,
 # schematic, and module lifecycle changes should be followed by a full restart.
@@ -245,6 +245,11 @@ districtTreasury:
   requireEmptyBeforeRemoval: true
   # Compatibility switch remains false: treasury banking is physical and local.
   legacyRemoteBankingEnabled: false
+  breach:
+    # Unauthorized players need a real breach kit and must remain nearby for this channel.
+    channelSeconds: 5
+    stealPercent: 20.0
+    lockdownSeconds: 1800
 
 breach:
   max_distance_blocks: 8
@@ -259,6 +264,12 @@ breach:
 # 8. DISTRICTS, BLOCK CLAIMS, NPC PLANNING, DEVELOPMENT
 # -----------------------------------------------------------------------------
 districts:
+  restrictedLand:
+    # Mayors can define this many exact-block restricted areas per district.
+    maxAreasPerDistrict: 8
+    # One restricted area may cover at most this fraction of the district claim.
+    maxPercentOfDistrict: 0.25
+
   # Horizontal block distance measured edge-to-edge.
   min_distance_from_spawn: 500
   min_distance_between: 350
@@ -297,6 +308,10 @@ districts:
     maxChangesPerDay: 5
   evidence:
     expireDays: 14
+
+districtLaws:
+  # Maximum simultaneous pending changes per district. Existing pending values can still be edited.
+  maxPendingChanges: 5
 
 districtDevelopment:
   scaling:
@@ -400,6 +415,8 @@ rail:
     trainCarYOffset: 5.0
 
 travel:
+  # All normal player teleports wait this many seconds. Moving cancels them.
+  teleportWarmupSeconds: 3
   tpa:
     # Requests disappear automatically; acceptance is always explicit.
     timeoutSeconds: 60

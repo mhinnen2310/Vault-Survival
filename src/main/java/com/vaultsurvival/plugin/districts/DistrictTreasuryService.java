@@ -28,6 +28,8 @@ public interface DistrictTreasuryService {
     Result depositHeld(Player actor, UUID vaultUuid);
     Result depositAll(Player actor, UUID vaultUuid);
     Result withdraw(Player actor, UUID vaultUuid, long amount);
+    /** Complete a breach-kit theft after the listener's channel delay. */
+    Result breach(Player thief, UUID vaultUuid);
     long getDistrictBalance(int districtId);
     long getVaultBalance(UUID vaultUuid);
     List<TreasuryVault> getVaults(int districtId);

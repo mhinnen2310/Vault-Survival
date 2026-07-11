@@ -678,7 +678,11 @@ public class MerchantShopServiceImpl implements MerchantShopService {
         }
         List<MerchantShopData.ShopItem> items = getShopItems(shop.getId());
         if (items.isEmpty()) {
-            player.sendMessage(fmt.info("This shop has no items in stock."));
+            player.closeInventory();
+            try {
+                plugin.getServiceRegistry().get(com.vaultsurvival.plugin.dialogs.DialogService.class).openResult(player,
+                    shop.getName(), "This shop is currently sold out.", List.of());
+            } catch (RuntimeException fallback) { player.sendMessage(fmt.info("This shop has no items in stock.")); }
             return;
         }
 
@@ -701,7 +705,9 @@ public class MerchantShopServiceImpl implements MerchantShopService {
 
             guiItems.add(new GUIFramework.GUIItem(shopItem.getSlot(), display, (p, e) -> {
                 int buyQty = e.isShiftClick() ? Math.min(64, shopItem.getStock()) : 1;
-                buyItem(p, shop.getId(), shopItem.getSlot(), buyQty);
+                if (buyItem(p, shop.getId(), shopItem.getSlot(), buyQty)) {
+                    Bukkit.getScheduler().runTask(plugin, () -> openCustomerShop(p, shop.getId()));
+                }
             }));
         }
 

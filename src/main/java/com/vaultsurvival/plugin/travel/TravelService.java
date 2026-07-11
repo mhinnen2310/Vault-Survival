@@ -14,6 +14,13 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.scheduler.BukkitTask;
+import com.vaultsurvival.plugin.currency.CurrencyService;
+import com.vaultsurvival.plugin.breach.BreachService;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -26,10 +33,12 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** Safe player TPA and persistent player/district homes. */
-public final class TravelService implements CommandExecutor {
+public final class TravelService implements CommandExecutor, Listener {
     private record Request(UUID requester, long expiresAt) { }
+    private record Warmup(Location origin, BukkitTask task, String reason) { }
     private final VaultSurvivalPlugin plugin;
     private final Map<UUID, Request> requests = new ConcurrentHashMap<>();
+    private final Map<UUID, Warmup> warmups = new ConcurrentHashMap<>();
 
     public TravelService(VaultSurvivalPlugin plugin) { this.plugin = plugin; }
 
@@ -77,9 +86,7 @@ public final class TravelService implements CommandExecutor {
             target.sendMessage(plugin.getMessageFormatter().info("Teleport request denied.")); return true;
         }
         if (!canTravel(target) || !canTravel(requester)) return true;
-        requester.teleportAsync(target.getLocation()).thenAccept(ok -> {
-            if (ok) requester.sendMessage(plugin.getMessageFormatter().success("Teleported to " + target.getName() + "."));
-        });
+        beginTeleport(requester, target.getLocation(), "TPA to " + target.getName());
         plugin.getAuditLogger().log(target.getUniqueId(), target.getName(), "TPA_ACCEPT", "PLAYER", requester.getUniqueId().toString(), "target=" + target.getUniqueId());
         return true;
     }
@@ -104,7 +111,7 @@ public final class TravelService implements CommandExecutor {
     private boolean home(Player player, String name) {
         Location destination = readLocation("SELECT world,x,y,z,yaw,pitch FROM player_homes WHERE player_uuid=? AND name=?", player.getUniqueId().toString(), normalize(name));
         if (destination == null) { player.sendMessage(plugin.getMessageFormatter().error("Home not found. Use /homes.")); return true; }
-        if (canTravel(player)) player.teleportAsync(destination);
+        beginTeleport(player, destination, "home " + name);
         return true;
     }
 
@@ -129,7 +136,7 @@ public final class TravelService implements CommandExecutor {
         if (district == null) { player.sendMessage(plugin.getMessageFormatter().error("You are not a district member.")); return true; }
         Location location = readLocation("SELECT world,x,y,z,yaw,pitch FROM district_homes WHERE district_id=?", String.valueOf(district.getId()));
         if (location == null) { player.sendMessage(plugin.getMessageFormatter().error("The mayor has not set a district home.")); return true; }
-        if (canTravel(player)) player.teleportAsync(location);
+        beginTeleport(player, location, "district home");
         return true;
     }
 
@@ -159,6 +166,62 @@ public final class TravelService implements CommandExecutor {
     }
 
     private DistrictService districts() { return plugin.getServiceRegistry().get(DistrictService.class); }
+    public boolean beginTeleport(Player player, Location destination, String reason) {
+        if (destination == null || !canTravel(player)) return false;
+        if (carriesCash(player)) {
+            player.sendMessage(plugin.getMessageFormatter().error("You cannot teleport while carrying physical cash. Store or spend it first."));
+            return false;
+        }
+        try {
+            if (plugin.getServiceRegistry().get(BreachService.class).isTeleportBlocked(player.getUniqueId())) {
+                player.sendMessage(plugin.getMessageFormatter().error("You cannot teleport during a breach cooldown.")); return false;
+            }
+        } catch (RuntimeException ignored) { }
+        cancelWarmup(player, null);
+        int seconds = Math.max(0, plugin.getConfigManager().getConfig().getInt("travel.teleportWarmupSeconds", 3));
+        if (seconds == 0) {
+            player.teleportAsync(destination); return true;
+        }
+        Location origin = player.getLocation().clone();
+        player.sendMessage(plugin.getMessageFormatter().info("Teleporting in " + seconds + " seconds. Do not move."));
+        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            Warmup current = warmups.remove(player.getUniqueId());
+            if (current == null || !player.isOnline()) return;
+            player.teleportAsync(destination).thenAccept(ok -> {
+                if (ok) player.sendMessage(plugin.getMessageFormatter().success("Teleport complete."));
+            });
+        }, seconds * 20L);
+        warmups.put(player.getUniqueId(), new Warmup(origin, task, reason));
+        return true;
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onMove(PlayerMoveEvent event) {
+        Warmup warmup = warmups.get(event.getPlayer().getUniqueId());
+        if (warmup == null || event.getTo() == null) return;
+        if (event.getFrom().getBlockX() != event.getTo().getBlockX()
+            || event.getFrom().getBlockY() != event.getTo().getBlockY()
+            || event.getFrom().getBlockZ() != event.getTo().getBlockZ()) {
+            cancelWarmup(event.getPlayer(), "Teleport cancelled because you moved.");
+        }
+    }
+
+    @EventHandler public void onQuit(PlayerQuitEvent event) { cancelWarmup(event.getPlayer(), null); requests.remove(event.getPlayer().getUniqueId()); }
+
+    private void cancelWarmup(Player player, String message) {
+        Warmup previous = warmups.remove(player.getUniqueId());
+        if (previous != null) previous.task().cancel();
+        if (previous != null && message != null) player.sendMessage(plugin.getMessageFormatter().warn(message));
+    }
+
+    private boolean carriesCash(Player player) {
+        try {
+            CurrencyService currency = plugin.getServiceRegistry().get(CurrencyService.class);
+            for (var item : player.getInventory().getContents()) if (item != null && currency.isCashItem(item)) return true;
+            return currency.isCashItem(player.getInventory().getItemInOffHand());
+        } catch (RuntimeException unavailable) { return true; }
+    }
+
     private boolean canTravel(Player p) { if (p.hasMetadata("combat_tagged") || p.hasMetadata("staffmode_frozen")) { p.sendMessage(plugin.getMessageFormatter().error("You cannot teleport right now.")); return false; } return true; }
     private String name(String[] args) { return args.length == 0 ? "home" : args[0]; }
     private String normalize(String name) { return name != null && name.matches("[A-Za-z0-9_-]{1,24}") ? name.toLowerCase(Locale.ROOT) : null; }

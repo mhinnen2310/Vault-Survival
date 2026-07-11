@@ -260,6 +260,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
 
         TravelService travelService = new TravelService(this);
         serviceRegistry.register(TravelService.class, travelService);
+        getServer().getPluginManager().registerEvents(travelService, this);
         for (String commandName : java.util.List.of("tpa", "tpaccept", "tpdeny", "sethome", "home", "delhome", "homes")) {
             if (getCommand(commandName) != null) getCommand(commandName).setExecutor(travelService);
         }

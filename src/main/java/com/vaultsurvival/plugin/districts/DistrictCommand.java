@@ -80,11 +80,13 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "expand" -> handleExpansion(sender);
             case "borders", "border" -> handleBorders(sender, args);
             case "marketzone", "market" -> handleMarketZone(sender, args);
+            case "restricted", "restrictedland" -> handleRestrictedLand(sender, args);
             case "teleport", "tp" -> handleTeleport(sender, args);
             case "npcs", "npc" -> handleNpcs(sender, args);
             case "message", "messages" -> handleDistrictMessage(sender, args);
             case "chat" -> handleDistrictChat(sender, args);
             case "current" -> handleCurrent(sender);
+            case "stats", "level" -> handleDistrictStats(sender);
             case "home" -> handleDistrictHome(sender, false);
             case "sethome" -> handleDistrictHome(sender, true);
             case "approve" -> handleApprove(sender, args);
@@ -116,6 +118,30 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         return development.handle(player, args[0].toLowerCase(), args);
     }
 
+    private boolean handleRestrictedLand(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        DistrictData.District district = districtService.getPlayerDistrict(player.getUniqueId());
+        if (district == null || !district.hasRole(player.getUniqueId(), DistrictData.DistrictRole.MAYOR)) {
+            player.sendMessage(fmt.error("Only the district MAYOR can manage restricted land.")); return true;
+        }
+        if (args.length < 2) { player.sendMessage(fmt.info("Use /district restricted <start|confirm|cancel|list|allow|deny|clear|mode|delete>.")); return true; }
+        String sub=args[1].toLowerCase(Locale.ROOT);
+        if (sub.equals("start")) { if(args.length<3)player.sendMessage(fmt.error("Usage: /district restricted start <name>"));else selection.startRestrictedLand(player,String.join(" ",Arrays.copyOfRange(args,2,args.length)));return true; }
+        if (sub.equals("confirm")) { selection.confirm(player); return true; }
+        if (sub.equals("cancel")) { selection.cancel(player); return true; }
+        DistrictRestrictedLandService service=plugin.getServiceRegistry().get(DistrictRestrictedLandService.class);
+        if (sub.equals("list")) { var lands=service.list(district.getId()); player.sendMessage(fmt.header("Restricted Land"));if(lands.isEmpty())player.sendMessage(fmt.info("No restricted areas."));for(var land:lands)player.sendMessage(fmt.info("&e#"+land.id()+" &f"+land.name()+" &7"+land.mode()+" | "+(land.maxX()-land.minX()+1)+"x"+(land.maxZ()-land.minZ()+1)));return true; }
+        if (args.length<3) { player.sendMessage(fmt.error("A restricted-land ID is required.")); return true; }
+        int id=parseInt(args[2]); DistrictRestrictedLandService.Result result;
+        switch(sub){
+            case "allow","deny","clear" -> { if(args.length<4){player.sendMessage(fmt.error("Usage: /district restricted "+sub+" <id> <player>"));return true;} @SuppressWarnings("deprecation") OfflinePlayer target=Bukkit.getOfflinePlayer(args[3]);result=service.setAccess(player,id,target,sub.equals("clear")?null:sub.equals("allow")); }
+            case "mode" -> { if(args.length<4){player.sendMessage(fmt.error("Usage: /district restricted mode <id> <PUBLIC|MEMBERS|ALLOWLIST>"));return true;}result=service.setMode(player,id,args[3]); }
+            case "delete" -> result=service.delete(player,id);
+            default -> { player.sendMessage(fmt.error("Unknown restricted-land action."));return true; }
+        }
+        player.sendMessage(result.success()?fmt.success(result.message()):fmt.error(result.message())); return true;
+    }
+
     private boolean handleDistrictHome(CommandSender sender, boolean set) {
         if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
         try {
@@ -124,6 +150,13 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         } catch (RuntimeException unavailable) {
             player.sendMessage(fmt.error("Travel service is unavailable.")); return true;
         }
+    }
+
+    private boolean handleDistrictStats(CommandSender sender) {
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
+        if (plugin.getServiceRegistry().has(DialogService.class)) plugin.getServiceRegistry().get(DialogService.class).openDistrictStats(player);
+        else development.handle(player,"development",new String[]{"development"});
+        return true;
     }
 
     private boolean handleApply(CommandSender sender, String[] args) {
@@ -581,6 +614,19 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean handleLaw(CommandSender sender, String[] args) {
+        if (args.length >= 2 && args[1].equalsIgnoreCase("force-activate-all")) {
+            if (!sender.hasPermission("vs.district.law.force") && !sender.hasPermission("vs.district.admin")) {
+                sender.sendMessage(fmt.permissionDenied()); return true;
+            }
+            if (sender instanceof Player staff && !plugin.isStaffModeActive(staff.getUniqueId())) {
+                sender.sendMessage(fmt.error("Enter staffmode before force-activating laws.")); return true;
+            }
+            int applied = districtService.applyPendingLaws();
+            UUID actor = sender instanceof Player staff ? staff.getUniqueId() : null;
+            plugin.getAuditLogger().log(actor, sender.getName(), "DISTRICT_LAWS_FORCE_ACTIVATE_ALL", "DISTRICT_LAWS", "ALL", "applied=" + applied);
+            sender.sendMessage(fmt.success("Force-activated " + applied + " pending district law change(s)."));
+            return true;
+        }
         if (!(sender instanceof Player player)) return true;
         if (args.length < 4 || !args[1].equalsIgnoreCase("propose")) {
             sender.sendMessage(fmt.error("Usage: /district law propose <law> <true|false>"));
@@ -943,11 +989,13 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("/district expand &8- Expand your level-gated district claim"));
         sender.sendMessage(fmt.info("/district marketzone [confirm|cancel] &8- Select the merchant market zone"));
         sender.sendMessage(fmt.info("/district marketzone borders &8- Show your district's market-zone borders"));
+        sender.sendMessage(fmt.info("/district restricted start|list|allow|deny|clear|mode|delete &8- Mayor restricted land"));
         sender.sendMessage(fmt.info("/district npcs <start|confirm|cancel|activate> &8- Plan and unlock district NPCs"));
         sender.sendMessage(fmt.info("/district message <welcome|leave> <text> &8- Mayor-only area messages"));
         sender.sendMessage(fmt.info("/district chat prefix <text> &8- Mayor-only district chat prefix"));
         sender.sendMessage(fmt.info("/district chat rolecolor <role> <color> &8- Mayor-only role color"));
         sender.sendMessage(fmt.info("/district info [id] &8- District info"));
+        sender.sendMessage(fmt.info("/district stats &8- View district level and all development stats"));
         sender.sendMessage(fmt.info("/district home &8- Teleport to the district home"));
         sender.sendMessage(fmt.info("/district sethome &8- Mayor-only district home location"));
         sender.sendMessage(fmt.info("/district station status &8- Station status"));
@@ -965,6 +1013,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("/district laws &8- Show active laws"));
         sender.sendMessage(fmt.info("/district laws pending &8- Show pending law changes"));
         sender.sendMessage(fmt.info("/district law propose <law> <true|false> &8- Propose daily law change"));
+        if (sender.hasPermission("vs.district.law.force") || sender.hasPermission("vs.district.admin")) sender.sendMessage(fmt.info("/district law force-activate-all &8- Staff: apply every pending law now"));
         sender.sendMessage(fmt.info("/district jobs &8- Show active jobs"));
         sender.sendMessage(fmt.info("/district job create|list|accept|deliver|submit|approve|deny &8- District jobs"));
         sender.sendMessage(fmt.info("/district list &8- All districts"));
@@ -982,8 +1031,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
-            return Arrays.asList("apply", "confirm", "cancel", "selection", "blocks", "expand", "borders", "marketzone", "teleport", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
-                "role", "permissions", "members", "home", "sethome", "treasury", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
+            return Arrays.asList("apply", "confirm", "cancel", "selection", "blocks", "expand", "borders", "marketzone", "restricted", "teleport", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
+                "role", "permissions", "members", "stats", "level", "home", "sethome", "treasury", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("job")) {
@@ -996,7 +1045,9 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             return List.of("pending").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("law")) {
-            return List.of("propose").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+            List<String> options = new ArrayList<>(List.of("propose"));
+            if (sender.hasPermission("vs.district.law.force") || sender.hasPermission("vs.district.admin")) options.add("force-activate-all");
+            return options.stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
         if (args.length == 3 && args[0].equalsIgnoreCase("law") && args[1].equalsIgnoreCase("propose")) {
             return Arrays.stream(DistrictData.LawKey.values())
@@ -1009,6 +1060,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             return List.of("list", "set", "remove").stream()
                 .filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
+        if (args.length == 2 && args[0].equalsIgnoreCase("restricted")) return List.of("start","confirm","cancel","list","allow","deny","clear","mode","delete").stream().filter(a->a.startsWith(args[1].toLowerCase())).toList();
         if (args.length == 2 && args[0].equalsIgnoreCase("treasury")) {
             return List.of("create", "remove", "list", "balance").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }

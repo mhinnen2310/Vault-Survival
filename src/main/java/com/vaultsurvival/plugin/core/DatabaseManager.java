@@ -870,7 +870,9 @@ public class DatabaseManager {
             "CREATE INDEX IF NOT EXISTS idx_staff_alerts_queue ON staff_alerts(status, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_player_reports_queue ON player_reports(status, created_at DESC)",
             "CREATE TABLE IF NOT EXISTS player_homes (player_uuid TEXT NOT NULL,name TEXT NOT NULL,world TEXT NOT NULL,x REAL NOT NULL,y REAL NOT NULL,z REAL NOT NULL,yaw REAL NOT NULL,pitch REAL NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(player_uuid,name))",
-            "CREATE TABLE IF NOT EXISTS district_homes (district_id INTEGER PRIMARY KEY REFERENCES districts(id) ON DELETE CASCADE,world TEXT NOT NULL,x REAL NOT NULL,y REAL NOT NULL,z REAL NOT NULL,yaw REAL NOT NULL,pitch REAL NOT NULL,set_by TEXT NOT NULL,updated_at INTEGER NOT NULL)"
+            "CREATE TABLE IF NOT EXISTS district_homes (district_id INTEGER PRIMARY KEY REFERENCES districts(id) ON DELETE CASCADE,world TEXT NOT NULL,x REAL NOT NULL,y REAL NOT NULL,z REAL NOT NULL,yaw REAL NOT NULL,pitch REAL NOT NULL,set_by TEXT NOT NULL,updated_at INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS district_restricted_lands (id INTEGER PRIMARY KEY AUTOINCREMENT,district_id INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE,name TEXT NOT NULL,world TEXT NOT NULL,min_x INTEGER NOT NULL,min_z INTEGER NOT NULL,max_x INTEGER NOT NULL,max_z INTEGER NOT NULL,access_mode TEXT NOT NULL DEFAULT 'MEMBERS',created_by TEXT NOT NULL,created_at INTEGER NOT NULL,UNIQUE(district_id,name))",
+            "CREATE TABLE IF NOT EXISTS district_restricted_access (land_id INTEGER NOT NULL REFERENCES district_restricted_lands(id) ON DELETE CASCADE,player_uuid TEXT NOT NULL,allowed INTEGER NOT NULL,changed_by TEXT NOT NULL,changed_at INTEGER NOT NULL,PRIMARY KEY(land_id,player_uuid))"
         };
 
         try (Statement stmt = connection.createStatement()) {
