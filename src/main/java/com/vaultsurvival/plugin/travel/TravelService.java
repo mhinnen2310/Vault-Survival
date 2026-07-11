@@ -13,6 +13,8 @@ import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -33,7 +35,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** Safe player TPA and persistent player/district homes. */
-public final class TravelService implements CommandExecutor, Listener {
+public final class TravelService implements CommandExecutor, TabCompleter, Listener {
     private record Request(UUID requester, long expiresAt) { }
     private record Warmup(Location origin, BukkitTask task, String reason) { }
     private final VaultSurvivalPlugin plugin;
@@ -192,6 +194,14 @@ public final class TravelService implements CommandExecutor, Listener {
             });
         }, seconds * 20L);
         warmups.put(player.getUniqueId(), new Warmup(origin, task, reason));
+        for (int elapsed = 0; elapsed < seconds; elapsed++) {
+            int delay = elapsed;
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (warmups.containsKey(player.getUniqueId()) && player.isOnline()) {
+                    player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, .7f, 1.25f + delay * .08f);
+                }
+            }, elapsed * 20L);
+        }
         return true;
     }
 
@@ -223,6 +233,23 @@ public final class TravelService implements CommandExecutor, Listener {
     }
 
     private boolean canTravel(Player p) { if (p.hasMetadata("combat_tagged") || p.hasMetadata("staffmode_frozen")) { p.sendMessage(plugin.getMessageFormatter().error("You cannot teleport right now.")); return false; } return true; }
+
+    @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (!(sender instanceof Player player) || args.length != 1) return List.of();
+        String typed = args[0].toLowerCase(Locale.ROOT);
+        if (command.getName().equalsIgnoreCase("tpa")) return Bukkit.getOnlinePlayers().stream()
+            .filter(other -> !other.equals(player)).map(Player::getName)
+            .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(typed)).sorted().toList();
+        if (command.getName().equalsIgnoreCase("home") || command.getName().equalsIgnoreCase("delhome")) {
+            try (Connection c = plugin.getDatabase().getConnection(); PreparedStatement ps = c.prepareStatement(
+                    "SELECT name FROM player_homes WHERE player_uuid=? AND lower(name) LIKE ? ORDER BY name")) {
+                ps.setString(1, player.getUniqueId().toString()); ps.setString(2, typed + "%");
+                ResultSet rows = ps.executeQuery(); java.util.ArrayList<String> names = new java.util.ArrayList<>();
+                while (rows.next()) names.add(rows.getString(1)); return names;
+            } catch (SQLException ignored) { return List.of(); }
+        }
+        return command.getName().equalsIgnoreCase("sethome") ? List.of("home") : List.of();
+    }
     private String name(String[] args) { return args.length == 0 ? "home" : args[0]; }
     private String normalize(String name) { return name != null && name.matches("[A-Za-z0-9_-]{1,24}") ? name.toLowerCase(Locale.ROOT) : null; }
     private int countHomes(UUID uuid) { return scalar("SELECT COUNT(*) FROM player_homes WHERE player_uuid=?", uuid.toString()); }

@@ -26,6 +26,7 @@ public interface DistrictTreasuryService {
     Result create(Player actor, Block block);
     Result remove(Player actor, UUID vaultUuid);
     Result depositHeld(Player actor, UUID vaultUuid);
+    Result depositAmount(Player actor, UUID vaultUuid, long amount);
     Result depositAll(Player actor, UUID vaultUuid);
     Result withdraw(Player actor, UUID vaultUuid, long amount);
     /** Complete a breach-kit theft after the listener's channel delay. */

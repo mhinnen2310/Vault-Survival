@@ -2,7 +2,7 @@
 # Vault Survival configuration
 # =============================================================================
 # Configuration version used by future migrations. Do not change manually.
-configVersion: 4
+configVersion: 5
 
 # Reload-safe settings can be applied with /vs reload. World, database, command,
 # schematic, and module lifecycle changes should be followed by a full restart.
@@ -477,8 +477,9 @@ vsworldedit:
   schematics:
     enabled: true
     # Put vanilla Structure Block .nbt files directly in
-    # plugins/VaultSurvival/schematics. Subfolders, symlinks, .schem, and
-    # legacy .schematic files are rejected deliberately.
+    # plugins/VaultSurvival/schematics. Accepts vanilla .nbt, modern
+    # Sponge/WorldEdit .schem, and common legacy MCEdit .schematic blocks.
+    # Subfolders and symlinks are rejected.
     maxFileSizeBytes: 16777216
     maxBlocks: 250000
     maxDimensionBlocks: 256

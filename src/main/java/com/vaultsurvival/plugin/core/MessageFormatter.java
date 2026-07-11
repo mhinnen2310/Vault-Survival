@@ -116,7 +116,7 @@ public class MessageFormatter {
         if (amount == 1) {
             return "&6" + amount + " &e" + currencyName;
         }
-        return "&6" + amount + " &e" + currencyNamePlural;
+        return "&6" + MoneyAmounts.compact(amount) + " &e" + currencyNamePlural;
     }
 
     /**

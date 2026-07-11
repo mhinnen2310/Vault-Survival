@@ -11,6 +11,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryCreativeEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -99,6 +100,12 @@ public final class MerchantShopEditor implements Listener {
                 Bukkit.getScheduler().runTask(plugin, () -> service.openShopEditor(player, holder.shopId));
             }
         }
+    }
+
+    /** Creative clone/replace actions must never extract editor display items. */
+    @EventHandler
+    public void creative(InventoryCreativeEvent event) {
+        if (event.getInventory().getHolder() instanceof EditorHolder) event.setCancelled(true);
     }
 
     @EventHandler public void drag(InventoryDragEvent event) {

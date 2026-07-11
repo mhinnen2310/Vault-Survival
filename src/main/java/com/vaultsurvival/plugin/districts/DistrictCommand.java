@@ -5,6 +5,7 @@ import com.vaultsurvival.plugin.access.AccessService;
 import com.vaultsurvival.plugin.area.CurrentAreaContext;
 import com.vaultsurvival.plugin.area.CurrentAreaService;
 import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.core.MoneyAmounts;
 import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
 import com.vaultsurvival.plugin.dialogs.DialogMenuType;
 import com.vaultsurvival.plugin.dialogs.DialogService;
@@ -124,7 +125,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         if (district == null || !district.hasRole(player.getUniqueId(), DistrictData.DistrictRole.MAYOR)) {
             player.sendMessage(fmt.error("Only the district MAYOR can manage restricted land.")); return true;
         }
-        if (args.length < 2) { player.sendMessage(fmt.info("Use /district restricted <start|confirm|cancel|list|allow|deny|clear|mode|delete>.")); return true; }
+        if (args.length < 2) { player.sendMessage(fmt.info("Use /district restricted <start|confirm|cancel|list|allow|deny|clear|allowrole|denyrole|clearrole|mode|delete>.")); return true; }
         String sub=args[1].toLowerCase(Locale.ROOT);
         if (sub.equals("start")) { if(args.length<3)player.sendMessage(fmt.error("Usage: /district restricted start <name>"));else selection.startRestrictedLand(player,String.join(" ",Arrays.copyOfRange(args,2,args.length)));return true; }
         if (sub.equals("confirm")) { selection.confirm(player); return true; }
@@ -135,6 +136,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         int id=parseInt(args[2]); DistrictRestrictedLandService.Result result;
         switch(sub){
             case "allow","deny","clear" -> { if(args.length<4){player.sendMessage(fmt.error("Usage: /district restricted "+sub+" <id> <player>"));return true;} @SuppressWarnings("deprecation") OfflinePlayer target=Bukkit.getOfflinePlayer(args[3]);result=service.setAccess(player,id,target,sub.equals("clear")?null:sub.equals("allow")); }
+            case "allowrole","denyrole","clearrole" -> { if(args.length<4){player.sendMessage(fmt.error("Usage: /district restricted "+sub+" <id> <role>"));return true;}DistrictData.DistrictRole role=parseRole(args[3]);if(role==null){player.sendMessage(fmt.error("Unknown district role."));return true;}result=service.setRoleAccess(player,id,role,sub.equals("clearrole")?null:sub.equals("allowrole")); }
             case "mode" -> { if(args.length<4){player.sendMessage(fmt.error("Usage: /district restricted mode <id> <PUBLIC|MEMBERS|ALLOWLIST>"));return true;}result=service.setMode(player,id,args[3]); }
             case "delete" -> result=service.delete(player,id);
             default -> { player.sendMessage(fmt.error("Unknown restricted-land action."));return true; }
@@ -286,7 +288,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "confirm" -> npcPlanning.confirm(player);
             case "cancel" -> npcPlanning.cancel(player);
             case "activate", "unlock" -> npcPlanning.activate(player);
-            default -> player.sendMessage(fmt.info("Usage: /district npcs <start|confirm|cancel|activate>"));
+            case "move" -> { if (args.length < 3) player.sendMessage(fmt.error("Usage: /district npcs move <npcId>")); else npcPlanning.move(player, parseInt(args[2])); }
+            default -> player.sendMessage(fmt.info("Usage: /district npcs <start|confirm|cancel|activate|move>"));
         }
         return true;
     }
@@ -306,7 +309,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     private boolean handleDistrictChat(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) return true;
         DistrictData.District district = districtService.getPlayerDistrict(player.getUniqueId());
-        if (args.length < 2) { player.sendMessage(fmt.info("Usage: /district chat <prefix|rolecolor> ...")); return true; }
+        if (args.length < 2) { player.sendMessage(fmt.info("Usage: /district chat <prefix|prefixcolor|rolecolor> ...")); return true; }
         if (args[1].equalsIgnoreCase("prefix")) {
             if (args.length < 3) { player.sendMessage(fmt.error("Usage: /district chat prefix <text>")); return true; }
             String prefix = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
@@ -323,7 +326,15 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             else player.sendMessage(fmt.error("Only the MAYOR can change role colors."));
             return true;
         }
-        player.sendMessage(fmt.info("Usage: /district chat <prefix|rolecolor> ..."));
+        if (args[1].equalsIgnoreCase("prefixcolor")) {
+            if (args.length < 3) { player.sendMessage(fmt.error("Usage: /district chat prefixcolor <color>")); return true; }
+            String color = legacyColor(args[2]);
+            if (color == null) { player.sendMessage(fmt.error("Use: red, gold, yellow, green, aqua, blue, purple, gray, white.")); return true; }
+            if (districtService.setDistrictChatPrefixColor(district, player.getUniqueId(), color)) player.sendMessage(fmt.success("District prefix color updated."));
+            else player.sendMessage(fmt.error("Only the MAYOR can change the district prefix color."));
+            return true;
+        }
+        player.sendMessage(fmt.info("Usage: /district chat <prefix|prefixcolor|rolecolor> ..."));
         return true;
     }
 
@@ -597,7 +608,12 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
                 var vault = treasuries.getVault(vaultId);
                 if (vault == null || !treasuries.isNear(player, vault)) { result = DistrictTreasuryService.Result.error("Stand next to that physical treasury vault."); break; }
                 if (args[1].equalsIgnoreCase("open")) result = DistrictTreasuryService.Result.ok("Physical treasury refreshed.", treasuries.getVaultBalance(vaultId), vault);
-                else if (args[1].equalsIgnoreCase("deposit")) result = treasuries.depositHeld(player, vaultId);
+                else if (args[1].equalsIgnoreCase("deposit")) {
+                    if (args.length >= 4 && !args[3].equalsIgnoreCase("held")) {
+                        long amount = args[3].equalsIgnoreCase("all") ? playerCash(player) : parseLong(args[3]);
+                        result = treasuries.depositAmount(player, vaultId, amount);
+                    } else result = treasuries.depositHeld(player, vaultId);
+                }
                 else if (args[1].equalsIgnoreCase("depositall")) result = treasuries.depositAll(player, vaultId);
                 else {
                     if (args.length < 4) { result = DistrictTreasuryService.Result.error("Choose a withdrawal amount."); break; }
@@ -989,10 +1005,11 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(fmt.info("/district expand &8- Expand your level-gated district claim"));
         sender.sendMessage(fmt.info("/district marketzone [confirm|cancel] &8- Select the merchant market zone"));
         sender.sendMessage(fmt.info("/district marketzone borders &8- Show your district's market-zone borders"));
-        sender.sendMessage(fmt.info("/district restricted start|list|allow|deny|clear|mode|delete &8- Mayor restricted land"));
-        sender.sendMessage(fmt.info("/district npcs <start|confirm|cancel|activate> &8- Plan and unlock district NPCs"));
+        sender.sendMessage(fmt.info("/district restricted start|list|allow|deny|allowrole|denyrole|mode|delete &8- Mayor restricted land"));
+        sender.sendMessage(fmt.info("/district npcs <start|confirm|cancel|activate|move> &8- Plan, unlock, or move district NPCs"));
         sender.sendMessage(fmt.info("/district message <welcome|leave> <text> &8- Mayor-only area messages"));
         sender.sendMessage(fmt.info("/district chat prefix <text> &8- Mayor-only district chat prefix"));
+        sender.sendMessage(fmt.info("/district chat prefixcolor <color> &8- Mayor-only prefix color"));
         sender.sendMessage(fmt.info("/district chat rolecolor <role> <color> &8- Mayor-only role color"));
         sender.sendMessage(fmt.info("/district info [id] &8- District info"));
         sender.sendMessage(fmt.info("/district stats &8- View district level and all development stats"));
@@ -1060,7 +1077,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             return List.of("list", "set", "remove").stream()
                 .filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
-        if (args.length == 2 && args[0].equalsIgnoreCase("restricted")) return List.of("start","confirm","cancel","list","allow","deny","clear","mode","delete").stream().filter(a->a.startsWith(args[1].toLowerCase())).toList();
+        if (args.length == 2 && args[0].equalsIgnoreCase("restricted")) return List.of("start","confirm","cancel","list","allow","deny","clear","allowrole","denyrole","clearrole","mode","delete").stream().filter(a->a.startsWith(args[1].toLowerCase())).toList();
+        if (args.length == 4 && args[0].equalsIgnoreCase("restricted") && List.of("allowrole","denyrole","clearrole").contains(args[1].toLowerCase())) return Arrays.stream(DistrictData.DistrictRole.values()).map(Enum::name).filter(role->role.startsWith(args[3].toUpperCase())).toList();
         if (args.length == 2 && args[0].equalsIgnoreCase("treasury")) {
             return List.of("create", "remove", "list", "balance").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
@@ -1077,10 +1095,11 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
                 .toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("npcs")) {
-            return List.of("start", "confirm", "cancel", "activate").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+            return List.of("start", "confirm", "cancel", "activate", "move").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("message")) return List.of("welcome", "leave").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
-        if (args.length == 2 && args[0].equalsIgnoreCase("chat")) return List.of("prefix", "rolecolor").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+        if (args.length == 2 && args[0].equalsIgnoreCase("chat")) return List.of("prefix", "prefixcolor", "rolecolor").stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
+        if (args.length == 3 && args[0].equalsIgnoreCase("chat") && args[1].equalsIgnoreCase("prefixcolor")) return List.of("red","gold","yellow","green","aqua","blue","purple","gray","white").stream().filter(a -> a.startsWith(args[2].toLowerCase())).toList();
         if (args.length == 3 && args[0].equalsIgnoreCase("chat") && args[1].equalsIgnoreCase("rolecolor")) return Arrays.stream(DistrictData.DistrictRole.values()).map(Enum::name).filter(a -> a.startsWith(args[2].toUpperCase())).toList();
         if (args.length == 4 && args[0].equalsIgnoreCase("role")
             && (args[1].equalsIgnoreCase("set") || args[1].equalsIgnoreCase("remove"))) {
@@ -1166,7 +1185,12 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         try { return Integer.parseInt(s); } catch (NumberFormatException e) { return -1; }
     }
 
+    private long playerCash(Player player) {
+        try { return plugin.getServiceRegistry().get(com.vaultsurvival.plugin.currency.CurrencyService.class).getPlayerCashTotal(player.getUniqueId()); }
+        catch (RuntimeException unavailable) { return 0; }
+    }
+
     private static long parseLong(String s) {
-        try { return Long.parseLong(s); } catch (NumberFormatException e) { return -1; }
+        try { return MoneyAmounts.parse(s); } catch (NumberFormatException e) { return -1; }
     }
 }

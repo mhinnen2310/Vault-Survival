@@ -76,14 +76,19 @@ public final class DistrictTreasuryListener implements Listener {
             return;
         }
         long balance = treasuries.getVaultBalance(vault.vaultUuid());
+        List<DialogMenuItem> actions = new java.util.ArrayList<>();
+        for (String amount : List.of("1", "10", "100", "1k", "10k", "1m", "all")) {
+            actions.add(DialogMenuItem.item("Deposit " + amount, "Take this exact amount from your physical cash.",
+                "district treasury deposit " + vault.vaultUuid() + " " + amount, null, Material.GOLD_NUGGET));
+        }
+        for (String amount : List.of("1", "10", "100", "1k", "10k", "1m", "all")) {
+            actions.add(DialogMenuItem.item("Withdraw " + amount, "Create one physical cash item; one empty slot is required.",
+                "district treasury withdraw " + vault.vaultUuid() + " " + amount, null, Material.GOLD_INGOT));
+        }
+        actions.add(DialogMenuItem.item("Refresh", "Refresh this physical vault while standing nearby.",
+            "district treasury open " + vault.vaultUuid(), null, Material.CLOCK));
         plugin.getServiceRegistry().get(DialogService.class).openResult(player, "Physical District Treasury",
-            status + "\nVault balance: " + balance + "\nDeposit by holding physical cash and right-clicking this block.", List.of(
-                DialogMenuItem.item("Deposit Held Cash", "Deposit the physical cash in your main hand.", "district treasury deposit " + vault.vaultUuid(), null, Material.GOLD_NUGGET),
-                DialogMenuItem.item("Deposit All Cash", "Deposit every valid physical cash item in your inventory.", "district treasury depositall " + vault.vaultUuid(), null, Material.GOLD_BLOCK),
-                DialogMenuItem.item("Withdraw 100", "Withdraw here; requires one free inventory slot.", "district treasury withdraw " + vault.vaultUuid() + " 100", null, Material.GOLD_INGOT),
-                DialogMenuItem.item("Withdraw 1,000", "Withdraw here; requires one free inventory slot.", "district treasury withdraw " + vault.vaultUuid() + " 1000", null, Material.RAW_GOLD_BLOCK),
-                DialogMenuItem.item("Withdraw All", "Withdraw this physical vault's full balance.", "district treasury withdraw " + vault.vaultUuid() + " all", null, Material.CHEST),
-                DialogMenuItem.item("Refresh", "Refresh this physical vault while standing nearby.", "district treasury open " + vault.vaultUuid(), null, Material.CLOCK)));
+            status + "\nVault balance: " + balance + "\nHolding cash and right-clicking deposits it immediately.", actions);
     }
 
     public void send(Player player, DistrictTreasuryService.Result result) {

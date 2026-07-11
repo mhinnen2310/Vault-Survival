@@ -21,6 +21,7 @@ public enum DialogMenuType {
     DISTRICT_MERCHANT("district.merchant", "District Merchant", "Merchant NPC, shops, orders, storage, and payouts."),
     DISTRICT_TREASURY("district.treasury", "District Treasury", "Physical treasury balance, deposits, withdrawals, and oversight."),
     DISTRICT_POLICE("district.police", "District Police", "Evidence, wanted, arrest, fine, and report tools."),
+    DISTRICT_EVIDENCE("district.evidence", "District Evidence", "Paginated active evidence for this district."),
     DISTRICT_STATION("district.station", "District Station", "Station application, platform, arrival, and status controls."),
     DISTRICT_DIPLOMACY("district.diplomacy", "Diplomacy", "Alliances, hostility, neutral relations, and ally chat."),
     DISTRICT_JOBS("district.jobs", "District Jobs", "Job creation, claims, completion history, disputes, and escrow."),
@@ -31,6 +32,7 @@ public enum DialogMenuType {
     MERCHANT_ORDERS("merchant.orders", "Merchant Orders", "Your buy-order status, fill progress, storage, and escrow."),
     MERCHANT_CREATE_ORDER("merchant.create_order", "Create Order", "Interactive held-item buy-order creation."),
     MERCHANT_EARNINGS("merchant.earnings", "Earnings", "Delivered order storage and claimable merchant payouts."),
+    MERCHANT_SETTINGS("merchant.settings", "Merchant Settings", "Merchant limits, market visualization, and payout policy."),
 
     RAIL_HOME("rail.home", "Rail", "Rail station and travel tools."),
     RAIL_STATION("rail.station", "Station", "Active stations, platform context, and district station status."),

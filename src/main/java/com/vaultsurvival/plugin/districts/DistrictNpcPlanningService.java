@@ -104,6 +104,30 @@ public final class DistrictNpcPlanningService implements Listener {
         player.sendMessage(fmt.info(created == 0 ? "No planned NPCs are unlocked yet." : "Activated " + created + " district NPC(s)."));
     }
 
+    public void move(Player player, int npcId) {
+        DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
+        if (district == null || !districts.canManageDevelopment(player.getUniqueId(), district)) {
+            player.sendMessage(fmt.error("Requires MAYOR, CO_MAYOR, or BUILDER in this NPC's district.")); return;
+        }
+        DistrictData.BlockClaim claim = districts.getClaim(district.getId()); Location location = player.getLocation();
+        if (claim == null || !claim.worldName().equals(location.getWorld().getName()) || !claim.contains(location.getBlockX(), location.getBlockZ())) {
+            player.sendMessage(fmt.error("Stand at the new location inside your district claim.")); return;
+        }
+        try (Connection connection = plugin.getDatabase().getConnection(); PreparedStatement check = connection.prepareStatement(
+                "SELECT id FROM district_npc_plans WHERE district_id=? AND npc_id=? AND status='ACTIVE'")) {
+            check.setInt(1, district.getId()); check.setInt(2, npcId); ResultSet row = check.executeQuery();
+            if (!row.next()) { player.sendMessage(fmt.error("That is not an active NPC owned by your district.")); return; }
+            NpcService npcs = plugin.getServiceRegistry().get(NpcService.class);
+            if (!npcs.moveNpc(npcId, location)) { player.sendMessage(fmt.error("NPC could not be moved.")); return; }
+            plugin.getDatabase().executeUpdate("UPDATE district_npc_plans SET world=?,x=?,y=?,z=?,yaw=?,pitch=?,planned_by=?,planned_at=? WHERE id=?",
+                location.getWorld().getName(), location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch(),
+                player.getUniqueId().toString(), System.currentTimeMillis(), row.getInt(1));
+            plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "DISTRICT_NPC_MOVE", "NPC", String.valueOf(npcId),
+                "district=" + district.getId() + " world=" + location.getWorld().getName() + " x=" + location.getX() + " y=" + location.getY() + " z=" + location.getZ());
+            player.sendMessage(fmt.success("District NPC moved to your current location."));
+        } catch (Exception error) { player.sendMessage(fmt.error("NPC move could not be saved.")); }
+    }
+
     public void cancel(Player player) { cancel(player, true); }
     private void cancel(Player player, boolean message) {
         PlanSession session = sessions.remove(player.getUniqueId());

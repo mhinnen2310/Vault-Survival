@@ -2,6 +2,7 @@ package com.vaultsurvival.plugin.merchant;
 
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.core.MoneyAmounts;
 import com.vaultsurvival.plugin.merchant.shop.MerchantShopData;
 import com.vaultsurvival.plugin.merchant.shop.MerchantShopService;
 import org.bukkit.Bukkit;
@@ -209,7 +210,7 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
 
         long price;
         try {
-            price = Long.parseLong(args[2]);
+            price = MoneyAmounts.parse(args[2]);
         } catch (NumberFormatException e) {
             player.sendMessage(fmt.error("Invalid price."));
             return true;
@@ -417,7 +418,7 @@ public class MerchantOrderCommand implements CommandExecutor, TabCompleter {
         try {
             shopId = Integer.parseInt(args[2]);
             slot = Integer.parseInt(args[3]);
-            price = Long.parseLong(args[4]);
+            price = MoneyAmounts.parse(args[4]);
         } catch (NumberFormatException e) {
             player.sendMessage(fmt.error("Invalid number."));
             return true;

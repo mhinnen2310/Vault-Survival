@@ -6,7 +6,7 @@
 
     <groupId>com.vaultsurvival</groupId>
     <artifactId>VaultSurvival</artifactId>
-    <version>1.0.32</version>
+    <version>1.0.33</version>
     <packaging>jar</packaging>
 
     <name>VaultSurvival</name>
@@ -38,6 +38,11 @@
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
             <version>3.46.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.canary-prism</groupId>
+            <artifactId>querz-nbt</artifactId>
+            <version>6.2.1</version>
         </dependency>
     </dependencies>
 

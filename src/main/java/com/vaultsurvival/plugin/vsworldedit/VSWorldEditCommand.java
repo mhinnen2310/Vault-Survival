@@ -220,8 +220,8 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         }
         if (args.length < 2 || args[1].equalsIgnoreCase("list")) {
             var files = schematics.list();
-            String body = "Supported format: vanilla structure .nbt\nFolder: " + schematics.getDirectory()
-                + "\nFiles: " + files.size() + "\nWorldEdit .schem/.schematic files are not accepted.";
+            String body = "Supported: vanilla .nbt, Sponge/WorldEdit .schem, legacy MCEdit .schematic\nFolder: "
+                + schematics.getDirectory() + "\nFiles: " + files.size();
             if (plugin.getServiceRegistry().has(DialogService.class)) {
                 List<DialogMenuItem> items = new java.util.ArrayList<>();
                 files.stream().limit(20).forEach(file -> items.add(DialogMenuItem.adminItem(file.fileName(),
@@ -238,7 +238,7 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         if (args.length < 3) {
-            player.sendMessage(fmt.error("/vwe schematic <list|preview|paste> <file.nbt>"));
+            player.sendMessage(fmt.error("/vwe schematic <list|preview|paste> <file.nbt|file.schem|file.schematic>"));
             return true;
         }
         String action = args[1].toLowerCase();
@@ -486,7 +486,7 @@ public class VSWorldEditCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(fmt.info("/vwe cancel &8- Cancel pending/active"));
         player.sendMessage(fmt.info("/vwe undo &8- Undo last operation"));
         player.sendMessage(fmt.info("/vwe debugpatterns &8- Run live parser acceptance checks"));
-        player.sendMessage(fmt.info("/vwe schematic <list|preview|paste> [file.nbt] &8- Safe vanilla structure loader"));
+        player.sendMessage(fmt.info("/vwe schematic <list|preview|paste> [file] &8- .nbt, .schem and .schematic"));
     }
 
     @Override

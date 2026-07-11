@@ -717,6 +717,14 @@ public class DistrictServiceImpl implements DistrictService {
         return getSetting(district, "chat.prefix", district == null ? "" : district.getName());
     }
 
+    @Override public boolean setDistrictChatPrefixColor(DistrictData.District district, UUID actorUuid, String color) {
+        return setMayorSetting(district, actorUuid, "chat.prefix_color", color);
+    }
+
+    @Override public String getDistrictChatPrefixColor(DistrictData.District district) {
+        return getSetting(district, "chat.prefix_color", "&7");
+    }
+
     @Override
     public boolean setDistrictRoleColor(DistrictData.District district, UUID actorUuid, DistrictData.DistrictRole role, String color) {
         return role != null && setMayorSetting(district, actorUuid, "chat.role." + role.name(), color);

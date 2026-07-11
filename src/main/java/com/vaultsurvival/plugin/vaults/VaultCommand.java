@@ -3,6 +3,7 @@ package com.vaultsurvival.plugin.vaults;
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.currency.CurrencyService;
 import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.core.MoneyAmounts;
 import com.vaultsurvival.plugin.vaults.VaultData.VaultTier;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -172,7 +173,7 @@ public class VaultCommand implements CommandExecutor, TabCompleter {
 
         long amount;
         try {
-            amount = Long.parseLong(args[1]);
+            amount = MoneyAmounts.parse(args[1]);
         } catch (NumberFormatException e) {
             player.sendMessage(fmt.error("Invalid amount."));
             return true;

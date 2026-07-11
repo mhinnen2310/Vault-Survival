@@ -474,23 +474,48 @@ public class MerchantShopServiceImpl implements MerchantShopService {
                     }
                 }
 
-                // Update stock
-                int newStock = shopItem.getStock() - toBuy;
-                if (newStock <= 0) {
-                    plugin.getDatabase().executeUpdate(
-                        "DELETE FROM merchant_shop_items WHERE id = ?", shopItem.getId());
-                } else {
-                    plugin.getDatabase().executeUpdate(
-                        "UPDATE merchant_shop_items SET stock = ? WHERE id = ?",
-                        newStock, shopItem.getId());
+                // Claim stock atomically. The shop view is only a snapshot and two
+                // customers can click it during the same tick.
+                try (PreparedStatement stock = conn.prepareStatement(
+                        "UPDATE merchant_shop_items SET stock=stock-? WHERE id=? AND shop_id=? AND stock>=?")) {
+                    stock.setInt(1, toBuy);
+                    stock.setInt(2, shopItem.getId());
+                    stock.setInt(3, shopId);
+                    stock.setInt(4, toBuy);
+                    if (stock.executeUpdate() != 1) throw new SQLException("Stock changed concurrently");
+                }
+                try (PreparedStatement cleanup = conn.prepareStatement(
+                        "DELETE FROM merchant_shop_items WHERE id=? AND stock=0")) {
+                    cleanup.setInt(1, shopItem.getId());
+                    cleanup.executeUpdate();
                 }
 
                 // Record sale
-                plugin.getDatabase().executeUpdate(
-                    "INSERT INTO merchant_shop_sales (shop_id, buyer_uuid, item_data, quantity, price_each, tax_amount, timestamp) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    shopId, buyer.getUniqueId().toString(), shopItem.getItemData(),
-                    toBuy, shopItem.getPrice(), taxAmount, now);
+                try (PreparedStatement sale = conn.prepareStatement(
+                        "INSERT INTO merchant_shop_sales (shop_id,buyer_uuid,item_data,quantity,price_each,tax_amount,timestamp) " +
+                            "VALUES (?,?,?,?,?,?,?)")) {
+                    sale.setInt(1, shopId);
+                    sale.setString(2, buyer.getUniqueId().toString());
+                    sale.setString(3, shopItem.getItemData());
+                    sale.setInt(4, toBuy);
+                    sale.setLong(5, shopItem.getPrice());
+                    sale.setLong(6, taxAmount);
+                    sale.setLong(7, now);
+                    if (sale.executeUpdate() != 1) throw new SQLException("Sale was not recorded");
+                }
+
+                // The merchant payout is part of the same transaction as stock
+                // and payment. A successful sale can therefore never lose its payout.
+                try (PreparedStatement payout = conn.prepareStatement(
+                        "INSERT INTO payout_lockers(player_uuid,amount,source_type,source_id,details,status,created_at) " +
+                            "VALUES(?,?,'MERCHANT_SHOP',?,?, 'PENDING',?)")) {
+                    payout.setString(1, shop.getOwnerUuid().toString());
+                    payout.setLong(2, netEarnings);
+                    payout.setString(3, String.valueOf(shopId));
+                    payout.setString(4, "sold=" + toBuy + "x " + shopItem.getItemDisplay() + " tax=" + taxAmount);
+                    payout.setLong(5, now);
+                    if (payout.executeUpdate() != 1) throw new SQLException("Merchant payout was not stored");
+                }
 
                 conn.commit();
 
@@ -501,11 +526,6 @@ public class MerchantShopServiceImpl implements MerchantShopService {
                         logger.severe("Committed shop tax could not be credited: " + taxCredit.message());
                     }
                 }
-
-                // Create payout locker entry for merchant
-                payouts.storePayout(shop.getOwnerUuid(), netEarnings,
-                    "MERCHANT_SHOP", String.valueOf(shopId),
-                    "sold=" + toBuy + "x " + shopItem.getItemDisplay() + " tax=" + taxAmount);
 
                 audit.log(buyer.getUniqueId(), buyer.getName(), "MERCHANT_SHOP_BUY",
                     "SHOP", String.valueOf(shopId),

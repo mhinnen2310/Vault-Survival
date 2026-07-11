@@ -366,7 +366,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
                 player.sendMessage(fmt.error("Structure would extend beyond this world's build height."));
                 return false;
             }
-            Material material = placement.templateState().getType();
+            Material material = placement.material();
             if ((!material.isBlock() && !material.isAir()) || material == Material.STRUCTURE_VOID) {
                 player.sendMessage(fmt.error("Structure contains an unsupported block: " + material.name()));
                 return false;
@@ -378,7 +378,7 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
         }
         var selection = new VSWorldEditData.Selection(uuid,
             new Location(world, minX, minY, minZ), new Location(world, maxX, maxY, maxZ));
-        Material primary = placements.getFirst().templateState().getType();
+        Material primary = placements.getFirst().material();
         var operation = new VSWorldEditData.ActiveOperation(uuid,
             VSWorldEditData.OperationType.SCHEMATIC_PASTE, selection, primary, null);
         operation.setTotalBlocks(placements.size());
@@ -780,12 +780,12 @@ public class VSWorldEditServiceImpl implements VSWorldEditService {
                     op.getUndoEntry().addSnapshot(new VSWorldEditData.BlockSnapshot(targetLocation,
                         targetLocation.getBlock().getType().name()));
                     try {
-                        var copy = placement.templateState().copy(targetLocation);
-                        if (!copy.update(true, false)) {
-                            targetLocation.getBlock().setBlockData(placement.templateState().getBlockData(), false);
-                        }
+                        if (placement.templateState() != null) {
+                            var copy = placement.templateState().copy(targetLocation);
+                            if (!copy.update(true, false)) targetLocation.getBlock().setBlockData(placement.blockData(), false);
+                        } else targetLocation.getBlock().setBlockData(placement.blockData(), false);
                     } catch (RuntimeException unsupportedTileState) {
-                        targetLocation.getBlock().setBlockData(placement.templateState().getBlockData(), false);
+                        targetLocation.getBlock().setBlockData(placement.blockData(), false);
                     }
                     changed++;
                 }

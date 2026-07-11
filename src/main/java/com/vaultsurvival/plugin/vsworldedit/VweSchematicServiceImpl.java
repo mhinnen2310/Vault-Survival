@@ -8,6 +8,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.BlockState;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
 import org.bukkit.structure.Palette;
 import org.bukkit.structure.Structure;
@@ -18,6 +19,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -25,12 +28,11 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Loads Paper's native vanilla structure-NBT format. WorldEdit .schem and
- * legacy MCEdit .schematic formats are deliberately rejected rather than
- * guessed or partially decoded.
+ * Loads vanilla structure NBT and Sponge/WorldEdit schematics. Entity and
+ * block-entity payloads are intentionally ignored; block data remains exact.
  */
 public final class VweSchematicServiceImpl implements VweSchematicService {
-    private static final Pattern SAFE_FILE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,63}\\.nbt",
+    private static final Pattern SAFE_FILE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,63}\\.(?:nbt|schem|schematic)",
         Pattern.CASE_INSENSITIVE);
 
     private final VaultSurvivalPlugin plugin;
@@ -110,11 +112,13 @@ public final class VweSchematicServiceImpl implements VweSchematicService {
         boolean pasteAir = configBoolean("pasteAir", true);
         List<VSWorldEditData.SchematicPlacement> placements = new ArrayList<>(loaded.blocks.size());
         for (RelativeBlock block : loaded.blocks) {
-            Material material = block.state.getType();
+            Material material = block.blockData.getMaterial();
             if (material == Material.STRUCTURE_VOID || (!pasteAir && material.isAir())) continue;
-            placements.add(new VSWorldEditData.SchematicPlacement(
-                origin.getBlockX() + block.x, origin.getBlockY() + block.y,
-                origin.getBlockZ() + block.z, block.state));
+            placements.add(block.state == null
+                ? new VSWorldEditData.SchematicPlacement(origin.getBlockX() + block.x, origin.getBlockY() + block.y,
+                    origin.getBlockZ() + block.z, block.blockData)
+                : new VSWorldEditData.SchematicPlacement(origin.getBlockX() + block.x, origin.getBlockY() + block.y,
+                    origin.getBlockZ() + block.z, block.state));
         }
         if (placements.isEmpty()) return Result.failure("The structure has no pasteable blocks with the current settings.");
 
@@ -153,6 +157,9 @@ public final class VweSchematicServiceImpl implements VweSchematicService {
             long maxBytes = Math.max(1L, configLong("maxFileSizeBytes", 16L * 1024 * 1024));
             if (bytes > maxBytes) return LoadResult.error("Structure file is " + bytes + " bytes (maximum: " + maxBytes + ").");
 
+            String extension = extension(fileName);
+            if (extension.equals("schem")) return loadSponge(real, fileName, bytes);
+            if (extension.equals("schematic")) return loadLegacy(real, fileName, bytes);
             Structure structure = Bukkit.getStructureManager().loadStructure(real.toFile());
             if (structure == null) return LoadResult.error("Paper could not decode this vanilla structure NBT file.");
             BlockVector size = structure.getSize();
@@ -178,22 +185,121 @@ public final class VweSchematicServiceImpl implements VweSchematicService {
                 if (x < 0 || y < 0 || z < 0 || x >= width || y >= height || z >= length) {
                     return LoadResult.error("Structure contains a block outside its declared dimensions.");
                 }
-                blocks.add(new RelativeBlock(x, y, z, state.copy()));
+                blocks.add(new RelativeBlock(x, y, z, state.copy(), state.getBlockData().clone()));
             }
             SchematicInfo info = new SchematicInfo(fileName, width, height, length,
                 blocks.size(), structure.getEntityCount(), bytes);
             return new LoadResult(info, List.copyOf(blocks), null);
         } catch (IOException | RuntimeException exception) {
             plugin.getLogger().warning("Rejected VWE structure '" + fileName + "': " + exception.getMessage());
-            return LoadResult.error("Could not load that vanilla .nbt structure: " + exception.getMessage());
+            return LoadResult.error("Could not load that schematic: " + exception.getMessage());
         }
     }
 
     private String normalizeName(String requested) {
         if (requested == null) return null;
         String trimmed = requested.trim();
-        if (!trimmed.toLowerCase(Locale.ROOT).endsWith(".nbt")) trimmed += ".nbt";
+        if (!trimmed.toLowerCase(Locale.ROOT).matches(".*\\.(nbt|schem|schematic)$")) trimmed += ".nbt";
         return SAFE_FILE.matcher(trimmed).matches() ? trimmed : null;
+    }
+
+    private String extension(String name) { return name.substring(name.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT); }
+
+    private LoadResult loadSponge(Path path, String fileName, long bytes) throws IOException {
+        net.querz.nbt.tag.Tag<?> raw = net.querz.nbt.io.NBTUtil.read(path.toFile()).getTag();
+        if (!(raw instanceof net.querz.nbt.tag.CompoundTag root)) return LoadResult.error("Sponge schematic root is not a compound.");
+        net.querz.nbt.tag.CompoundTag schematic = root.getCompoundTag("Schematic");
+        if (schematic != null) root = schematic; // Sponge v3 wrapper
+        int width = number(root, "Width"), height = number(root, "Height"), length = number(root, "Length");
+        String dimensionsError = validateDimensions(width, height, length);
+        if (dimensionsError != null) return LoadResult.error(dimensionsError);
+        net.querz.nbt.tag.CompoundTag paletteTag = root.getCompoundTag("Palette");
+        byte[] encoded = root.getByteArray("BlockData").orElse(null);
+        if (paletteTag == null || encoded == null) return LoadResult.error("Sponge schematic has no Palette or BlockData.");
+        Map<Integer, BlockData> palette = new HashMap<>();
+        for (Map.Entry<String, net.querz.nbt.tag.Tag<?>> entry : paletteTag.entrySet()) {
+            if (!(entry.getValue() instanceof net.querz.nbt.tag.NumberTag<?> number)) continue;
+            try { palette.put(number.asInt(), Bukkit.createBlockData(entry.getKey())); }
+            catch (IllegalArgumentException invalid) { return LoadResult.error("Unknown block data in palette: " + entry.getKey()); }
+        }
+        int volume = Math.multiplyExact(Math.multiplyExact(width, height), length);
+        int maxBlocks = Math.min(vwe.getMaxBlocksPerOperation(), Math.max(1, configInt("maxBlocks", 250_000)));
+        if (volume > maxBlocks) return LoadResult.error("Schematic volume is " + volume + " blocks (maximum: " + maxBlocks + ").");
+        int[] ids = decodeVarInts(encoded, volume);
+        if (ids == null) return LoadResult.error("Sponge BlockData is truncated or has more entries than its dimensions.");
+        List<RelativeBlock> blocks = new ArrayList<>(volume);
+        for (int index = 0; index < volume; index++) {
+            BlockData data = palette.get(ids[index]);
+            if (data == null) return LoadResult.error("Sponge palette index " + ids[index] + " is missing.");
+            int x = index % width, z = (index / width) % length, y = index / (width * length);
+            blocks.add(new RelativeBlock(x, y, z, null, data.clone()));
+        }
+        return new LoadResult(new SchematicInfo(fileName, width, height, length, blocks.size(), 0, bytes), List.copyOf(blocks), null);
+    }
+
+    private LoadResult loadLegacy(Path path, String fileName, long bytes) throws IOException {
+        net.querz.nbt.tag.Tag<?> raw = net.querz.nbt.io.NBTUtil.read(path.toFile()).getTag();
+        if (!(raw instanceof net.querz.nbt.tag.CompoundTag root)) return LoadResult.error("Legacy schematic root is not a compound.");
+        int width = number(root, "Width"), height = number(root, "Height"), length = number(root, "Length");
+        String dimensionsError = validateDimensions(width, height, length);
+        if (dimensionsError != null) return LoadResult.error(dimensionsError);
+        byte[] blocksRaw = root.getByteArray("Blocks").orElse(null), dataRaw = root.getByteArray("Data").orElse(null);
+        int volume = Math.multiplyExact(Math.multiplyExact(width, height), length);
+        if (blocksRaw == null || blocksRaw.length != volume) return LoadResult.error("Legacy Blocks length does not match its dimensions.");
+        if (dataRaw == null || dataRaw.length != volume) dataRaw = new byte[volume];
+        byte[] add = root.getByteArray("AddBlocks").orElse(null);
+        List<RelativeBlock> blocks = new ArrayList<>(volume);
+        for (int index = 0; index < volume; index++) {
+            int id = blocksRaw[index] & 0xff;
+            if (add != null && index / 2 < add.length) id |= ((index & 1) == 0 ? add[index / 2] & 0x0f : (add[index / 2] >>> 4) & 0x0f) << 8;
+            BlockData blockData = legacyBlockData(id, dataRaw[index]);
+            if (blockData == null) return LoadResult.error("Unsupported legacy block id " + id + " at index " + index + ". Convert this file to Sponge .schem for exact modern mappings.");
+            int x = index % width, z = (index / width) % length, y = index / (width * length);
+            blocks.add(new RelativeBlock(x, y, z, null, blockData));
+        }
+        return new LoadResult(new SchematicInfo(fileName, width, height, length, blocks.size(), 0, bytes), List.copyOf(blocks), null);
+    }
+
+    private BlockData legacyBlockData(int id, byte data) {
+        String name = switch (id) {
+            case 0 -> "air"; case 1 -> "stone"; case 2 -> "grass_block"; case 3 -> "dirt";
+            case 4 -> "cobblestone"; case 5 -> "oak_planks"; case 7 -> "bedrock"; case 8, 9 -> "water";
+            case 10, 11 -> "lava"; case 12 -> "sand"; case 13 -> "gravel"; case 17 -> "oak_log";
+            case 18 -> "oak_leaves"; case 20 -> "glass"; case 24 -> "sandstone"; case 35 -> "white_wool";
+            case 41 -> "gold_block"; case 42 -> "iron_block"; case 43, 44 -> "stone_slab"; case 45 -> "bricks";
+            case 46 -> "tnt"; case 47 -> "bookshelf"; case 48 -> "mossy_cobblestone"; case 49 -> "obsidian";
+            case 50 -> "torch"; case 53 -> "oak_stairs"; case 54 -> "chest"; case 57 -> "diamond_block";
+            case 58 -> "crafting_table"; case 61, 62 -> "furnace"; case 67 -> "cobblestone_stairs";
+            case 79 -> "ice"; case 80 -> "snow_block"; case 82 -> "clay"; case 85 -> "oak_fence";
+            case 87 -> "netherrack"; case 88 -> "soul_sand"; case 89 -> "glowstone"; case 98 -> "stone_bricks";
+            case 103 -> "melon"; case 112 -> "nether_bricks"; case 121 -> "end_stone"; case 129 -> "emerald_ore";
+            case 133 -> "emerald_block"; case 152 -> "redstone_block"; case 155 -> "quartz_block"; case 159 -> "white_terracotta";
+            case 168 -> "prismarine"; case 169 -> "sea_lantern"; case 172 -> "terracotta"; case 173 -> "coal_block";
+            default -> null;
+        };
+        return name == null ? null : Bukkit.createBlockData(name);
+    }
+
+    private int number(net.querz.nbt.tag.CompoundTag tag, String key) {
+        Number number = tag.getNumber(key); return number == null ? -1 : number.intValue();
+    }
+
+    private String validateDimensions(int width, int height, int length) {
+        int max = Math.max(1, configInt("maxDimensionBlocks", 256));
+        return width <= 0 || height <= 0 || length <= 0 || width > max || height > max || length > max
+            ? "Schematic dimensions must each be 1-" + max + " blocks." : null;
+    }
+
+    private int[] decodeVarInts(byte[] bytes, int expected) {
+        int[] values = new int[expected]; int count = 0, value = 0, shift = 0;
+        for (byte raw : bytes) {
+            value |= (raw & 0x7f) << shift;
+            if ((raw & 0x80) == 0) {
+                if (count >= expected) return null;
+                values[count++] = value; value = 0; shift = 0;
+            } else if ((shift += 7) > 28) return null;
+        }
+        return count == expected && shift == 0 ? values : null;
     }
 
     private boolean enabled() { return configBoolean("enabled", true); }
@@ -218,7 +324,7 @@ public final class VweSchematicServiceImpl implements VweSchematicService {
         return info.width() + " x " + info.height() + " x " + info.length();
     }
 
-    private record RelativeBlock(int x, int y, int z, BlockState state) { }
+    private record RelativeBlock(int x, int y, int z, BlockState state, BlockData blockData) { }
     private record LoadResult(SchematicInfo info, List<RelativeBlock> blocks, String error) {
         private static LoadResult error(String message) { return new LoadResult(null, List.of(), message); }
     }

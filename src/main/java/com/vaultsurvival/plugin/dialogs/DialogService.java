@@ -709,6 +709,7 @@ public class DialogService {
             case DISTRICT_MERCHANT -> merchantMenu();
             case DISTRICT_TREASURY -> districtTreasuryMenu(player);
             case DISTRICT_POLICE -> policeDeskMenu(player);
+            case DISTRICT_EVIDENCE -> districtEvidenceMenu(player);
             case DISTRICT_STATION -> districtStationMenu(player);
             case DISTRICT_DIPLOMACY -> diplomacyMenu(player);
             case DISTRICT_JOBS -> districtJobsMenu(player);
@@ -726,6 +727,7 @@ public class DialogService {
             case MERCHANT_ORDERS -> merchantOrdersMenu(player);
             case MERCHANT_CREATE_ORDER -> merchantCreateOrderMenu(player);
             case MERCHANT_EARNINGS -> merchantEarningsMenu(player);
+            case MERCHANT_SETTINGS -> merchantSettingsMenu(player);
             case RAIL_HOME -> railMenu();
             case RAIL_STATION -> railStationMenu(player);
             case RAIL_ROUTES -> railRoutesMenu(player, false);
@@ -767,9 +769,7 @@ public class DialogService {
         List<DialogMenuItem> items = new ArrayList<>(List.of(
             DialogMenuItem.item("Current Area", "Show current area information.", "vsmenu current", null, Material.COMPASS),
             DialogMenuItem.item("Rail", "Browse stations, routes, tickets, and journeys.", "vsmenu rail", null, Material.RAIL),
-            DialogMenuItem.item("Orders", "Browse merchant orders and Auction Hall listings.", "vsmenu orders", null, Material.WRITABLE_BOOK),
-            DialogMenuItem.item("Settings", "Use native controls for preferences and visualization.", "vsmenu settings", null, Material.COMPARATOR),
-            DialogMenuItem.item("Guides", "Open concise system guides.", "vsmenu guides", null, Material.BOOK)
+            DialogMenuItem.item("Settings & Help", "Player preferences, region visualization, and concise guides.", "vsmenu settings", null, Material.COMPARATOR)
         ));
 
         if (plugin.isStaffModeActive(player.getUniqueId())) {
@@ -969,7 +969,7 @@ public class DialogService {
             );
         }
         List<DialogMenuItem> items = new ArrayList<>();
-        items.add(DialogMenuItem.item("Evidence List", "List active district evidence.", "crime evidence", null, Material.PAPER));
+        items.add(DialogMenuItem.item("Evidence List", "Browse active district evidence without leaving the dialog.", "vsmenu district.evidence", null, Material.PAPER));
         items.add(DialogMenuItem.item("Wanted List", "List wanted players.", "crime wanted", null, Material.CROSSBOW));
         items.add(DialogMenuItem.item("Fine Evidence", "Enter evidence id and amount.", "vsmenu input crime_fine", null, Material.GOLD_NUGGET));
         items.add(DialogMenuItem.item("Mark Wanted", "Enter evidence id.", "vsmenu input crime_wanted", null, Material.TARGET));
@@ -1015,17 +1015,22 @@ public class DialogService {
 
     private List<DialogMenuItem> merchantMenu() {
         return List.of(
-            DialogMenuItem.item("Show Market Zone", "Display your district's exact market-zone block borders.", "district marketzone borders", null, Material.LIME_DYE),
-            DialogMenuItem.item("My Buy Orders", "View your merchant buy orders.", "merchant orders", null, Material.WRITABLE_BOOK),
-            DialogMenuItem.item("Create Buy Order", "Create a new buy order (hold the item).", "vsmenu input merchant_create", null, Material.EMERALD),
-            DialogMenuItem.item("Active Buy Orders", "Browse all active buy orders.", "merchant order list", null, Material.BOOKSHELF),
-            DialogMenuItem.item("Deliver Items", "Deliver items to an active order.", "vsmenu input merchant_deliver", null, Material.CHEST),
-            DialogMenuItem.item("Cancel Order", "Cancel your buy order.", "vsmenu input merchant_cancel", null, Material.BARRIER),
-            DialogMenuItem.item("Order Storage", "View delivered items in storage.", "vsmenu merchant.earnings", null, Material.BARREL),
-            DialogMenuItem.item("My NPC Shops", "Manage your merchant NPC shops.", "vsmenu merchant.shops", null, Material.VILLAGER_SPAWN_EGG),
-            DialogMenuItem.item("Collect Shop Earnings", "Shop proceeds are physical: collect them at your own shop NPC.", "merchant shop edit", null, Material.GOLD_NUGGET),
+            DialogMenuItem.item("NPC Shops", "Shop inventory, prices, stock and NPC-only payout collection.", "vsmenu merchant.shops", null, Material.VILLAGER_SPAWN_EGG),
+            DialogMenuItem.item("Orders", "Create, deliver, cancel, and review merchant buy orders.", "vsmenu merchant.orders", null, Material.WRITABLE_BOOK),
+            DialogMenuItem.item("Settings", "Market border, limits, storage, and payout policy.", "vsmenu merchant.settings", null, Material.COMPARATOR),
             backItem(), homeItem(), closeItem()
         );
+    }
+
+    private List<DialogMenuItem> merchantSettingsMenu(Player player) {
+        int limit = Math.max(1, plugin.getConfigManager().getConfig().getInt("merchant.max_active_orders", 10));
+        return List.of(
+            DialogMenuItem.status("Active Order Limit", "Maximum simultaneous merchant orders.", String.valueOf(limit), Material.COMPARATOR),
+            DialogMenuItem.item("Show Market Zone", "Display your district's exact market-zone border.", "district marketzone borders", null, Material.LIME_DYE),
+            DialogMenuItem.item("Order Storage", "Review delivered order items.", "vsmenu merchant.earnings", null, Material.BARREL),
+            DialogMenuItem.locked("Payout Collection", "Merchant shop proceeds remain physical.",
+                "Payouts can only be collected by right-clicking your own shop NPC.", Material.GOLD_NUGGET),
+            backItem("merchant"), homeItem(), closeItem());
     }
 
     private List<DialogMenuItem> merchantCreateOrderMenu(Player player) {
@@ -1392,27 +1397,25 @@ public class DialogService {
     }
 
     private List<DialogMenuItem> staffMenu(Player player) {
-        return List.of(
-            DialogMenuItem.adminItem("Staff Test World", "Transfer to the fully isolated staff sandbox.", "staffmode test", "vs.staffmode.use", Material.GRASS_BLOCK),
-            DialogMenuItem.adminItem("Quick Actions", "Freeze, inspect, debug, and return shortcuts.", "vsmenu staff.quick", "vs.staffmode.use", Material.LIGHTNING_ROD),
-            DialogMenuItem.adminItem("Player Inspector", "Search players and open audited profiles.", "vsmenu staff.players", "vs.staffinspect", Material.PLAYER_HEAD),
-            DialogMenuItem.adminItem("Reports", "Open report queues.", "vsmenu staff.reports", "vs.staffmode.use", Material.PAPER),
-            DialogMenuItem.adminItem("Security Alerts", "Open security and abuse tools.", "vsmenu security", "vs.staffmode.use", Material.SHIELD),
-            DialogMenuItem.adminItem("Economy Tools", "Cash, vault, and contract oversight.", "vsmenu economy", "vs.cash.admin", Material.GOLD_INGOT),
-            DialogMenuItem.adminItem("Vault Tools", "Inspect vault administration tools.", "vsmenu vaults", "vs.vault.admin.inspect", Material.BARREL),
-            DialogMenuItem.adminItem("District Tools", "Open district moderation tools.", "vsmenu staff.districts", "vs.district.admin", Material.MAP),
-            DialogMenuItem.adminItem("Contract Oversight", "Inspect contracts, escrow, and payouts.", "vsmenu contracts", "vs.admin", Material.WRITABLE_BOOK),
-            DialogMenuItem.adminItem("Region Debug", "Inspect this location's regions and flags.", "vsmenu debug", "vs.region.admin", Material.SPYGLASS),
-            DialogMenuItem.adminItem("System Tools", "Modules, config, updates, and diagnostics.", "vsmenu system", "vs.staffmode.use", Material.COMPARATOR),
-            DialogMenuItem.adminItem("Leave Staffmode", "Return to normal player mode.", "staffmode", "vs.staffmode.use", Material.ENDER_EYE),
-            backItem(), homeItem(), closeItem()
-        );
+        List<DialogMenuItem> items = new ArrayList<>();
+        if (player.hasPermission("vs.staffmode.use")) items.add(DialogMenuItem.adminItem("Staff Test World", "Transfer to the fully isolated staff sandbox.", "staffmode test", "vs.staffmode.use", Material.GRASS_BLOCK));
+        if (player.hasPermission("vs.staffmode.use")) items.add(DialogMenuItem.adminItem("Quick Actions", "Freeze, spectate, inspect, and return shortcuts.", "vsmenu staff.quick", "vs.staffmode.use", Material.LIGHTNING_ROD));
+        if (player.hasPermission("vs.staffinspect")) items.add(DialogMenuItem.adminItem("Player Inspector", "Search players and open silent audited profiles.", "vsmenu staff.players", "vs.staffinspect", Material.PLAYER_HEAD));
+        if (player.hasPermission("vs.staffmode.use")) items.add(DialogMenuItem.adminItem("Crime Reports", "Open normal crime report queues.", "vsmenu staff.reports", "vs.staffmode.use", Material.PAPER));
+        if (player.hasPermission("vs.staff.alerts")) items.add(DialogMenuItem.adminItem("Security & Abuse", "Security alerts and separate police/staff abuse reports.", "vsmenu security", "vs.staff.alerts", Material.SHIELD));
+        if (player.hasPermission("vs.cash.admin")) items.add(DialogMenuItem.adminItem("Economy Tools", "Cash, vault, and contract oversight.", "vsmenu economy", "vs.cash.admin", Material.GOLD_INGOT));
+        if (player.hasPermission("vs.district.admin")) items.add(DialogMenuItem.adminItem("District Admin", "Choose a district and open audited administration.", "vsmenu staff.districts", "vs.district.admin", Material.MAP));
+        if (player.hasPermission("vs.region.admin")) items.add(DialogMenuItem.adminItem("Region Debug", "Inspect this location's regions and flags.", "vsmenu debug", "vs.region.admin", Material.SPYGLASS));
+        if (player.hasPermission("vs.admin")) items.add(DialogMenuItem.adminItem("System Tools", "Modules, config, updates, and diagnostics.", "vsmenu system", "vs.admin", Material.COMPARATOR));
+        items.add(DialogMenuItem.adminItem("Leave Staffmode", "Return to normal player mode.", "staffmode", "vs.staffmode.use", Material.ENDER_EYE));
+        items.add(backItem()); items.add(homeItem()); items.add(closeItem()); return items;
     }
 
     private List<DialogMenuItem> staffPlayersMenu() {
         return List.of(
             DialogMenuItem.adminItem("Search Player", "Search name, partial name, UUID, district, or rank.", "vsmenu input staffinspect_search", "vs.staffinspect", Material.SPYGLASS),
             DialogMenuItem.adminItem("Open Profile", "Open an audited staff profile for a player.", "vsmenu input staffinspect_profile", "vs.staffinspect", Material.PLAYER_HEAD),
+            DialogMenuItem.adminItem("Silent Spectate", "Enter a player name; the target receives no notification.", "vsmenu input staff_spectate", "vs.staff.utility", Material.ENDER_EYE),
             DialogMenuItem.adminItem("Online Players", "Show online players with pagination.", "staffinspect online", "vs.staffinspect", Material.LIME_DYE),
             DialogMenuItem.adminItem("Recently Joined", "Show recently active players with pagination.", "staffinspect recent", "vs.staffinspect", Material.CLOCK),
             DialogMenuItem.adminItem("Wanted Players", "Show wanted players with pagination.", "staffinspect wanted", "vs.staffinspect", Material.CROSSBOW),
@@ -1517,6 +1520,32 @@ public class DialogService {
         items.add(DialogMenuItem.item("Submit Report", "Attach this location to a persistent staff report.", "vsmenu input player_report", null, Material.BELL));
         if (context.hasDistrict()) items.add(DialogMenuItem.item("District Police Desk", "Open local evidence and wanted tools when your role allows it.", "vsmenu district.police", null, Material.SHIELD));
         items.add(backItem()); items.add(homeItem()); items.add(closeItem());
+        return items;
+    }
+
+    private List<DialogMenuItem> districtEvidenceMenu(Player player) {
+        DistrictData.District district = getDistrict(player);
+        DistrictService districts = getDistrictService(); CrimeService crimes = getCrimeService();
+        if (district == null || districts == null || crimes == null
+            || !districts.canPolice(player.getUniqueId(), district)) {
+            return unavailableMenu("District Evidence", "Requires an active district police role.", "district.police");
+        }
+        List<DialogMenuItem> items = new ArrayList<>();
+        for (var evidence : crimes.getDistrictEvidence(district.getId())) {
+            @SuppressWarnings("deprecation") String suspect = Bukkit.getOfflinePlayer(evidence.getPlayerUuid()).getName();
+            if (suspect == null) suspect = evidence.getPlayerUuid().toString().substring(0, 8);
+            String detail = "Suspect: " + suspect + " | " + readable(evidence.getActionType())
+                + " | " + evidence.getSeverity() + " | " + evidence.getStatus()
+                + " | " + evidence.getLocation() + (evidence.getDetails() == null || evidence.getDetails().isBlank()
+                    ? "" : " | " + evidence.getDetails());
+            items.add(DialogMenuItem.locked("Evidence #" + evidence.getId(), "Recorded district evidence.", detail, Material.PAPER));
+        }
+        if (items.isEmpty()) items.add(DialogMenuItem.locked("No Active Evidence", "This district has no evidence records.",
+            "Nothing currently requires police review.", Material.LIME_DYE));
+        items.add(DialogMenuItem.item("Fine Evidence", "Enter an evidence id and amount.", "vsmenu input crime_fine", null, Material.GOLD_NUGGET));
+        items.add(DialogMenuItem.item("Mark Wanted", "Enter an evidence id.", "vsmenu input crime_wanted", null, Material.TARGET));
+        items.add(DialogMenuItem.item("Dismiss Evidence", "Enter an evidence id.", "vsmenu input crime_dismiss", null, Material.BARRIER));
+        items.add(backItem("district.police")); items.add(homeItem()); items.add(closeItem());
         return items;
     }
 
@@ -2124,6 +2153,7 @@ public class DialogService {
             input("support_request", "Request Kingdom Support", "Enter a project id or all, followed by the needed materials/staffing.", "projectId|all details", "civic support request $(value)", null, true),
             input("staffinspect_search", "Search Player", "Search by player name, partial name, UUID, district, or rank.", "Search", "staffinspect search $(value)", "vs.staffinspect", true),
             input("staffinspect_profile", "Open Player Profile", "Enter a player name or UUID.", "Player", "staffinspect $(value)", "vs.staffinspect", true),
+            input("staff_spectate", "Silent Spectate", "Enter an online player name. This action is audited and the target is not notified.", "Player", "vsspectate $(value)", "vs.staff.utility", true),
             input("station_request", "Request Station", "Enter station name.", "Station name", "district station request $(value)", null, false),
             input("station_setplatform", "Set Platform", "Enter the pending station ID, then select two exact block corners with the district wand.", "Station ID", "district station setplatform $(value)", null, false),
             input("station_setarrival", "Set Arrival", "Stand at arrival point.", "any", "district station setarrival", null, false),

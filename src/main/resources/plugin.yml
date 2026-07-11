@@ -1,5 +1,5 @@
 ﻿name: VaultSurvival
-version: 1.0.32
+version: 1.0.33
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -29,6 +29,10 @@ commands:
     description: Admin cash management tools
     usage: /cash <inspect|trace|mint|invalidate|scan|stats>
     permission: vs.cash.admin
+  cashsplit:
+    description: Split held physical cash into exact change
+    usage: /cashsplit <amount>
+    aliases: [splitcash]
   vault:
     description: Vault management commands
     usage: /vault <place|remove|info|deposit|withdraw|access|repair|list>
@@ -80,6 +84,10 @@ commands:
     description: Toggle the protected staff area breaker
     usage: /vsbreaker <3x3|4x4|5x5|6x6|7x7|8x8|9x9|off>
     aliases: [breaker]
+  vsspectate:
+    description: Silently spectate an online player while in staffmode
+    usage: /vsspectate <player|stop>
+    aliases: [spectate]
   staffalerts:
     description: Persistent staff alert queue, security scoring, and staff navigation
     usage: /staffalerts <list|claim|resolve|tp|last|return|antixray|storage|scores|payouts>

@@ -25,6 +25,8 @@ public final class StaffUtilityCommand implements CommandExecutor, TabCompleter 
     private final VaultSurvivalPlugin plugin;
     private final Map<UUID, StaffmodeData> staffData;
     private final Map<UUID, Location> returns = new HashMap<>();
+    private record SpectateState(Location location, GameMode gameMode) { }
+    private final Map<UUID, SpectateState> spectating = new HashMap<>();
 
     public StaffUtilityCommand(VaultSurvivalPlugin plugin, Map<UUID, StaffmodeData> staffData) {
         this.plugin = plugin;
@@ -54,6 +56,7 @@ public final class StaffUtilityCommand implements CommandExecutor, TabCompleter 
             case "vsweather" -> weather(staff, args);
             case "vsspeed" -> speed(staff, args);
             case "vsbreaker" -> breaker(staff, args);
+            case "vsspectate" -> spectate(staff, args);
             default -> false;
         };
     }
@@ -75,6 +78,23 @@ public final class StaffUtilityCommand implements CommandExecutor, TabCompleter 
         target.teleportAsync(staff.getLocation());
         audit(staff, "STAFF_TPHERE", "PLAYER", target.getUniqueId().toString(), "target=" + target.getName());
         return success(staff, "Teleported " + target.getName() + " to you.");
+    }
+
+    private boolean spectate(Player staff, String[] args) {
+        if (args.length != 1) return error(staff, "Usage: /vsspectate <player|stop>");
+        if (args[0].equalsIgnoreCase("stop")) {
+            SpectateState previous = spectating.remove(staff.getUniqueId());
+            if (previous == null) return error(staff, "You are not spectating a player.");
+            staff.setSpectatorTarget(null); staff.setGameMode(previous.gameMode()); staff.teleportAsync(previous.location());
+            audit(staff, "STAFF_SPECTATE_STOP", "PLAYER", staff.getUniqueId().toString(), locationDetail(previous.location()));
+            return success(staff, "Silent spectating stopped.");
+        }
+        Player target = Bukkit.getPlayerExact(args[0]);
+        if (target == null || target.equals(staff)) return error(staff, "Player not found: " + args[0]);
+        spectating.putIfAbsent(staff.getUniqueId(), new SpectateState(staff.getLocation().clone(), staff.getGameMode()));
+        staff.setGameMode(GameMode.SPECTATOR); staff.teleportAsync(target.getLocation()).thenRun(() -> staff.setSpectatorTarget(target));
+        audit(staff, "STAFF_SPECTATE_START", "PLAYER", target.getUniqueId().toString(), "target=" + target.getName() + " silent=true");
+        return success(staff, "Silently spectating " + target.getName() + ". Use /vsspectate stop to return.");
     }
 
     private boolean back(Player staff) {
@@ -337,8 +357,9 @@ public final class StaffUtilityCommand implements CommandExecutor, TabCompleter 
                 if (args.length == 1) suggestions.addAll(List.of("survival", "creative", "adventure", "spectator"));
                 else if (args.length == 2) addOnlinePlayers(suggestions);
             }
-            case "vstp", "vstphere", "vsheal" -> {
+            case "vstp", "vstphere", "vsheal", "vsspectate" -> {
                 if (args.length == 1) addOnlinePlayers(suggestions);
+                if (name.equals("vsspectate") && args.length == 1) suggestions.add("stop");
             }
             case "vsfly" -> {
                 if (args.length == 1) suggestions.addAll(List.of("on", "off"));

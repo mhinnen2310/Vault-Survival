@@ -74,6 +74,41 @@ public final class DistrictTreasuryServiceImpl implements DistrictTreasuryServic
     }
 
     @Override
+    public Result depositAmount(Player actor, UUID vaultUuid, long amount) {
+        TreasuryVault vault = getVault(vaultUuid);
+        Result access = validatePhysicalAccess(actor, vault);
+        if (!access.success()) return access;
+        if (amount <= 0) return Result.error("Deposit amount must be positive.");
+        List<ItemStack> cash = currency.withdrawCash(actor, amount);
+        long withdrawn = cash.stream().mapToLong(currency::getCashAmount).sum();
+        if (withdrawn != amount) {
+            currency.depositCash(actor, cash);
+            return Result.error("You do not have enough valid physical cash; nothing was deposited.");
+        }
+        try (Connection connection = plugin.getDatabase().getConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement update = connection.prepareStatement(
+                    "UPDATE cash_items SET state='IN_DISTRICT_TREASURY',location_type='DISTRICT_TREASURY_VAULT',location_id=?,owner_uuid=NULL,last_seen_at=datetime('now') WHERE cash_uuid=? AND state='ACTIVE' AND owner_uuid=?")) {
+                for (ItemStack item : cash) {
+                    update.setString(1, vaultUuid.toString());
+                    update.setString(2, currency.getCashUuid(item).toString());
+                    update.setString(3, actor.getUniqueId().toString());
+                    if (update.executeUpdate() != 1) throw new SQLException("Cash changed during deposit");
+                }
+                connection.commit();
+            } catch (SQLException failure) {
+                connection.rollback();
+                throw failure;
+            } finally { connection.setAutoCommit(true); }
+        } catch (SQLException failure) {
+            currency.depositCash(actor, cash);
+            return Result.error("Deposit failed; your physical cash was returned.");
+        }
+        audit(actor, "DISTRICT_TREASURY_DEPOSIT", vault.districtId(), vaultUuid, amount, vault);
+        return Result.ok("Deposited " + amount + " physical cash.", amount, vault);
+    }
+
+    @Override
     public Result depositAll(Player actor, UUID vaultUuid) {
         TreasuryVault vault = getVault(vaultUuid);
         Result access = validatePhysicalAccess(actor, vault);

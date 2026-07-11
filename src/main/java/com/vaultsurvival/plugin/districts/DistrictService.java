@@ -95,6 +95,8 @@ public interface DistrictService {
     /** MAYOR-only district chat style. */
     boolean setDistrictChatPrefix(DistrictData.District district, UUID actorUuid, String prefix);
     String getDistrictChatPrefix(DistrictData.District district);
+    boolean setDistrictChatPrefixColor(DistrictData.District district, UUID actorUuid, String color);
+    String getDistrictChatPrefixColor(DistrictData.District district);
     boolean setDistrictRoleColor(DistrictData.District district, UUID actorUuid, DistrictData.DistrictRole role, String color);
     String getDistrictRoleColor(DistrictData.District district, DistrictData.DistrictRole role);
 

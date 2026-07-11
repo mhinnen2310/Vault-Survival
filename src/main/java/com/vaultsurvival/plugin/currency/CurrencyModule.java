@@ -46,6 +46,7 @@ public class CurrencyModule extends Module {
 
         // Register admin command
         plugin.getCommand("cash").setExecutor(new CurrencyCommand(plugin));
+        plugin.getCommand("cashsplit").setExecutor(new CashSplitCommand(plugin, currencyService));
     }
 
     @Override

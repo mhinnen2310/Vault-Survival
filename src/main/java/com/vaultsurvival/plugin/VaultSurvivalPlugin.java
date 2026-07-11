@@ -290,7 +290,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(staffInspect, this);
         var staffUtility = new StaffUtilityCommand(this, staffmodeModule.getStaffData());
         for (String commandName : java.util.List.of("vstp", "vstphere", "vsback", "vsfly", "vsheal", "vsgamemode",
-            "vstime", "vsweather", "vsspeed", "vsbreaker")) {
+            "vstime", "vsweather", "vsspeed", "vsbreaker", "vsspectate")) {
             getCommand(commandName).setExecutor(staffUtility);
             getCommand(commandName).setTabCompleter(staffUtility);
         }

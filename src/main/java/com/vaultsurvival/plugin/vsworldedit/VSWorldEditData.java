@@ -3,6 +3,7 @@ package com.vaultsurvival.plugin.vsworldedit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.BlockState;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.block.TileState;
 
 import java.util.*;
@@ -57,10 +58,17 @@ public class VSWorldEditData {
      * Keeping the detached BlockState preserves signs, containers and other
      * tile-state data instead of reducing a structure to material names.
      */
-    public record SchematicPlacement(int x, int y, int z, BlockState templateState) {
-        public SchematicPlacement {
-            Objects.requireNonNull(templateState, "templateState");
+    public record SchematicPlacement(int x, int y, int z, BlockState templateState, BlockData blockData) {
+        public SchematicPlacement(int x, int y, int z, BlockState templateState) {
+            this(x, y, z, Objects.requireNonNull(templateState, "templateState"), templateState.getBlockData().clone());
         }
+        public SchematicPlacement(int x, int y, int z, BlockData blockData) {
+            this(x, y, z, null, Objects.requireNonNull(blockData, "blockData").clone());
+        }
+        public SchematicPlacement {
+            Objects.requireNonNull(blockData, "blockData");
+        }
+        public Material material() { return blockData.getMaterial(); }
     }
 
     /**
