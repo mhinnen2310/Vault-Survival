@@ -2,7 +2,7 @@
 # Vault Survival configuration
 # =============================================================================
 # Configuration version used by future migrations. Do not change manually.
-configVersion: 7
+configVersion: 8
 
 # Reload-safe settings can be applied with /vs reload. World, database, command,
 # schematic, and module lifecycle changes should be followed by a full restart.
@@ -271,6 +271,9 @@ breach:
 # 8. DISTRICTS, BLOCK CLAIMS, NPC PLANNING, DEVELOPMENT
 # -----------------------------------------------------------------------------
 districts:
+  founding:
+    # Draft petitions expire so abandoned names and invitations do not stay locked forever.
+    petitionExpiryDays: 7
   restrictedLand:
     # Mayors can define this many exact-block restricted areas per district.
     maxAreasPerDistrict: 8
@@ -316,6 +319,50 @@ districts:
     maxChangesPerDay: 5
   evidence:
     expireDays: 14
+
+# Independent facility progression. Every list is the physical treasury cost
+# for levels 1 through 5. Town Hall level 5 unlocks the Auction House.
+districtFacilities:
+  town_hall:
+    upgradeCosts: [5000, 15000, 40000, 90000, 180000]
+  market:
+    upgradeCosts: [5000, 15000, 40000, 90000, 180000]
+  station:
+    upgradeCosts: [7500, 20000, 50000, 110000, 220000]
+  jail:
+    upgradeCosts: [5000, 12500, 30000, 70000, 150000]
+  auction_house:
+    upgradeCosts: [25000, 60000, 125000, 250000, 500000]
+
+# Farmer role automation. All world/entity/inventory work runs on the Paper
+# main thread. Workers never load chunks; farms pause while their chunks or
+# output container are unloaded.
+districtFarms:
+  # FARMER, MAYOR and CO_MAYOR may define exact 3D farm cuboids inside their district.
+  # Each active worker NPC processes one output allowance per interval. Missing, removed,
+  # or moved-too-far NPCs produce nothing. Unloaded chunks are never force-loaded.
+  maxFarmsPerDistrict: 8
+  # One farm cuboid may cover at most this fraction of the district footprint.
+  maxPercentOfDistrict: 0.25
+  levels:
+    # Values correspond to farm levels 1 through 5.
+    maxWorkers: [1, 2, 3, 4, 6]
+    maxOutputPerWorkerInterval: [64, 128, 256, 384, 512]
+    # Paid from physical district treasury cash; index 1 is the already unlocked level 1.
+    upgradeCosts: [0, 10000, 30000, 75000, 150000]
+  worker:
+    # 1200 ticks = one minute. Lower values increase server load.
+    intervalTicks: 1200
+    maxDistanceFromFarmBlocks: 8
+    maxBlocksScannedPerInterval: 4096
+    defaultSkin: Farmer
+  outputChest:
+    # The selected chest/barrel must be this close to the farm cuboid.
+    # Full output containers safely pause harvesting/slaughter; items are not discarded.
+    maxDistanceBlocks: 16
+  animals:
+    # Workers never kill babies and preserve this many adults per species.
+    minimumAdultsPerSpecies: 4
 
 districtLaws:
   # Maximum simultaneous pending changes per district. Existing pending values can still be edited.

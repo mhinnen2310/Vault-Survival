@@ -30,6 +30,6 @@ public final class CashRecoveryJournal {
     }
 
     private static String encode(CashPaymentPlan plan) {
-        return plan.lines().stream().map(l -> l.slot()+":"+l.cashUuid()+":"+l.pdcAmount()+":"+l.databaseAmount()+":"+l.consumedAmount()+":"+l.splitAmount()+":"+l.changeCashUuid()).reduce((a,b)->a+","+b).orElse("");
+        return plan.lines().stream().map(l -> l.slot()+":"+l.cashUuid()+":"+l.pdcAmount()+":"+l.databaseAmount()+":"+l.consumedAmount()+":"+l.splitAmount()+":"+l.changeCashUuid()+":"+l.validatedState()).reduce((a,b)->a+","+b).orElse("");
     }
 }

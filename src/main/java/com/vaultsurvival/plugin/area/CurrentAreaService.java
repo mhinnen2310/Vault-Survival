@@ -195,6 +195,7 @@ public class CurrentAreaService {
             case TREASURER -> "TREASURER";
             case POLICE -> "POLICE";
             case MERCHANT -> "MERCHANT";
+            case FARMER -> "FARMER";
             case BUILDER, DIPLOMAT, WARDEN, MEMBER -> "MEMBER";
             case GUEST -> "GUEST";
             case VISITOR -> "VISITOR";

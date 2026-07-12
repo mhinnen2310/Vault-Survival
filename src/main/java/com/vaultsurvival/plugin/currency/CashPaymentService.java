@@ -22,12 +22,18 @@ public final class CashPaymentService {
 
     public CompletableFuture<CashPaymentPlan> plan(CashInventorySnapshot snapshot,long amount,String idempotencyKey,String destinationType,String destinationId){return coordinator.plan(snapshot,amount,idempotencyKey,destinationType,destinationId);}
     public CompletableFuture<CashTransactionResult> prepare(CashPaymentPlan plan){return coordinator.prepare(plan);}
+    public CompletableFuture<CashTransactionResult> executeStored(UUID actor,long amount,String idempotencyKey,String sourceState,String sourceType,String sourceId,String destinationType,String destinationId){return coordinator.planStored(actor,amount,idempotencyKey,sourceState,sourceType,sourceId,destinationType,destinationId).thenCompose(plan->coordinator.prepare(plan).thenCompose(prepared->prepared.replayed()?CompletableFuture.completedFuture(prepared):coordinator.commitLedger(plan)));}
+    public CompletableFuture<CashTransactionResult> executeDistrictTreasury(UUID actor,int districtId,long amount,String idempotencyKey,String destinationType,String destinationId){return coordinator.planDistrictTreasury(actor,districtId,amount,idempotencyKey,destinationType,destinationId).thenCompose(plan->coordinator.prepare(plan).thenCompose(prepared->prepared.replayed()?CompletableFuture.completedFuture(prepared):coordinator.commitLedger(plan)));}
+    public CompletableFuture<CashTransactionResult> executeDistrictTreasury(UUID actor,int districtId,long amount,String idempotencyKey,String destinationType,String destinationId,CashBusinessMutation business){return coordinator.planDistrictTreasury(actor,districtId,amount,idempotencyKey,destinationType,destinationId).thenCompose(plan->coordinator.prepare(plan).thenCompose(prepared->prepared.replayed()?CompletableFuture.completedFuture(prepared):coordinator.commitLedger(plan,business)));}
 
     /** Commit ledger off-thread, then revalidate and apply inventory on the main thread. */
     public CompletableFuture<CashTransactionResult> execute(Player player,CashPaymentPlan plan){
+        return execute(player,plan,(connection,ignored)->{});
+    }
+    public CompletableFuture<CashTransactionResult> execute(Player player,CashPaymentPlan plan,CashBusinessMutation business){
         if(!Bukkit.isPrimaryThread())return CompletableFuture.failedFuture(new IllegalStateException("execute must start on the Paper main thread"));
         CompletableFuture<CashTransactionResult> result=new CompletableFuture<>();
-        coordinator.prepare(plan).thenCompose(prepared->prepared.replayed()?CompletableFuture.completedFuture(prepared):coordinator.commitLedger(plan)).whenComplete((committed,failure)->{
+        coordinator.prepare(plan).thenCompose(prepared->prepared.replayed()?CompletableFuture.completedFuture(prepared):coordinator.commitLedger(plan,business)).whenComplete((committed,failure)->{
             if(failure!=null){result.completeExceptionally(failure);return;}
             if(committed.replayed()){result.complete(committed);return;}
             Bukkit.getScheduler().runTask(plugin,()->applyInventory(player,plan,result));

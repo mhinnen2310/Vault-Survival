@@ -84,10 +84,7 @@ public class EscrowServiceImpl implements EscrowService {
             plugin.getDatabase().executeUpdate(
                 "UPDATE contract_escrows SET status = 'RELEASED', released_at = ? WHERE contract_id = ? AND status = 'LOCKED'",
                 System.currentTimeMillis(), contractId);
-            if (payouts.storePayout(recipientUuid, amount, "CONTRACT", String.valueOf(contractId), details) < 0) {
-                plugin.getDatabase().executeUpdate("UPDATE contract_escrows SET status = 'LOCKED', released_at = NULL WHERE contract_id = ? AND status = 'RELEASED'", contractId);
-                return false;
-            }
+            payouts.storePayout(recipientUuid,amount,"CONTRACT",String.valueOf(contractId),details);
             plugin.getDatabase().executeUpdate(
                 "UPDATE cash_items SET state = 'SPENT', last_seen_at = datetime('now') WHERE location_type = 'CONTRACT_ESCROW' AND location_id = ?",
                 String.valueOf(contractId));
@@ -107,10 +104,7 @@ public class EscrowServiceImpl implements EscrowService {
             plugin.getDatabase().executeUpdate(
                 "UPDATE contract_escrows SET status = 'REFUNDED', released_at = ? WHERE contract_id = ? AND status = 'LOCKED'",
                 System.currentTimeMillis(), contractId);
-            if (payouts.storePayout(payerUuid, amount, "CONTRACT_REFUND", String.valueOf(contractId), details) < 0) {
-                plugin.getDatabase().executeUpdate("UPDATE contract_escrows SET status = 'LOCKED', released_at = NULL WHERE contract_id = ? AND status = 'REFUNDED'", contractId);
-                return false;
-            }
+            payouts.storePayout(payerUuid,amount,"CONTRACT_REFUND",String.valueOf(contractId),details);
             plugin.getDatabase().executeUpdate(
                 "UPDATE cash_items SET state = 'SPENT', last_seen_at = datetime('now') WHERE location_type = 'CONTRACT_ESCROW' AND location_id = ?",
                 String.valueOf(contractId));

@@ -24,7 +24,7 @@ public class DatabaseManager {
     private String dbUrl;
     private DatabaseExecutor executor;
     private int busyTimeoutMillis = 5000;
-    private static final long LATEST_MIGRATION = 2026071202L;
+    private static final long LATEST_MIGRATION = 2026071204L;
 
     public DatabaseManager(Logger logger, File dataFolder) {
         this.logger = logger;
@@ -954,17 +954,25 @@ public class DatabaseManager {
             ensureColumn(connection, "cash_items", "issued_by", "TEXT");
             ensureColumn(connection, "cash_items", "original_owner", "TEXT");
             ensureColumn(connection, "cash_items", "current_holder", "TEXT");
+            ensureColumn(connection, "districts", "founding_source", "TEXT");
+            ensureColumn(connection, "districts", "responsible_staff_uuid", "TEXT");
             statement.execute("UPDATE cash_items SET issued_by=COALESCE(issued_by,created_by),original_owner=COALESCE(original_owner,owner_uuid),current_holder=COALESCE(current_holder,owner_uuid)");
             statement.execute("CREATE TABLE IF NOT EXISTS cash_transaction_journal (id INTEGER PRIMARY KEY AUTOINCREMENT, transaction_uuid TEXT UNIQUE NOT NULL, idempotency_key TEXT UNIQUE NOT NULL, player_uuid TEXT NOT NULL, state TEXT NOT NULL, requested_amount INTEGER NOT NULL, change_amount INTEGER NOT NULL DEFAULT 0, destination_type TEXT NOT NULL, destination_id TEXT, plan_data TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, recovery_attempts INTEGER NOT NULL DEFAULT 0, failure_reason TEXT)");
             statement.execute("CREATE TABLE IF NOT EXISTS cash_transaction_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, transaction_uuid TEXT NOT NULL, cash_uuid TEXT NOT NULL, entry_type TEXT NOT NULL, amount INTEGER NOT NULL, source_location_type TEXT, source_location_id TEXT, destination_location_type TEXT, destination_location_id TEXT, created_at INTEGER NOT NULL, UNIQUE(transaction_uuid,cash_uuid,entry_type))");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_cash_journal_state_updated ON cash_transaction_journal(state,updated_at)");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_cash_current_holder_state ON cash_items(current_holder,state)");
+            statement.execute("CREATE TABLE IF NOT EXISTS cash_recovery_deliveries(id INTEGER PRIMARY KEY AUTOINCREMENT,transaction_uuid TEXT NOT NULL,cash_uuid TEXT NOT NULL,player_uuid TEXT NOT NULL,amount INTEGER NOT NULL,state TEXT NOT NULL DEFAULT 'PENDING',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,failure_reason TEXT,UNIQUE(transaction_uuid,cash_uuid))");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_cash_recovery_player_state ON cash_recovery_deliveries(player_uuid,state,created_at)");
             statement.execute("CREATE TABLE IF NOT EXISTS district_founding_petitions (id INTEGER PRIMARY KEY AUTOINCREMENT, petition_uuid TEXT UNIQUE NOT NULL, founder_uuid TEXT NOT NULL, district_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'DRAFT', claim_world TEXT, claim_min_x INTEGER, claim_min_z INTEGER, claim_max_x INTEGER, claim_max_z INTEGER, contract_uuid TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, submitted_at INTEGER, approved_at INTEGER, founding_source TEXT NOT NULL DEFAULT 'PLAYER_CLERK', responsible_staff_uuid TEXT, idempotency_key TEXT UNIQUE)");
             statement.execute("CREATE TABLE IF NOT EXISTS district_founding_participants (petition_uuid TEXT NOT NULL, player_uuid TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'MEMBER', status TEXT NOT NULL DEFAULT 'INVITED', invited_at INTEGER NOT NULL, responded_at INTEGER, PRIMARY KEY(petition_uuid,player_uuid))");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_founding_petition_status ON district_founding_petitions(status,expires_at)");
+            statement.execute("CREATE TABLE IF NOT EXISTS district_facility_levels(district_id INTEGER NOT NULL,facility_type TEXT NOT NULL,level INTEGER NOT NULL DEFAULT 0,updated_at INTEGER NOT NULL,updated_by TEXT,last_transaction_uuid TEXT,PRIMARY KEY(district_id,facility_type))");
+            statement.execute("CREATE TABLE IF NOT EXISTS district_farms(id INTEGER PRIMARY KEY AUTOINCREMENT,district_id INTEGER NOT NULL,name TEXT NOT NULL,farm_type TEXT NOT NULL,world TEXT NOT NULL,min_x INTEGER NOT NULL,min_y INTEGER NOT NULL,min_z INTEGER NOT NULL,max_x INTEGER NOT NULL,max_y INTEGER NOT NULL,max_z INTEGER NOT NULL,level INTEGER NOT NULL DEFAULT 1,output_world TEXT,output_x INTEGER,output_y INTEGER,output_z INTEGER,created_by TEXT NOT NULL,created_at INTEGER NOT NULL,UNIQUE(district_id,name))");
+            statement.execute("CREATE TABLE IF NOT EXISTS district_farm_workers(id INTEGER PRIMARY KEY AUTOINCREMENT,farm_id INTEGER NOT NULL,npc_id INTEGER NOT NULL,placed_by TEXT NOT NULL,placed_at INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'ACTIVE',total_output INTEGER NOT NULL DEFAULT 0,last_run_at INTEGER,UNIQUE(npc_id))");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_district_farms_district ON district_farms(district_id,farm_type)");
             statement.execute("UPDATE npcs SET action_type='TOWN_CLERK',action_data='DISTRICT:'||(SELECT district_id FROM district_npc_plans WHERE npc_id=npcs.id) WHERE id IN (SELECT npc_id FROM district_npc_plans WHERE npc_type='CLERK' AND npc_id IS NOT NULL)");
             try (PreparedStatement insert = connection.prepareStatement("INSERT INTO schema_migrations(version,name,applied_at) VALUES(?,?,?)")) {
-                insert.setLong(1, LATEST_MIGRATION); insert.setString(2, "atomic_cash_journal_and_executor_indexes"); insert.setLong(3, System.currentTimeMillis()); insert.executeUpdate();
+                insert.setLong(1, LATEST_MIGRATION); insert.setString(2, "district_founding_facilities_and_farms"); insert.setLong(3, System.currentTimeMillis()); insert.executeUpdate();
             }
             connection.commit();
         } catch (SQLException failure) {

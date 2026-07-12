@@ -60,6 +60,7 @@ public class DistrictData {
         CO_MAYOR,
         TREASURER,
         MERCHANT,
+        FARMER,
         POLICE,
         BUILDER,
         DIPLOMAT,
@@ -235,6 +236,7 @@ public class DistrictData {
                 case WARDEN -> 60;
                 case DIPLOMAT -> 55;
                 case MERCHANT -> 50;
+                case FARMER -> 48;
                 case BUILDER -> 45;
                 case MEMBER -> 20;
                 case GUEST -> 10;

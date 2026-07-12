@@ -14,6 +14,6 @@ public record CashPaymentPlan(UUID transactionUuid, String idempotencyKey, UUID 
         if (requestedAmount <= 0) throw new IllegalArgumentException("requestedAmount must be positive");
     }
     public record Line(int slot, UUID cashUuid, long pdcAmount, long databaseAmount,
-                       long consumedAmount, long splitAmount, UUID changeCashUuid, String validatedLocationType,
+                       long consumedAmount, long splitAmount, UUID changeCashUuid, CashItemData.CashState validatedState, String validatedLocationType,
                        String validatedLocationId) { }
 }

@@ -38,6 +38,7 @@ public final class RegionTypeStyleRegistry {
         put(RegionData.RegionType.BLACK_MARKET, 75, 15, 110, 1.35f);
         put(RegionData.RegionType.PROJECT_REGION, 255, 80, 190, 1.25f);
         put(RegionData.RegionType.TRAIN_INTERIOR, 145, 145, 145, 1.25f);
+        put(RegionData.RegionType.FARM_ZONE, 80, 220, 70, 1.25f);
         put(RegionData.RegionType.NO_BREACH_ZONE, 255, 65, 65, 1.3f);
         put(RegionData.RegionType.NO_CASH_DROP, 170, 45, 45, 1.3f);
         put(RegionData.RegionType.ROAD, 185, 185, 185, 1.15f);

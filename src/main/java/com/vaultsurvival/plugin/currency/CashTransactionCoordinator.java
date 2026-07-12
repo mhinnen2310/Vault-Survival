@@ -20,7 +20,7 @@ public final class CashTransactionCoordinator {
                 if(!"INVENTORY".equals(record.locationType()) || !snapshot.playerUuid().toString().equals(record.locationId())) throw new IllegalStateException("Stale physical cash location: "+entry.cashUuid());
                 long consumed=Math.min(remaining,record.amount()); if(consumed<=0) break; total+=record.amount();remaining-=consumed;
                 long split=record.amount()-consumed;
-                lines.add(new CashPaymentPlan.Line(entry.slot(),entry.cashUuid(),entry.pdcAmount(),record.amount(),consumed,split,split>0?UUID.randomUUID():null,record.locationType(),record.locationId()));
+                lines.add(new CashPaymentPlan.Line(entry.slot(),entry.cashUuid(),entry.pdcAmount(),record.amount(),consumed,split,split>0?UUID.randomUUID():null,record.state(),record.locationType(),record.locationId()));
             }
             if(remaining>0) throw new IllegalStateException("Not enough physical cash");
             long change=total-amount;
@@ -30,7 +30,10 @@ public final class CashTransactionCoordinator {
     }
 
     public CompletableFuture<CashTransactionResult> prepare(CashPaymentPlan plan) { return journal.prepare(plan); }
+    public CompletableFuture<CashPaymentPlan> planStored(UUID actor,long amount,String idempotencyKey,String sourceState,String sourceType,String sourceId,String destinationType,String destinationId){return ledger.planStored(actor,amount,idempotencyKey,sourceState,sourceType,sourceId,destinationType,destinationId);}
+    public CompletableFuture<CashPaymentPlan> planDistrictTreasury(UUID actor,int districtId,long amount,String idempotencyKey,String destinationType,String destinationId){return ledger.planDistrictTreasury(actor,districtId,amount,idempotencyKey,destinationType,destinationId);}
     public CompletableFuture<CashTransactionResult> commitLedger(CashPaymentPlan plan){return ledger.commit(plan);}
+    public CompletableFuture<CashTransactionResult> commitLedger(CashPaymentPlan plan,CashBusinessMutation business){return ledger.commit(plan,business);}
     public CompletableFuture<Void> inventoryApplied(CashPaymentPlan plan){return ledger.completeInventory(plan);}
-    public CompletableFuture<Void> recoveryRequired(CashPaymentPlan plan,String reason){return journal.transition(plan.transactionUuid(),CashTransactionState.LEDGER_COMMITTED,CashTransactionState.RECOVERY_REQUIRED,reason);}
+    public CompletableFuture<Void> recoveryRequired(CashPaymentPlan plan,String reason){return ledger.markRecovery(plan,reason);}
 }

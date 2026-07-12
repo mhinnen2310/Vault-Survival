@@ -51,10 +51,10 @@ public class DistrictServiceImpl implements DistrictService {
 
     @Override
     public DistrictData.District apply(Player founder, String name, DistrictData.BlockClaim claim) {
+        long minimum=plugin.getConfigManager().getConfig().getLong("districts.selection.requiredAreaBlocks",2500),maximum=plugin.getConfigManager().getDistrictInitialClaimBlocks();
         if (claim == null || !claim.worldName().equals(founder.getWorld().getName())
-            || claim.areaBlocks() != plugin.getConfigManager().getDistrictInitialClaimBlocks()) {
-            founder.sendMessage(fmt.error("District applications require exactly "
-                + plugin.getConfigManager().getDistrictInitialClaimBlocks() + " selected blocks of horizontal area."));
+            || claim.areaBlocks()<minimum || claim.areaBlocks()>maximum) {
+            founder.sendMessage(fmt.error("District applications require between "+minimum+" and "+maximum+" selected blocks of horizontal area."));
             return null;
         }
         if (districts.values().stream().anyMatch(d -> d.getFounderUuid().equals(founder.getUniqueId())
@@ -135,6 +135,12 @@ public class DistrictServiceImpl implements DistrictService {
             logger.log(Level.SEVERE, "Failed to create district application", e);
         }
         return null;
+    }
+
+    void registerFoundingApplication(int id,DistrictFoundingPetition petition){
+        DistrictData.BlockClaim claim=petition.claim();DistrictData.District district=new DistrictData.District(id,petition.districtName(),petition.founderUuid(),claim.worldName(),claim.centerBlockX(),claim.centerBlockZ());
+        for(var participant:petition.participants().values())if(participant.status()==DistrictFoundingPetition.ParticipantStatus.ACCEPTED)district.addMember(participant.playerUuid(),participant.playerUuid().equals(petition.founderUuid())?DistrictData.DistrictRole.MAYOR:DistrictData.DistrictRole.MEMBER);
+        districts.put(id,district);claims.put(id,claim);
     }
 
     @Override
@@ -734,7 +740,7 @@ public class DistrictServiceImpl implements DistrictService {
     public String getDistrictRoleColor(DistrictData.District district, DistrictData.DistrictRole role) {
         String fallback = role == null ? "&7" : switch (role) {
             case MAYOR -> "&6"; case CO_MAYOR -> "&e"; case TREASURER -> "&a"; case MERCHANT -> "&2";
-            case POLICE, WARDEN -> "&9"; case BUILDER -> "&b"; case DIPLOMAT -> "&d"; case GUEST -> "&7";
+            case FARMER -> "&a"; case POLICE, WARDEN -> "&9"; case BUILDER -> "&b"; case DIPLOMAT -> "&d"; case GUEST -> "&7";
             case MEMBER -> "&f"; case VISITOR -> "&7";
         };
         return getSetting(district, "chat.role." + (role == null ? "VISITOR" : role.name()), fallback);

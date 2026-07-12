@@ -30,6 +30,7 @@ public class RegionData {
         BLACK_MARKET,
         PROJECT_REGION,
         TRAIN_INTERIOR,
+        FARM_ZONE,
         SPAWN_PUBLIC,      // Spawn capital — safe, no PvP, no breach
         AUCTION_HALL,      // Auction Hall interior — market interaction allowed
         MINT,              // Mint building — cash minting allowed

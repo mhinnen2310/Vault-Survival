@@ -64,6 +64,11 @@ public final class DistrictSelectionService implements Listener {
         begin(player, name, false, null, plugin.getConfigManager().getDistrictInitialClaimBlocks());
     }
 
+    public void startFounding(UUID petitionUuid,String name,Player player){
+        if(districts.getPlayerDistrict(player.getUniqueId())!=null){player.sendMessage(fmt.error("You already belong to a district."));return;}
+        cancel(player,false);Selection selection=new Selection(name,player.getWorld().getName(),false,null,plugin.getConfigManager().getDistrictInitialClaimBlocks(),null,null,-1,false);selection.foundingPetitionUuid=petitionUuid;selections.put(player.getUniqueId(),selection);giveWand(player);player.sendMessage(fmt.success("Remote founding claim selection started for &e"+name+"&a."));player.sendMessage(fmt.info("Select two surface corners. The district extends from minimum to maximum world height. Then use &e/district confirm&7."));updateActionbar(player,selection);
+    }
+
     public void startExpansion(Player player) {
         DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
         if (district == null) { player.sendMessage(fmt.error("You are not in a district.")); return; }
@@ -129,6 +134,10 @@ public final class DistrictSelectionService implements Listener {
         startOwnedSelection(player, selection, "Restricted-land block selection started", "/district restricted confirm");
     }
 
+    public void startFarm(Player player,String farmName,DistrictFarmService.FarmType farmType){
+        DistrictData.District district=districts.getPlayerDistrict(player.getUniqueId());DistrictData.BlockClaim claim=district==null?null:districts.getClaim(district.getId());if(district==null||claim==null||!(district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.FARMER)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.MAYOR)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.CO_MAYOR))){player.sendMessage(fmt.error("Requires FARMER, MAYOR, or CO_MAYOR in a claimed district."));return;}long limit=Math.max(1,(long)Math.floor(claim.areaBlocks()*plugin.getConfigManager().getConfig().getDouble("districtFarms.maxPercentOfDistrict",0.25)));Selection selection=new Selection(farmName,claim.worldName(),false,null,limit,null,null,-1,false);selection.farmDistrict=district;selection.farmType=farmType;startOwnedSelection(player,selection,"Exact "+farmType.name().toLowerCase()+" farm cuboid selection started","/district farm confirm");
+    }
+
     public void startSpawnCityClaim(Player player) {
         if (!player.hasPermission("vaultsurvival.spawncity.admin")) { player.sendMessage(fmt.permissionDenied()); return; }
         cancel(player, false);
@@ -145,8 +154,8 @@ public final class DistrictSelectionService implements Listener {
         cancel(player, false);
         Selection selection = new Selection(name, player.getWorld().getName(), expansion, existing, limit, null, null, -1, false);
         if (existing != null) {
-            selection.pos1 = new BlockPoint(existing.minBlockX(), existing.minBlockZ());
-            selection.pos2 = new BlockPoint(existing.maxBlockX(), existing.maxBlockZ());
+            selection.pos1 = new BlockPoint(existing.minBlockX(), player.getWorld().getMinHeight(), existing.minBlockZ());
+            selection.pos2 = new BlockPoint(existing.maxBlockX(), player.getWorld().getMaxHeight()-1, existing.maxBlockZ());
         }
         selections.put(player.getUniqueId(), selection);
         giveWand(player);
@@ -181,20 +190,20 @@ public final class DistrictSelectionService implements Listener {
                     + (selection.existing.areaBlocks() + 1) + " and " + selection.limit + " blocks."));
                 return;
             }
-        } else if (!selection.isMarketZone() && !selection.isStationPlatform() && !selection.isRestrictedLand() && !selection.isSpawnCityClaim()
+        } else if (!selection.isMarketZone() && !selection.isStationPlatform() && !selection.isRestrictedLand() && !selection.isSpawnCityClaim() && !selection.isFarm()
             && (claim.areaBlocks() < plugin.getConfigManager().getConfig().getLong("districts.selection.requiredAreaBlocks", 2500)
                 || claim.areaBlocks() > selection.limit)) {
             long minimum = plugin.getConfigManager().getConfig().getLong("districts.selection.requiredAreaBlocks", 2500);
             player.sendMessage(fmt.error("A new district claim must contain between " + minimum + " and "
                 + selection.limit + " horizontal blocks."));
             return;
-        } else if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand() || selection.isSpawnCityClaim())
+        } else if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand() || selection.isSpawnCityClaim() || selection.isFarm())
             && claim.areaBlocks() > selection.limit) {
             player.sendMessage(fmt.error("The selected area is " + claim.areaBlocks() + " blocks; the maximum is " + selection.limit + "."));
             return;
         }
 
-        if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand())) {
+        if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand() || selection.isFarm())) {
             DistrictData.BlockClaim owner = districts.getClaim(selection.ownerDistrict().getId());
             if (owner == null || !owner.contains(claim)) {
                 player.sendMessage(fmt.error("Both corners and the complete selected rectangle must be inside your district claim."));
@@ -202,6 +211,13 @@ public final class DistrictSelectionService implements Listener {
             }
         }
 
+        if(selection.foundingPetitionUuid!=null){
+            plugin.getServiceRegistry().get(DistrictFoundingService.class).attachClaim(player,selection.foundingPetitionUuid,claim).whenComplete((petition,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(failure!=null){player.sendMessage(fmt.error(failure.getMessage()==null?"The founding claim could not be saved.":failure.getMessage()));return;}selections.remove(player.getUniqueId());removeWands(player);visualization.hide(player.getUniqueId());if(plugin.getServiceRegistry().has(DialogService.class))plugin.getServiceRegistry().get(TownClerkService.class).open(player,TownClerkContext.SPAWN_CITY,null);}));return;
+        }
+        if(selection.isFarm()){
+            var zone=new DistrictFarmService.FarmZone(selection.worldName,Math.min(selection.pos1.x,selection.pos2.x),Math.min(selection.pos1.y,selection.pos2.y),Math.min(selection.pos1.z,selection.pos2.z),Math.max(selection.pos1.x,selection.pos2.x),Math.max(selection.pos1.y,selection.pos2.y),Math.max(selection.pos1.z,selection.pos2.z));
+            plugin.getServiceRegistry().get(DistrictFarmService.class).create(player,selection.name,selection.farmType,zone).whenComplete((farm,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(failure!=null){player.sendMessage(fmt.error(failure.getMessage()==null?"Farm could not be saved.":failure.getMessage()));return;}selections.remove(player.getUniqueId());removeWands(player);visualization.hide(player.getUniqueId());player.sendMessage(fmt.success("Farm #"+farm.id+" created. Select its output container next."));}));return;
+        }
         boolean completed;
         if (selection.isSpawnCityClaim()) completed = setSpawnCityClaim(player, claim);
         else if (selection.isStationPlatform()) completed = setStationPlatform(player, selection.stationId, claim);
@@ -330,7 +346,7 @@ public final class DistrictSelectionService implements Listener {
         if (player.isSneaking()) {
             if (first) selection.pos1 = null; else selection.pos2 = null;
         } else {
-            BlockPoint point = new BlockPoint(event.getClickedBlock().getX(), event.getClickedBlock().getZ());
+            BlockPoint point = new BlockPoint(event.getClickedBlock().getX(), event.getClickedBlock().getY(), event.getClickedBlock().getZ());
             BlockPoint previous = first ? selection.pos1 : selection.pos2;
             if (first) selection.pos1 = point; else selection.pos2 = point;
             DistrictData.BlockClaim candidate = asRectangle(selection);
@@ -465,6 +481,7 @@ public final class DistrictSelectionService implements Listener {
 
     private void refreshSelection(Player player, Selection selection) {
         if (!selection.complete()) { visualization.hide(player.getUniqueId()); return; }
+        if(selection.isFarm()){visualization.showBounds(player,new RegionVisualizationSession.Bounds(player.getWorld(),Math.min(selection.pos1.x,selection.pos2.x),Math.min(selection.pos1.y,selection.pos2.y),Math.min(selection.pos1.z,selection.pos2.z),Math.max(selection.pos1.x,selection.pos2.x),Math.max(selection.pos1.y,selection.pos2.y),Math.max(selection.pos1.z,selection.pos2.z)),RegionData.RegionType.FARM_ZONE,selection.name,RegionVisualizationSession.Mode.WHILE_EDITING,false);return;}
         DistrictData.BlockClaim bounds = asRectangle(selection);
         if (plugin.getConfigManager().isDistrictSelectionOverlayEnabled())
             visualizeClaim(player, bounds, selectionType(selection), selection.name, RegionVisualizationSession.Mode.WHILE_EDITING);
@@ -476,6 +493,7 @@ public final class DistrictSelectionService implements Listener {
         if (selection.isStationPlatform()) return RegionData.RegionType.STATION_PLATFORM;
         if (selection.isMarketZone()) return RegionData.RegionType.DISTRICT_MARKET;
         if (selection.isRestrictedLand()) return RegionData.RegionType.CUSTOM;
+        if (selection.isFarm()) return RegionData.RegionType.FARM_ZONE;
         return RegionData.RegionType.DISTRICT;
     }
 
@@ -524,8 +542,8 @@ public final class DistrictSelectionService implements Listener {
             DialogMenuItem.item("Refresh", "Render this border again.", reopenCommand, null, Material.ENDER_EYE)));
     }
 
-    private record BlockPoint(int x, int z) {
-        @Override public String toString() { return x + "," + z; }
+    private record BlockPoint(int x, int y, int z) {
+        @Override public String toString() { return x + "," + y + "," + z; }
     }
 
     private static final class Selection {
@@ -539,6 +557,9 @@ public final class DistrictSelectionService implements Listener {
         private final int stationId;
         private final boolean spawnCityClaim;
         private DistrictData.District restrictedDistrict;
+        private UUID foundingPetitionUuid;
+        private DistrictData.District farmDistrict;
+        private DistrictFarmService.FarmType farmType;
         private BlockPoint pos1;
         private BlockPoint pos2;
         private long lastTouched = System.currentTimeMillis();
@@ -561,6 +582,7 @@ public final class DistrictSelectionService implements Listener {
         private boolean isStationPlatform() { return stationDistrict != null; }
         private boolean isSpawnCityClaim() { return spawnCityClaim; }
         private boolean isRestrictedLand() { return restrictedDistrict != null; }
-        private DistrictData.District ownerDistrict() { return marketDistrict != null ? marketDistrict : stationDistrict != null ? stationDistrict : restrictedDistrict; }
+        private boolean isFarm(){return farmDistrict!=null;}
+        private DistrictData.District ownerDistrict() { return marketDistrict != null ? marketDistrict : stationDistrict != null ? stationDistrict : restrictedDistrict!=null?restrictedDistrict:farmDistrict; }
     }
 }

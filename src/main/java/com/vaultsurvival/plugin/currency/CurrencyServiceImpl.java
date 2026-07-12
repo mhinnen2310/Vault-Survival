@@ -40,6 +40,7 @@ public class CurrencyServiceImpl implements CurrencyService {
     // Material used for physical cash items
     private final Material cashMaterial;
     private final int cashModelData;
+    private volatile CurrencyStats statsCache = new CurrencyStats(0,0,0,0,0,0,0,0,0);
 
     public CurrencyServiceImpl(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
@@ -242,16 +243,7 @@ public class CurrencyServiceImpl implements CurrencyService {
         CashState newState = "SPENT".equalsIgnoreCase(reason) ? CashState.SPENT : CashState.INVALIDATED;
 
         String sql = "UPDATE cash_items SET state = ?, last_seen_at = datetime('now') WHERE cash_uuid = ?";
-        try (Connection conn = db.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, newState.name());
-            ps.setObject(2, cashUuid);
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to invalidate cash: " + cashUuid, e);
-        }
-
-        audit.logCashInvalidate(null, "SYSTEM", cashUuid, reason);
+        db.write(connection->{try(PreparedStatement ps=connection.prepareStatement(sql)){ps.setString(1,newState.name());ps.setObject(2,cashUuid);if(ps.executeUpdate()!=1)throw new IllegalStateException("Cash UUID is missing or already changed: "+cashUuid);}return null;}).whenComplete((ignored,failure)->{if(failure!=null)logger.log(Level.WARNING,"Failed to invalidate cash: "+cashUuid,failure);else audit.logCashInvalidate(null,"SYSTEM",cashUuid,reason);});
     }
 
     private void clearCashPDC(ItemStack cashItem) {
@@ -368,33 +360,12 @@ public class CurrencyServiceImpl implements CurrencyService {
         String sql = "UPDATE cash_items SET owner_uuid = ?, location_type = 'INVENTORY', " +
                      "location_id = ?, last_seen_at = datetime('now'), state = 'ACTIVE' WHERE cash_uuid = ?";
 
-        try (Connection conn = db.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, toPlayer);
-            ps.setString(2, toPlayer.toString());
-            ps.setObject(3, cashUuid);
-            ps.executeUpdate();
-            return true;
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to transfer cash: " + cashUuid, e);
-            return false;
-        }
+        db.write(connection->{try(PreparedStatement ps=connection.prepareStatement(sql)){ps.setObject(1,toPlayer);ps.setString(2,toPlayer.toString());ps.setObject(3,cashUuid);if(ps.executeUpdate()!=1)throw new IllegalStateException("Cash changed during transfer");}return null;}).exceptionally(failure->{logger.log(Level.WARNING,"Failed to transfer cash: "+cashUuid,failure);return null;});return true;
     }
 
     @Override
     public long getPlayerCashTotal(UUID playerUuid) {
-        String sql = "SELECT IFNULL(SUM(amount), 0) FROM cash_items " +
-                     "WHERE owner_uuid = ? AND state = 'ACTIVE'";
-        try (Connection conn = db.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, playerUuid);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getLong(1);
-            }
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to get cash total for " + playerUuid, e);
-        }
-        return 0;
+        Player player=plugin.getServer().getPlayer(playerUuid);if(player==null)return 0;long total=0;for(ItemStack item:player.getInventory().getStorageContents())if(isCashItem(item))total=Math.addExact(total,Math.max(0,getAmountFromPDC(item)));return total;
     }
 
     @Override
@@ -477,6 +448,10 @@ public class CurrencyServiceImpl implements CurrencyService {
 
     @Override
     public CurrencyStats getStats() {
+        return statsCache;
+    }
+
+    public java.util.concurrent.CompletableFuture<CurrencyStats> refreshStatsAsync() {
         String sql = """
             SELECT
                 IFNULL(SUM(CASE WHEN state = 'ACTIVE' THEN amount ELSE 0 END), 0) AS circulating,
@@ -491,11 +466,9 @@ public class CurrencyServiceImpl implements CurrencyService {
             FROM cash_items
             """;
 
-        try (Connection conn = db.getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+        return db.read(conn->{try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
             if (rs.next()) {
-                return new CurrencyStats(
+                CurrencyStats stats=new CurrencyStats(
                     rs.getLong("circulating"),
                     rs.getLong("in_vaults"),
                     rs.getLong("in_escrow"),
@@ -505,13 +478,9 @@ public class CurrencyServiceImpl implements CurrencyService {
                     rs.getLong("spent"),
                     rs.getLong("invalidated"),
                     rs.getInt("active_count")
-                );
+                );statsCache=stats;return stats;
             }
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to get currency stats", e);
-        }
-
-        return new CurrencyStats(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }return statsCache;}).whenComplete((stats,failure)->{if(failure!=null)logger.log(Level.WARNING,"Failed to refresh currency stats",failure);});
     }
 
     // ========================================================================

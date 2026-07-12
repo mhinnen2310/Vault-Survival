@@ -109,6 +109,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             case "disband" -> handleDisband(sender);
             case "applications" -> handleApplications(sender);
             case "station" -> handleStation(sender, args);
+            case "farm", "farms" -> handleFarmRouter(sender,args);
             case "development", "projects", "project", "maintenance", "contributors" -> handleDevelopment(sender, args);
             default -> { sendUsage(sender); yield true; }
         };
@@ -118,6 +119,17 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
         if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
         return development.handle(player, args[0].toLowerCase(), args);
     }
+
+    private boolean handleFarmRouter(CommandSender sender,String[] args){
+        if(args.length<2||!args[1].equalsIgnoreCase("upgrade"))return handleFarm(sender,args);
+        if(!(sender instanceof Player player)){sender.sendMessage(fmt.error("Players only."));return true;}
+        DistrictFarmService farms=plugin.getServiceRegistry().get(DistrictFarmService.class);
+        try{if(args.length<3){player.sendMessage(fmt.error("Usage: /district farm upgrade <id>"));return true;}int id=Integer.parseInt(args[2]);var farm=farms.get(id);if(farm==null){openFarmDialog(player,farms,"Farm not found.");return true;}if(args.length<4||!args[3].equalsIgnoreCase("confirm")){plugin.getServiceRegistry().get(DialogService.class).openResult(player,"Confirm Farm Upgrade","Farm #"+id+" "+farm.name+"\nLevel "+farm.level+" -> "+(farm.level+1)+"\nPhysical treasury cost: "+farms.nextUpgradeCost(farm),List.of(DialogMenuItem.item("Confirm Upgrade","Debit the district treasury.","district farm upgrade "+id+" confirm",null,Material.EMERALD),DialogMenuItem.item("Cancel","Return without payment.","district farm list",null,Material.BARRIER)));return true;}farms.upgrade(player,id).whenComplete((upgraded,failure)->Bukkit.getScheduler().runTask(plugin,()->openFarmDialog(player,farms,failure==null?"Farm #"+id+" upgraded to level "+upgraded.level+".":"Farm upgrade failed: "+rootMessage(failure))));}catch(RuntimeException failure){openFarmDialog(player,farms,"Farm upgrade failed: "+rootMessage(failure));}return true;
+    }
+
+    private boolean handleFarm(CommandSender sender,String[] args){if(!(sender instanceof Player player)){sender.sendMessage(fmt.error("Players only."));return true;}DistrictFarmService farms=plugin.getServiceRegistry().get(DistrictFarmService.class);if(args.length<2){openFarmDialog(player,farms,"Choose a farm action.");return true;}String sub=args[1].toLowerCase(Locale.ROOT);try{if(sub.equals("create")){if(args.length<4){player.sendMessage(fmt.error("Usage: /district farm create <crops|animals> <name>"));return true;}DistrictFarmService.FarmType type=DistrictFarmService.FarmType.valueOf(args[2].toUpperCase(Locale.ROOT));selection.startFarm(player,String.join(" ",Arrays.copyOfRange(args,3,args.length)),type);return true;}if(sub.equals("confirm")){selection.confirm(player);return true;}if(sub.equals("cancel")){selection.cancel(player);return true;}if(sub.equals("output")){if(args.length<3){player.sendMessage(fmt.error("Usage: /district farm output <id> while looking at a container"));return true;}Block block=player.getTargetBlockExact(6);if(block==null){player.sendMessage(fmt.error("Look at the output chest or barrel."));return true;}int id=Integer.parseInt(args[2]);farms.setOutput(player,id,block).whenComplete((farm,failure)->Bukkit.getScheduler().runTask(plugin,()->openFarmDialog(player,farms,failure==null?"Output container linked to farm #"+farm.id+".":"Output link failed: "+rootMessage(failure))));return true;}if(sub.equals("worker")){if(args.length<3){player.sendMessage(fmt.error("Usage: /district farm worker <id> [skin]"));return true;}int id=Integer.parseInt(args[2]);String skin=args.length>3?args[3]:plugin.getConfigManager().getConfig().getString("districtFarms.worker.defaultSkin","Farmer");farms.placeWorker(player,id,player.getLocation(),skin).whenComplete((npc,failure)->Bukkit.getScheduler().runTask(plugin,()->openFarmDialog(player,farms,failure==null?"Farm worker NPC #"+npc+" placed.":"Worker placement failed: "+rootMessage(failure))));return true;}openFarmDialog(player,farms,"Unknown farm action.");}catch(RuntimeException failure){openFarmDialog(player,farms,"Farm action failed: "+rootMessage(failure));}return true;}
+    private void openFarmDialog(Player player,DistrictFarmService farms,String status){DistrictData.District district=districtService.getPlayerDistrict(player.getUniqueId());List<DialogMenuItem> items=new ArrayList<>();if(district!=null)for(var farm:farms.farms(district.getId())){items.add(DialogMenuItem.status("#"+farm.id+" "+farm.name,"Type "+farm.type+" | level "+farm.level+" | workers "+farm.workerNpcIds.size(),farm.hasOutput()?"Output chest configured":"Output chest missing",farm.type==DistrictFarmService.FarmType.CROPS?Material.WHEAT:Material.COW_SPAWN_EGG));items.add(DialogMenuItem.item("Set Output #"+farm.id,"Look at a chest/barrel within configured distance first.","district farm output "+farm.id,null,Material.CHEST));items.add(DialogMenuItem.item("Place Worker #"+farm.id,"Place a level-limited worker at your current location.","district farm worker "+farm.id,null,Material.VILLAGER_SPAWN_EGG));}items.add(DialogMenuItem.item("Create Crop Farm","Select an exact crop farm cuboid.","vsmenu input district_farm_crop",null,Material.WHEAT));items.add(DialogMenuItem.item("Create Animal Farm","Select an exact animal farm cuboid.","vsmenu input district_farm_animal",null,Material.COW_SPAWN_EGG));items.add(DialogMenuItem.item("Back to Town Clerk","Return to district settings.","vsmenu action district_town_clerk",null,Material.LECTERN));items.add(DialogMenuItem.item("Close","Close.","vsmenu close",null,Material.BARRIER));plugin.getServiceRegistry().get(DialogService.class).openResult(player,"District Farms",status,items);}
+    private static String rootMessage(Throwable failure){Throwable current=failure;while(current.getCause()!=null)current=current.getCause();return current.getMessage()==null?current.getClass().getSimpleName():current.getMessage();}
 
     private boolean handleRestrictedLand(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Players only.")); return true; }
@@ -166,12 +178,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(fmt.error("Only players can apply for a district."));
             return true;
         }
-        if (args.length < 2) {
-            sender.sendMessage(fmt.error("Usage: /district apply <name>"));
-            return true;
-        }
-        String name = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
-        selection.start(name, player);
+        plugin.getServiceRegistry().get(TownClerkService.class).open(player,TownClerkContext.SPAWN_CITY,null);
+        sender.sendMessage(fmt.info("Player district founding now runs through the Spawn City Town Clerk."));
         return true;
     }
 
@@ -1049,7 +1057,7 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         if (args.length == 1) {
             return Arrays.asList("apply", "confirm", "cancel", "selection", "blocks", "expand", "borders", "marketzone", "restricted", "teleport", "npcs", "message", "chat", "current", "approve", "reject", "info", "invite", "kick",
-                "role", "permissions", "members", "stats", "level", "home", "sethome", "treasury", "laws", "law", "jobs", "job", "list", "disband", "applications", "station")
+                "role", "permissions", "members", "stats", "level", "home", "sethome", "treasury", "laws", "law", "jobs", "job", "list", "disband", "applications", "station", "farm")
                 .stream().filter(a -> a.startsWith(args[0].toLowerCase())).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("job")) {
@@ -1066,6 +1074,8 @@ public class DistrictCommand implements CommandExecutor, TabCompleter {
             if (sender.hasPermission("vs.district.law.force") || sender.hasPermission("vs.district.admin")) options.add("force-activate-all");
             return options.stream().filter(a -> a.startsWith(args[1].toLowerCase())).toList();
         }
+        if(args.length==2&&args[0].equalsIgnoreCase("farm"))return List.of("create","confirm","cancel","list","output","worker","upgrade").stream().filter(a->a.startsWith(args[1].toLowerCase())).toList();
+        if(args.length==3&&args[0].equalsIgnoreCase("farm")&&args[1].equalsIgnoreCase("create"))return List.of("crops","animals").stream().filter(a->a.startsWith(args[2].toLowerCase())).toList();
         if (args.length == 3 && args[0].equalsIgnoreCase("law") && args[1].equalsIgnoreCase("propose")) {
             return Arrays.stream(DistrictData.LawKey.values())
                 .map(Enum::name).filter(r -> r.startsWith(args[2].toUpperCase())).toList();
