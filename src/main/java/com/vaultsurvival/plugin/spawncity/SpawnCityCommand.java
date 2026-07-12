@@ -5,6 +5,12 @@ import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditData;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditService;
 import com.vaultsurvival.plugin.districts.DistrictSelectionService;
+import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
+import com.vaultsurvival.plugin.dialogs.DialogService;
+import com.vaultsurvival.plugin.regions.RegionData;
+import com.vaultsurvival.plugin.regions.RegionVisualizationService;
+import com.vaultsurvival.plugin.regions.RegionVisualizationSession;
+import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -41,9 +47,9 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
             case "setname" -> handleSetName(sender, args);
             case "setspawn" -> handleSetSpawn(sender);
             case "teleport" -> handleTeleport(sender);
-            case "setcapitalregion" -> handleSetRegion(sender, "capital");
-            case "setauctionhallregion" -> handleSetRegion(sender, "auction_hall");
-            case "setmintregion" -> handleSetRegion(sender, "mint");
+            case "setcapitalregion" -> handleSetRegion(sender, "capital", args);
+            case "setauctionhallregion" -> handleSetRegion(sender, "auction_hall", args);
+            case "setmintregion" -> handleSetRegion(sender, "mint", args);
             case "regions" -> handleRegions(sender);
             case "claim" -> handleClaim(sender, args);
             case "message" -> handleMessage(sender, args);
@@ -73,6 +79,7 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
         if (args.length < 2) { sender.sendMessage(fmt.error("/spawncity setname <name>")); return true; }
         String name = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
         service.setCityName(name);
+        audit(sender, "SPAWN_CITY_RENAME", "city", "name=" + name);
         sender.sendMessage(fmt.success("City name set to: &e" + name));
         return true;
     }
@@ -85,6 +92,7 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(fmt.error("Only players can set spawn.")); return true;
         }
         service.setSpawnLocation(player.getLocation());
+        audit(player, "SPAWN_CITY_SET_SPAWN", player.getWorld().getName(), "x=" + player.getX() + " y=" + player.getY() + " z=" + player.getZ());
         player.sendMessage(fmt.success("Spawn set for " + service.getCityName() + "."));
         return true;
     }
@@ -97,7 +105,7 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private boolean handleSetRegion(CommandSender sender, String type) {
+    private boolean handleSetRegion(CommandSender sender, String type, String[] args) {
         if (!sender.hasPermission("vaultsurvival.spawncity.admin")) {
             sender.sendMessage(fmt.permissionDenied()); return true;
         }
@@ -113,17 +121,42 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
 
         String label = type.replace("_", " ");
         boolean wasOverwrite = service.hasRegion(type);
+        if (wasOverwrite && (args.length < 2 || !args[1].equalsIgnoreCase("confirm"))) {
+            if (plugin.getServiceRegistry().has(DialogService.class)) {
+                plugin.getServiceRegistry().get(DialogService.class).openConfirmation(player,
+                    "Replace " + label + " region", "This replaces the existing saved Spawn City " + label + " bounds.",
+                    "spawncity set" + type.replace("_", "") + "region confirm", "spawncity");
+            } else player.sendMessage(fmt.error("Dangerous action: repeat the command with confirm."));
+            return true;
+        }
         switch (type) {
             case "capital" -> service.setCapitalRegion(sel);
             case "auction_hall" -> service.setAuctionHallRegion(sel);
             case "mint" -> service.setMintRegion(sel);
         }
-
-        player.sendMessage(fmt.success(service.getCityName() + " " + label + " region " +
-            (wasOverwrite ? "updated!" : "saved!")));
-        player.sendMessage(fmt.info("&7" + sel.getWidth() + "x" + sel.getHeight() + "x" + sel.getDepth() +
-            " &8(" + sel.getVolume() + " blocks)"));
+        audit(player, "SPAWN_CITY_REGION_" + (wasOverwrite ? "REPLACE" : "CREATE"), type,
+            "world=" + sel.getWorldName() + " volume=" + sel.getVolume());
+        RegionData.RegionType visualType = switch (type) {
+            case "auction_hall" -> RegionData.RegionType.AUCTION_HALL;
+            case "mint" -> RegionData.RegionType.MINT;
+            default -> RegionData.RegionType.TOWN_HALL;
+        };
+        plugin.getServiceRegistry().get(RegionVisualizationService.class).showBounds(player,
+            new RegionVisualizationSession.Bounds(player.getWorld(), sel.getX1(), sel.getY1(), sel.getZ1(), sel.getX2(), sel.getY2(), sel.getZ2()),
+            visualType, service.getCityName() + " " + label, RegionVisualizationSession.Mode.THIRTY_SECONDS, false);
+        if (plugin.getServiceRegistry().has(DialogService.class)) {
+            plugin.getServiceRegistry().get(DialogService.class).openResult(player, "Spawn City Region Saved",
+                service.getCityName() + " " + label + " was " + (wasOverwrite ? "replaced" : "saved") + ".\n"
+                    + sel.getWidth() + " x " + sel.getHeight() + " x " + sel.getDepth() + " (" + sel.getVolume() + " blocks)",
+                List.of(DialogMenuItem.adminItem("Return to Spawn City", "Open Spawn City administration.", "vsmenu spawncity", "vaultsurvival.spawncity.admin", Material.ARROW),
+                    DialogMenuItem.adminItem("Hide Borders", "Stop the saved-region preview.", "vwe hide", "vaultsurvival.vwe.use", Material.INK_SAC)));
+        } else player.sendMessage(fmt.success(service.getCityName() + " " + label + " region saved."));
         return true;
+    }
+
+    private void audit(CommandSender sender, String action, String target, String details) {
+        if (sender instanceof Player player) plugin.getAuditLogger().logAdminAction(player.getUniqueId(), player.getName(), action, target, details);
+        else plugin.getAuditLogger().logAdminAction(null, sender.getName(), action, target, details);
     }
 
     private boolean handleRegions(CommandSender sender) {
@@ -153,7 +186,7 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleClaim(CommandSender sender, String[] args) {
         if (!sender.hasPermission("vaultsurvival.spawncity.admin")) { sender.sendMessage(fmt.permissionDenied()); return true; }
-        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Only players can claim Spawn City chunks.")); return true; }
+        if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Only players can select Spawn City's exact block border.")); return true; }
         DistrictSelectionService selection = plugin.getServiceRegistry().get(DistrictSelectionService.class);
         if (args.length >= 2 && args[1].equalsIgnoreCase("confirm")) selection.confirm(player);
         else if (args.length >= 2 && args[1].equalsIgnoreCase("cancel")) selection.cancel(player);
@@ -184,7 +217,7 @@ public class SpawnCityCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(fmt.info("/spawncity setcapitalregion &8- Save /vwe selection as capital"));
             sender.sendMessage(fmt.info("/spawncity setauctionhallregion &8- Save /vwe selection as AH"));
             sender.sendMessage(fmt.info("/spawncity setmintregion &8- Save /vwe selection as Mint"));
-            sender.sendMessage(fmt.info("/spawncity claim [confirm|cancel] &8- Claim Spawn City chunks"));
+            sender.sendMessage(fmt.info("/spawncity claim [confirm|cancel] &8- Select Spawn City's exact block border"));
             sender.sendMessage(fmt.info("/spawncity message <welcome|leave> <text> &8- Set area messages"));
         }
         sender.sendMessage(fmt.info("/spawncity regions &8- List all saved regions"));

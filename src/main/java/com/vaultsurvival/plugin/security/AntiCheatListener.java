@@ -96,7 +96,7 @@ public final class AntiCheatListener implements Listener {
 
     private void flag(Player player, String check, double score, String details) {
         try {
-            plugin.getDatabase().executeUpdate("INSERT INTO anticheat_flags (player_uuid,check_type,score,details,created_at) VALUES (?,?,?,?,?)",
+            plugin.getDatabase().executeUpdateAsync("INSERT INTO anticheat_flags (player_uuid,check_type,score,details,created_at) VALUES (?,?,?,?,?)",
                 player.getUniqueId().toString(), check, score, details, System.currentTimeMillis());
             plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "ANTICHEAT_FLAG", "PLAYER", player.getUniqueId().toString(), check + " score=" + score + " " + details);
             double minimum = plugin.getConfigManager().getConfig().getDouble("security.anticheat.liveAlertMinimumScore", 1);

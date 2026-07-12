@@ -293,3 +293,9 @@ CustomPlugin/src/main/java/com/vaultsurvival/plugin/
 | `repair_states` | 8 | Repair points |
 | `crime_log`, `wanted_players`, `jail_locations` | 9 | Crime & Police |
 | `display_slots` | 10 | Display slots |
+# 1.0.30
+
+- Added physical, claim-bound district treasury vaults with live balances, local cash deposit/withdrawal, role checks, auditing, and legacy migration tooling.
+- Disabled remote district treasury banking and concealed vault coordinates from list output.
+- Added audited staffmode-only teleport, summon, return, fly, heal, and gamemode utilities.
+- Added structured dialog results, validation, refresh, pagination, in-dialog law/job lists, and job creation result dialogs.

@@ -218,7 +218,7 @@ public class DistrictJobServiceImpl implements DistrictJobService {
         long remaining = amount;
         try (Connection conn = plugin.getDatabase().getConnection()) {
             conn.setAutoCommit(false);
-            try (PreparedStatement ps = conn.prepareStatement("SELECT cash_uuid, amount FROM cash_items WHERE state='IN_DISTRICT_TREASURY' AND location_id=? ORDER BY amount ASC")) {
+            try (PreparedStatement ps = conn.prepareStatement("SELECT c.cash_uuid,c.amount FROM cash_items c JOIN district_treasury_vaults v ON v.vault_uuid=c.location_id WHERE c.state='IN_DISTRICT_TREASURY' AND c.location_type='DISTRICT_TREASURY_VAULT' AND v.district_id=? ORDER BY c.amount ASC")) {
                 ps.setString(1, String.valueOf(districtId));
                 ResultSet rs = ps.executeQuery();
                 while (rs.next() && remaining > 0) {
@@ -232,6 +232,17 @@ public class DistrictJobServiceImpl implements DistrictJobService {
                             ins.setInt(1, -jobId); ins.setString(2, cashUuid); ins.setLong(3, cashAmount); ins.setString(4, String.valueOf(districtId)); ins.setString(5, actor.toString()); ins.setLong(6, System.currentTimeMillis()); ins.executeUpdate();
                         }
                         remaining -= cashAmount;
+                    } else {
+                        String escrowUuid = UUID.randomUUID().toString();
+                        try (PreparedStatement reduce = conn.prepareStatement("UPDATE cash_items SET amount=amount-?,last_seen_at=datetime('now') WHERE cash_uuid=? AND amount>=?");
+                             PreparedStatement split = conn.prepareStatement("INSERT INTO cash_items(cash_uuid,amount,state,location_type,location_id,owner_uuid,created_by) VALUES(?,?,'IN_CONTRACT_ESCROW','CONTRACT_ESCROW',?,NULL,?)");
+                             PreparedStatement ins = conn.prepareStatement("INSERT INTO contract_escrows(contract_id,cash_uuid,amount,source_type,source_id,status,locked_by,locked_at) VALUES(?,?,?,'DISTRICT_TREASURY',?,'LOCKED',?,?)")) {
+                            reduce.setLong(1, remaining); reduce.setString(2, cashUuid); reduce.setLong(3, remaining);
+                            if (reduce.executeUpdate() != 1) throw new SQLException("Treasury cash changed concurrently");
+                            split.setString(1, escrowUuid); split.setLong(2, remaining); split.setString(3, String.valueOf(-jobId)); split.setString(4, actor.toString()); split.executeUpdate();
+                            ins.setInt(1, -jobId); ins.setString(2, escrowUuid); ins.setLong(3, remaining); ins.setString(4, String.valueOf(districtId)); ins.setString(5, actor.toString()); ins.setLong(6, System.currentTimeMillis()); ins.executeUpdate();
+                            remaining = 0;
+                        }
                     }
                 }
                 if (remaining > 0) { conn.rollback(); return false; }

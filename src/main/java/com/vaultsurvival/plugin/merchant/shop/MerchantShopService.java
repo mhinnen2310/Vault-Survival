@@ -24,6 +24,7 @@ public interface MerchantShopService {
      * Set or update the price for a shop slot.
      */
     boolean setPrice(Player merchant, int shopId, int slot, long price);
+    boolean setPriceSilently(Player merchant, int shopId, int slot, long price);
 
     /**
      * Remove stock from a shop slot and return items to the merchant.
@@ -70,6 +71,11 @@ public interface MerchantShopService {
      * Open the shop GUI for a player interacting with a merchant shop NPC.
      */
     void openShopGui(Player player, int npcId);
+    void openCustomerShop(Player player, int shopId);
+    void beginShopEdit(Player merchant);
+    void openShopEditor(Player merchant, int shopId);
+    boolean depositEditorStack(Player merchant, int shopId, int slot, ItemStack stack);
+    ItemStack itemStack(MerchantShopData.ShopItem item);
 
     /**
      * Load all shops from database.

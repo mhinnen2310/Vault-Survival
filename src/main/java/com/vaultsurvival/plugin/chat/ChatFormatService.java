@@ -48,7 +48,8 @@ public class ChatFormatService {
             if (district == null || district.getName() == null || district.getName().isBlank()) {
                 return noDistrict;
             }
-            return config.getDistrictLabelFormat().replace("%district%", districtService.getDistrictChatPrefix(district));
+            return districtService.getDistrictChatPrefixColor(district)
+                + config.getDistrictLabelFormat().replace("%district%", districtService.getDistrictChatPrefix(district));
         } catch (RuntimeException ignored) {
             return noDistrict;
         }

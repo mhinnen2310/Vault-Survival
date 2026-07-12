@@ -2,14 +2,16 @@ package com.vaultsurvival.plugin.districts;
 
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
-import com.vaultsurvival.plugin.regions.RegionData;
-import com.vaultsurvival.plugin.regions.RegionService;
+import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
+import com.vaultsurvival.plugin.dialogs.DialogService;
 import com.vaultsurvival.plugin.rail.RailService;
 import com.vaultsurvival.plugin.rail.RailServiceImpl;
+import com.vaultsurvival.plugin.regions.RegionData;
+import com.vaultsurvival.plugin.regions.RegionService;
+import com.vaultsurvival.plugin.regions.RegionVisualizationService;
+import com.vaultsurvival.plugin.regions.RegionVisualizationSession;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
-import org.bukkit.Color;
-import org.bukkit.Chunk;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
@@ -19,12 +21,12 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerKickEvent;
-import org.bukkit.event.player.PlayerChangedWorldEvent;
-import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -32,17 +34,17 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.Comparator;
-import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Chunk-only district claim selection with a server-side particle boundary overlay. */
+/** Exact-block district and district-owned subregion selection. */
 public final class DistrictSelectionService implements Listener {
     private final VaultSurvivalPlugin plugin;
     private final DistrictService districts;
     private final MessageFormatter fmt;
     private final NamespacedKey wandKey;
+    private final RegionVisualizationService visualization;
     private final Map<UUID, Selection> selections = new ConcurrentHashMap<>();
     private BukkitTask overlayTask;
 
@@ -51,6 +53,7 @@ public final class DistrictSelectionService implements Listener {
         this.districts = districts;
         this.fmt = plugin.getMessageFormatter();
         this.wandKey = new NamespacedKey(plugin, "district_selection_wand");
+        this.visualization = plugin.getServiceRegistry().get(RegionVisualizationService.class);
     }
 
     public void start(String name, Player player) {
@@ -58,27 +61,26 @@ public final class DistrictSelectionService implements Listener {
             player.sendMessage(fmt.error("You are already in a district. Use /district expand after your district levels up."));
             return;
         }
-        begin(player, name, false, null, plugin.getConfigManager().getDistrictInitialClaimChunks());
+        begin(player, name, false, null, plugin.getConfigManager().getDistrictInitialClaimBlocks());
+    }
+
+    public void startFounding(UUID petitionUuid,String name,Player player){
+        if(districts.getPlayerDistrict(player.getUniqueId())!=null){player.sendMessage(fmt.error("You already belong to a district."));return;}
+        cancel(player,false);Selection selection=new Selection(name,player.getWorld().getName(),false,null,plugin.getConfigManager().getDistrictInitialClaimBlocks(),null,null,-1,false);selection.foundingPetitionUuid=petitionUuid;selections.put(player.getUniqueId(),selection);giveWand(player);player.sendMessage(fmt.success("Remote founding claim selection started for &e"+name+"&a."));player.sendMessage(fmt.info("Select two surface corners. The district extends from minimum to maximum world height. Then use &e/district confirm&7."));updateActionbar(player,selection);
     }
 
     public void startExpansion(Player player) {
         DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
-        if (district == null) {
-            player.sendMessage(fmt.error("You are not in a district."));
-            return;
-        }
+        if (district == null) { player.sendMessage(fmt.error("You are not in a district.")); return; }
         if (!districts.canManageDevelopment(player.getUniqueId(), district)) {
             player.sendMessage(fmt.error("Requires MAYOR, CO_MAYOR, or BUILDER."));
             return;
         }
-        DistrictData.ChunkClaim claim = districts.getClaim(district.getId());
-        if (claim == null) {
-            player.sendMessage(fmt.error("This legacy district must be migrated by staff before it can expand."));
-            return;
-        }
-        int limit = districts.getClaimChunkLimit(district);
-        if (claim.chunkCount() >= limit) {
-            player.sendMessage(fmt.info("Your district already uses its level-based claim limit of &e" + limit + " chunks."));
+        DistrictData.BlockClaim claim = districts.getClaim(district.getId());
+        if (claim == null) { player.sendMessage(fmt.error("This legacy district must be migrated by staff before it can expand.")); return; }
+        long limit = districts.getClaimBlockLimit(district);
+        if (claim.areaBlocks() >= limit) {
+            player.sendMessage(fmt.info("Your district already uses its level-based limit of &e" + limit + " blocks&7."));
             return;
         }
         begin(player, district.getName(), true, claim, limit);
@@ -86,33 +88,21 @@ public final class DistrictSelectionService implements Listener {
 
     public void startMarketZone(Player player) {
         DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
-        if (district == null) {
-            player.sendMessage(fmt.error("You must be in a district to select a market zone."));
+        if (district == null || !districts.canCreateMerchantNpc(player.getUniqueId(), district)) {
+            player.sendMessage(fmt.error("Requires a district and the MERCHANT, CO_MAYOR, or MAYOR role."));
             return;
         }
-        if (!districts.canCreateMerchantNpc(player.getUniqueId(), district)) {
-            player.sendMessage(fmt.error("Requires the MERCHANT, CO_MAYOR, or MAYOR district role."));
-            return;
-        }
-        DistrictData.ChunkClaim claim = districts.getClaim(district.getId());
-        if (claim == null) {
-            player.sendMessage(fmt.error("This legacy district has no chunk claim yet."));
-            return;
-        }
-        int limit = Math.max(1, Math.min(claim.chunkCount(), (int) Math.ceil(claim.chunkCount()
-            * plugin.getConfigManager().getConfig().getDouble("districts.marketZone.maxPercentOfDistrict", 0.40))));
-        cancel(player, false);
-        Selection selection = new Selection(district.getName(), claim.worldName(), false, null, limit, district);
-        selections.put(player.getUniqueId(), selection);
-        giveWand(player);
-        player.sendMessage(fmt.success("Market-zone selection started for &e" + district.getName() + "&a."));
-        player.sendMessage(fmt.info("Select up to &e" + limit + " chunks&7 inside your district, then use &e/district marketzone confirm&7."));
-        updateActionbar(player, selection);
+        DistrictData.BlockClaim claim = districts.getClaim(district.getId());
+        if (claim == null) { player.sendMessage(fmt.error("This legacy district has no block claim yet.")); return; }
+        long limit = Math.max(1L, (long) Math.floor(claim.areaBlocks()
+            * plugin.getConfigManager().getConfig().getDouble("districts.marketZone.maxPercentOfDistrict", 0.40)));
+        startOwnedSelection(player, new Selection(district.getName(), claim.worldName(), false, null, limit, district, null, -1, false),
+            "Market-zone block selection started", "/district marketzone confirm");
     }
 
     public void startStationPlatform(Player player, int stationId) {
         DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
-        DistrictData.ChunkClaim claim = district == null ? null : districts.getClaim(district.getId());
+        DistrictData.BlockClaim claim = district == null ? null : districts.getClaim(district.getId());
         if (district == null || claim == null || !districts.canRequestStation(player.getUniqueId(), district)) {
             player.sendMessage(fmt.error("Requires a claimed district and MAYOR, CO_MAYOR, or DIPLOMAT role."));
             return;
@@ -120,98 +110,143 @@ public final class DistrictSelectionService implements Listener {
         try {
             RailService rail = plugin.getServiceRegistry().get(RailService.class);
             var station = rail.getStation(stationId);
-            if (station == null || station.getDistrictId() != district.getId() || !station.getRequesterUuid().equals(player.getUniqueId())) {
+            if (station == null || station.getDistrictId() != district.getId()) {
                 player.sendMessage(fmt.error("Station not found or not yours to configure."));
                 return;
             }
         } catch (RuntimeException unavailable) { player.sendMessage(fmt.error("Rail service is unavailable.")); return; }
-        int limit = Math.max(1, Math.min(claim.chunkCount(), (int) Math.ceil(claim.chunkCount()
-            * plugin.getConfigManager().getConfig().getDouble("districts.stationPlatform.maxPercentOfDistrict", 0.25))));
-        cancel(player, false);
-        Selection selection = new Selection(district.getName(), claim.worldName(), false, null, limit, null, district, stationId);
-        selections.put(player.getUniqueId(), selection);
-        giveWand(player);
-        player.sendMessage(fmt.success("Station-platform selection started. Select up to &e" + limit + " chunks&a, then use &e/district station confirm&a."));
-        updateActionbar(player, selection);
+        long limit = Math.max(1L, (long) Math.floor(claim.areaBlocks()
+            * plugin.getConfigManager().getConfig().getDouble("districts.stationPlatform.maxPercentOfDistrict", 0.25)));
+        startOwnedSelection(player, new Selection(district.getName(), claim.worldName(), false, null, limit, null, district, stationId, false),
+            "Station-platform block selection started", "/district station confirm");
     }
+
+    public void startRestrictedLand(Player player, String landName) {
+        DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
+        DistrictData.BlockClaim claim = district == null ? null : districts.getClaim(district.getId());
+        if (district == null || claim == null || !district.hasRole(player.getUniqueId(), DistrictData.DistrictRole.MAYOR)) {
+            player.sendMessage(fmt.error("Only the district MAYOR can select restricted land.")); return;
+        }
+        long limit = Math.max(1L, (long)Math.floor(claim.areaBlocks()
+            * plugin.getConfigManager().getConfig().getDouble("districts.restrictedLand.maxPercentOfDistrict", 0.25)));
+        Selection selection = new Selection(landName, claim.worldName(), false, null, limit, null, null, -1, false);
+        selection.restrictedDistrict = district;
+        startOwnedSelection(player, selection, "Restricted-land block selection started", "/district restricted confirm");
+    }
+
+    public void startFarm(Player player,String farmName,DistrictFarmService.FarmType farmType){
+        DistrictData.District district=districts.getPlayerDistrict(player.getUniqueId());DistrictData.BlockClaim claim=district==null?null:districts.getClaim(district.getId());if(district==null||claim==null||!(district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.MAYOR)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.CO_MAYOR))){player.sendMessage(fmt.error("Only MAYOR or CO_MAYOR can designate district farm zones at the Town Clerk."));return;}long limit=Math.max(1,(long)Math.floor(claim.areaBlocks()*plugin.getConfigManager().getConfig().getDouble("districtFarms.maxPercentOfDistrict",0.25)));Selection selection=new Selection(farmName,claim.worldName(),false,null,limit,null,null,-1,false);selection.farmDistrict=district;selection.farmType=farmType;startOwnedSelection(player,selection,"Exact "+farmType.name().toLowerCase()+" district farm-zone selection started","/district farm confirm");
+    }
+
+    public void startFarmWorker(Player player,int farmId,String skin){DistrictData.District district=districts.getPlayerDistrict(player.getUniqueId());DistrictFarmService.Farm farm=plugin.getServiceRegistry().get(DistrictFarmService.class).get(farmId);if(district==null||farm==null||farm.districtId!=district.getId()||!(district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.FARMER)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.MAYOR)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.CO_MAYOR))){player.sendMessage(fmt.error("Requires FARMER, MAYOR, or CO_MAYOR and a farm zone in your district."));return;}Selection selection=new Selection(farm.name,farm.zone.world(),false,null,DistrictFarmRules.footprint(farm.zone),null,null,-1,false);selection.farmDistrict=district;selection.workerFarmId=farmId;selection.workerSkin=skin;startOwnedSelection(player,selection,"Select the exact surface this worker must maintain","/district farm confirm");}
 
     public void startSpawnCityClaim(Player player) {
         if (!player.hasPermission("vaultsurvival.spawncity.admin")) { player.sendMessage(fmt.permissionDenied()); return; }
         cancel(player, false);
         Selection selection = new Selection("Spawn City", player.getWorld().getName(), false, null,
-            plugin.getConfigManager().getSpawnClaimMaxChunks(), null, null, -1, true);
+            plugin.getConfigManager().getSpawnClaimMaxBlocks(), null, null, -1, true);
         selections.put(player.getUniqueId(), selection);
-        giveWand(player, plugin.getConfigManager().getSpawnClaimWandMaterial(), "&6&lSpawn City Claim Wand");
-        player.sendMessage(fmt.success("Spawn City chunk claim started. Select up to &e" + selection.limit + " chunks&a, then use &e/spawncity claim confirm&a."));
+        giveWand(player, plugin.getConfigManager().getSpawnClaimWandMaterial(), "&6&lSpawn City Block Selection Wand");
+        player.sendMessage(fmt.success("Spawn City block selection started. Maximum area: &e" + selection.limit + " blocks&a."));
+        player.sendMessage(fmt.info("Left-click block 1, right-click block 2, then use &e/spawncity claim confirm&7."));
         updateActionbar(player, selection);
     }
 
-    private void begin(Player player, String name, boolean expansion, DistrictData.ChunkClaim existing, int limit) {
+    private void begin(Player player, String name, boolean expansion, DistrictData.BlockClaim existing, long limit) {
         cancel(player, false);
-        Selection selection = new Selection(name, player.getWorld().getName(), expansion, existing, limit);
+        Selection selection = new Selection(name, player.getWorld().getName(), expansion, existing, limit, null, null, -1, false);
         if (existing != null) {
-            for (int x = existing.minChunkX(); x <= existing.maxChunkX(); x++) {
-                for (int z = existing.minChunkZ(); z <= existing.maxChunkZ(); z++) selection.chunks.add(new ChunkKey(x, z));
-            }
+            selection.pos1 = new BlockPoint(existing.minBlockX(), player.getWorld().getMinHeight(), existing.minBlockZ());
+            selection.pos2 = new BlockPoint(existing.maxBlockX(), player.getWorld().getMaxHeight()-1, existing.maxBlockZ());
         }
         selections.put(player.getUniqueId(), selection);
         giveWand(player);
-        player.sendMessage(fmt.success((expansion ? "District expansion" : "District claim") + " started for &e" + name + "&a."));
-        player.sendMessage(fmt.info("Use the District Selection Wand: click a chunk to add it, sneak-click to remove it."));
-        player.sendMessage(fmt.info("Select " + (expansion ? "up to" : "exactly") + " &e" + limit + " chunks&7, then use &e/district confirm&7. Use &e/district cancel&7 to abort."));
+        player.sendMessage(fmt.success((expansion ? "District expansion" : "District block claim") + " started for &e" + name + "&a."));
+        player.sendMessage(fmt.info("Left-click block 1 and right-click block 2. Sneak-click that button to clear its corner."));
+        player.sendMessage(fmt.info((expansion ? "Maximum" : "Required") + " horizontal area: &e" + limit + " blocks&7. Then use &e/district confirm&7."));
         updateActionbar(player, selection);
+        if (selection.complete()) refreshSelection(player, selection);
         plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), expansion ? "DISTRICT_CLAIM_EXPAND_START" : "DISTRICT_CLAIM_START",
-            "DISTRICT", name, "chunkLimit=" + limit);
+            "DISTRICT", name, "blockAreaLimit=" + limit);
+    }
+
+    private void startOwnedSelection(Player player, Selection selection, String message, String confirmCommand) {
+        cancel(player, false);
+        selections.put(player.getUniqueId(), selection);
+        giveWand(player);
+        player.sendMessage(fmt.success(message + " for &e" + selection.name + "&a."));
+        player.sendMessage(fmt.info("Left-click block 1, right-click block 2, then use &e" + confirmCommand + "&7. Maximum area: &e" + selection.limit + " blocks&7."));
+        updateActionbar(player, selection);
     }
 
     public void confirm(Player player) {
         Selection selection = selections.get(player.getUniqueId());
-        if (selection == null) {
-            player.sendMessage(fmt.error("No district chunk selection is active."));
+        if (selection == null) { player.sendMessage(fmt.error("No district block selection is active.")); return; }
+        if (!selection.worldName.equals(player.getWorld().getName())) { player.sendMessage(fmt.error("Return to the selected world before confirming.")); return; }
+        DistrictData.BlockClaim claim = asRectangle(selection);
+        if (claim == null) { player.sendMessage(fmt.error("Select both block corners before confirming.")); return; }
+
+        if (selection.expansion) {
+            if (!claim.contains(selection.existing) || claim.areaBlocks() <= selection.existing.areaBlocks() || claim.areaBlocks() > selection.limit) {
+                player.sendMessage(fmt.error("The new rectangle must contain the entire old claim and have an area between "
+                    + (selection.existing.areaBlocks() + 1) + " and " + selection.limit + " blocks."));
+                return;
+            }
+        } else if (!selection.isMarketZone() && !selection.isStationPlatform() && !selection.isRestrictedLand() && !selection.isSpawnCityClaim() && !selection.isFarm()
+            && (claim.areaBlocks() < plugin.getConfigManager().getConfig().getLong("districts.selection.requiredAreaBlocks", 2500)
+                || claim.areaBlocks() > selection.limit)) {
+            long minimum = plugin.getConfigManager().getConfig().getLong("districts.selection.requiredAreaBlocks", 2500);
+            player.sendMessage(fmt.error("A new district claim must contain between " + minimum + " and "
+                + selection.limit + " horizontal blocks."));
+            return;
+        } else if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand() || selection.isSpawnCityClaim() || selection.isFarm())
+            && claim.areaBlocks() > selection.limit) {
+            player.sendMessage(fmt.error("The selected area is " + claim.areaBlocks() + " blocks; the maximum is " + selection.limit + "."));
             return;
         }
-        if (!selection.worldName.equals(player.getWorld().getName())) {
-            player.sendMessage(fmt.error("Return to the selected world before confirming."));
-            return;
+
+        if ((selection.isMarketZone() || selection.isStationPlatform() || selection.isRestrictedLand() || selection.isFarm())) {
+            DistrictData.BlockClaim owner = districts.getClaim(selection.ownerDistrict().getId());
+            if (owner == null || !owner.contains(claim)) {
+                player.sendMessage(fmt.error("Both corners and the complete selected rectangle must be inside your district claim."));
+                return;
+            }
         }
-        if ((!selection.isMarketZone() && !selection.isStationPlatform() && !selection.isSpawnCityClaim() && !selection.expansion && selection.chunks.size() != selection.limit)
-            || (selection.expansion && (selection.chunks.size() <= selection.existing.chunkCount() || selection.chunks.size() > selection.limit))) {
-            player.sendMessage(fmt.error(selection.expansion
-                ? "Select more than " + selection.existing.chunkCount() + " and no more than " + selection.limit + " chunks."
-                : "Select exactly " + selection.limit + " chunks before confirming."));
-            return;
+
+        if(selection.foundingPetitionUuid!=null){
+            plugin.getServiceRegistry().get(DistrictFoundingService.class).attachClaim(player,selection.foundingPetitionUuid,claim).whenComplete((petition,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(failure!=null){player.sendMessage(fmt.error(failure.getMessage()==null?"The founding claim could not be saved.":failure.getMessage()));return;}selections.remove(player.getUniqueId());removeWands(player);visualization.hide(player.getUniqueId());if(plugin.getServiceRegistry().has(DialogService.class))plugin.getServiceRegistry().get(TownClerkService.class).open(player,TownClerkContext.SPAWN_CITY,null);}));return;
         }
-        DistrictData.ChunkClaim claim = asRectangle(selection);
-        if (claim == null) {
-            player.sendMessage(fmt.error("Selected chunks must form one filled rectangle. Fill any gaps before confirming."));
-            return;
+        if(selection.isFarmWorker()){
+            var zone=new DistrictFarmService.FarmZone(selection.worldName,Math.min(selection.pos1.x,selection.pos2.x),Math.min(selection.pos1.y,selection.pos2.y),Math.min(selection.pos1.z,selection.pos2.z),Math.max(selection.pos1.x,selection.pos2.x),Math.max(selection.pos1.y,selection.pos2.y),Math.max(selection.pos1.z,selection.pos2.z));
+            plugin.getServiceRegistry().get(DistrictFarmService.class).placeWorker(player,selection.workerFarmId,zone,player.getLocation(),selection.workerSkin).whenComplete((npc,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(failure!=null){player.sendMessage(fmt.error(failure.getMessage()==null?"Worker could not be placed.":failure.getMessage()));return;}selections.remove(player.getUniqueId());removeWands(player);visualization.hide(player.getUniqueId());player.sendMessage(fmt.success("Worker NPC #"+npc+" placed for the selected surface. Link input and output chests in the farm menu."));}));return;
+        }
+        if(selection.isFarmZone()){
+            var zone=new DistrictFarmService.FarmZone(selection.worldName,Math.min(selection.pos1.x,selection.pos2.x),Math.min(selection.pos1.y,selection.pos2.y),Math.min(selection.pos1.z,selection.pos2.z),Math.max(selection.pos1.x,selection.pos2.x),Math.max(selection.pos1.y,selection.pos2.y),Math.max(selection.pos1.z,selection.pos2.z));
+            plugin.getServiceRegistry().get(DistrictFarmService.class).create(player,selection.name,selection.farmType,zone).whenComplete((farm,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(failure!=null){player.sendMessage(fmt.error(failure.getMessage()==null?"Farm could not be saved.":failure.getMessage()));return;}selections.remove(player.getUniqueId());removeWands(player);visualization.hide(player.getUniqueId());player.sendMessage(fmt.success("Farm #"+farm.id+" created. Select its output container next."));}));return;
         }
         boolean completed;
-        if (selection.isSpawnCityClaim()) {
-            completed = setSpawnCityClaim(player, claim);
-        } else if (selection.isStationPlatform()) {
-            completed = setStationPlatform(player, selection.stationId, claim);
-        } else if (selection.isMarketZone()) {
-            completed = createMarketZone(player, selection.marketDistrict, claim);
-            if (completed) player.sendMessage(fmt.success("Market zone updated: &e" + claim.chunkCount() + " chunks&a."));
-        } else if (selection.expansion) {
+        if (selection.isSpawnCityClaim()) completed = setSpawnCityClaim(player, claim);
+        else if (selection.isStationPlatform()) completed = setStationPlatform(player, selection.stationId, claim);
+        else if (selection.isRestrictedLand()) completed = setRestrictedLand(player, selection.restrictedDistrict, selection.name, claim);
+        else if (selection.isMarketZone()) completed = createMarketZone(player, selection.marketDistrict, claim);
+        else if (selection.expansion) {
             DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
             completed = district != null && districts.updateClaim(district, player.getUniqueId(), claim);
-            if (completed) player.sendMessage(fmt.success("District claim expanded to &e" + claim.chunkCount() + " chunks&a."));
-        } else {
-            completed = districts.apply(player, selection.name, claim) != null;
-        }
+        } else completed = districts.apply(player, selection.name, claim) != null;
+
         if (!completed) {
-            player.sendMessage(fmt.error("The claim could not be confirmed. Your selection remains active so you can adjust it."));
+            player.sendMessage(fmt.error("The block region could not be confirmed. Your selection remains active."));
             return;
         }
+        if (selection.isMarketZone()) player.sendMessage(fmt.success("Market zone updated: &e" + describe(claim) + "&a."));
+        else if (selection.expansion) player.sendMessage(fmt.success("District claim expanded to &e" + describe(claim) + "&a."));
         cancel(player, false);
     }
 
     public void cancel(Player player) {
         if (selections.containsKey(player.getUniqueId())) {
             cancel(player, true);
-            player.sendMessage(fmt.info("District chunk selection cancelled."));
+            player.sendMessage(fmt.info("District block selection cancelled."));
         } else {
             removeWands(player);
             player.sendMessage(fmt.info("No district selection was active."));
@@ -221,73 +256,56 @@ public final class DistrictSelectionService implements Listener {
     private void cancel(Player player, boolean audited) {
         Selection previous = selections.remove(player.getUniqueId());
         removeWands(player);
-        if (audited && previous != null) {
-            plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "DISTRICT_CLAIM_CANCEL", "DISTRICT", previous.name,
-                "selected=" + previous.chunks.size());
-        }
+        if (audited && previous != null) plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "DISTRICT_CLAIM_CANCEL",
+            "DISTRICT", previous.name, previous.complete() ? "areaBlocks=" + asRectangle(previous).areaBlocks() : "incomplete");
+        visualization.hide(player.getUniqueId());
     }
 
     public void showStatus(Player player) {
         Selection selection = selections.get(player.getUniqueId());
-        if (selection == null) {
-            player.sendMessage(fmt.info("No district chunk selection is active."));
-            return;
-        }
-        player.sendMessage(fmt.header("District Chunk Selection"));
-        player.sendMessage(fmt.info("District: &e" + selection.name + " &7| Selected: &e" + selection.chunks.size() + "/" + selection.limit));
-        player.sendMessage(fmt.info("Mode: &e" + (selection.isSpawnCityClaim() ? "SPAWN CITY" : selection.isStationPlatform() ? "STATION PLATFORM" : selection.isMarketZone() ? "MARKET ZONE" : selection.expansion ? "EXPAND" : "CREATE") + " &7| Rectangle: " + (asRectangle(selection) == null ? "&cNo" : "&aYes")));
+        if (selection == null) { player.sendMessage(fmt.info("No district block selection is active.")); return; }
+        DistrictData.BlockClaim claim = asRectangle(selection);
+        player.sendMessage(fmt.header("District Block Selection"));
+        player.sendMessage(fmt.info("District: &e" + selection.name + " &7| Position 1: " + (selection.pos1 == null ? "&cunset" : "&a" + selection.pos1)
+            + " &7| Position 2: " + (selection.pos2 == null ? "&cunset" : "&a" + selection.pos2)));
+        player.sendMessage(fmt.info("Area: &e" + (claim == null ? 0 : claim.areaBlocks()) + "&7/&e" + selection.limit + " blocks &7| Size: &e"
+            + (claim == null ? "incomplete" : claim.widthBlocks() + "x" + claim.depthBlocks())));
     }
 
     public void showDistrictBorders(Player player) {
         DistrictData.District district = districts.getAllDistricts().stream()
             .filter(d -> d.getStatus() == DistrictData.DistrictStatus.ACTIVE && d.getWorldName().equals(player.getWorld().getName()))
             .filter(d -> {
-                DistrictData.ChunkClaim claim = districts.getClaim(d.getId());
-                return claim != null && player.getChunk().getX() >= claim.minChunkX() && player.getChunk().getX() <= claim.maxChunkX()
-                    && player.getChunk().getZ() >= claim.minChunkZ() && player.getChunk().getZ() <= claim.maxChunkZ();
+                DistrictData.BlockClaim claim = districts.getClaim(d.getId());
+                return claim != null && claim.contains(player.getLocation().getBlockX(), player.getLocation().getBlockZ());
             }).findFirst().orElseGet(() -> districts.getAllDistricts().stream()
                 .filter(d -> d.getStatus() == DistrictData.DistrictStatus.ACTIVE && d.getWorldName().equals(player.getWorld().getName()))
                 .min(Comparator.comparingDouble(d -> Math.hypot(player.getLocation().getBlockX() - d.getCenterX(), player.getLocation().getBlockZ() - d.getCenterZ())))
                 .orElse(null));
         if (district == null || districts.getClaim(district.getId()) == null) {
-            player.sendMessage(fmt.error("No chunk-based district border is nearby."));
+            player.sendMessage(fmt.error("No block-based district border is nearby."));
             return;
         }
-        DistrictData.ChunkClaim claim = districts.getClaim(district.getId());
-        drawRectangle(player, claim, Color.YELLOW, 2);
-        player.sendMessage(fmt.info("Showing &e" + district.getName() + "&7 borders: &e" + claim.chunkCount() + " chunks &7(" + claim.minBlockX() + ", " + claim.minBlockZ() + " to " + claim.maxBlockX() + ", " + claim.maxBlockZ() + ")."));
+        DistrictData.BlockClaim claim = districts.getClaim(district.getId());
+        visualizeClaim(player, claim, RegionData.RegionType.DISTRICT, district.getName(), RegionVisualizationSession.Mode.THIRTY_SECONDS);
+        openBorderDialog(player, district.getName() + " borders", describe(claim) + " | " + claim.minBlockX() + ", " + claim.minBlockZ()
+            + " to " + claim.maxBlockX() + ", " + claim.maxBlockZ(), "district borders");
     }
 
     public void showMarketZoneBorders(Player player) {
         DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
         if (district == null || !districts.canCreateMerchantNpc(player.getUniqueId(), district)) {
-            player.sendMessage(fmt.error("Requires the MERCHANT, CO_MAYOR, or MAYOR district role."));
-            return;
+            player.sendMessage(fmt.error("Requires the MERCHANT, CO_MAYOR, or MAYOR district role.")); return;
         }
         try {
-            RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
             String regionName = "district_market_" + district.getId();
-            RegionData.Region zone = regions.getAllRegions().stream()
-                .filter(region -> region.getName().equalsIgnoreCase(regionName))
-                .findFirst().orElse(null);
-            if (zone == null) {
-                player.sendMessage(fmt.error("This district does not have a market zone yet."));
-                return;
-            }
-            if (!zone.getWorldName().equals(player.getWorld().getName())) {
-                player.sendMessage(fmt.error("Travel to &e" + zone.getWorldName() + "&c to view this market zone."));
-                return;
-            }
-            DistrictData.ChunkClaim claim = new DistrictData.ChunkClaim(zone.getWorldName(),
-                Math.floorDiv(Math.min(zone.getX1(), zone.getX2()), 16),
-                Math.floorDiv(Math.min(zone.getZ1(), zone.getZ2()), 16),
-                Math.floorDiv(Math.max(zone.getX1(), zone.getX2()), 16),
-                Math.floorDiv(Math.max(zone.getZ1(), zone.getZ2()), 16));
-            drawRectangle(player, claim, Color.LIME, 2);
-            player.sendMessage(fmt.info("Showing &a" + district.getName() + " market-zone&7 borders: &e" + claim.chunkCount() + " chunks&7."));
-        } catch (RuntimeException error) {
-            player.sendMessage(fmt.error("Market-zone borders are unavailable right now."));
-        }
+            RegionData.Region zone = plugin.getServiceRegistry().get(RegionService.class).getAllRegions().stream()
+                .filter(region -> region.getName().equalsIgnoreCase(regionName)).findFirst().orElse(null);
+            if (zone == null) { player.sendMessage(fmt.error("This district does not have a market zone yet.")); return; }
+            if (!zone.getWorldName().equals(player.getWorld().getName())) { player.sendMessage(fmt.error("Travel to &e" + zone.getWorldName() + "&c to view this market zone.")); return; }
+            visualization.showRegion(player, zone, RegionVisualizationSession.Mode.THIRTY_SECONDS, false);
+            openBorderDialog(player, district.getName() + " market zone", "Dense 3D market-zone border is visible for 30 seconds.", "district marketzone borders");
+        } catch (RuntimeException error) { player.sendMessage(fmt.error("Market-zone borders are unavailable right now.")); }
     }
 
     public void startOverlay() {
@@ -300,15 +318,12 @@ public final class DistrictSelectionService implements Listener {
                 if (player == null || now - selection.lastTouched > plugin.getConfigManager().getDistrictSelectionTimeoutMinutes() * 60_000L) {
                     if (player != null) {
                         removeWands(player);
-                        player.sendMessage(fmt.warn("District chunk selection expired and its wand was removed."));
+                        visualization.hide(player.getUniqueId());
+                        player.sendMessage(fmt.warn("District block selection expired and its wand was removed."));
                     }
                     selections.remove(entry.getKey());
-                    continue;
-                }
-                if (plugin.getConfigManager().isDistrictSelectionOverlayEnabled()) {
-                    DistrictData.ChunkClaim rectangle = asRectangle(selection);
-                    if (rectangle != null) drawRectangle(player, rectangle, Color.AQUA, 4);
-                    else drawChunkMarkers(player, selection);
+                } else if (selection.complete()) {
+                    renderPortalOutline(player, asRectangle(selection));
                 }
             }
         }, 20L, 20L);
@@ -316,7 +331,10 @@ public final class DistrictSelectionService implements Listener {
 
     public void shutdown() {
         if (overlayTask != null) overlayTask.cancel();
-        for (Player player : Bukkit.getOnlinePlayers()) removeWands(player);
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            removeWands(player);
+            if (selections.containsKey(player.getUniqueId())) visualization.hide(player.getUniqueId());
+        }
         selections.clear();
     }
 
@@ -325,45 +343,29 @@ public final class DistrictSelectionService implements Listener {
         if (event.getHand() != EquipmentSlot.HAND || !isWand(event.getItem())) return;
         Player player = event.getPlayer();
         Selection selection = selections.get(player.getUniqueId());
-        if (selection == null) {
-            event.setCancelled(true);
-            removeWands(player);
-            player.sendMessage(fmt.warn("This district wand is no longer active and was removed."));
-            return;
-        }
+        if (selection == null) { event.setCancelled(true); removeWands(player); return; }
         if (event.getAction() != Action.LEFT_CLICK_BLOCK && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         event.setCancelled(true);
-        Chunk chunk = event.getClickedBlock().getChunk();
-        if (!chunk.getWorld().getName().equals(selection.worldName)) return;
-        ChunkKey key = new ChunkKey(chunk.getX(), chunk.getZ());
-        boolean remove = player.isSneaking();
-        if (remove) {
-            if (selection.existing != null && isInClaim(key, selection.existing)) {
-                player.sendMessage(fmt.error("Existing district chunks cannot be removed during an expansion."));
-                return;
-            }
-            if (!selection.chunks.remove(key)) {
-                player.sendMessage(fmt.info("That chunk was not selected."));
-                return;
-            }
+        if (!event.getClickedBlock().getWorld().getName().equals(selection.worldName)) return;
+
+        boolean first = event.getAction() == Action.LEFT_CLICK_BLOCK;
+        if (player.isSneaking()) {
+            if (first) selection.pos1 = null; else selection.pos2 = null;
         } else {
-            if (selection.chunks.contains(key)) {
-                player.sendMessage(fmt.info("That chunk is already selected. Sneak-click it to remove it."));
+            BlockPoint point = new BlockPoint(event.getClickedBlock().getX(), event.getClickedBlock().getY(), event.getClickedBlock().getZ());
+            BlockPoint previous = first ? selection.pos1 : selection.pos2;
+            if (first) selection.pos1 = point; else selection.pos2 = point;
+            DistrictData.BlockClaim candidate = asRectangle(selection);
+            if (candidate != null && candidate.areaBlocks() > selection.limit) {
+                if (first) selection.pos1 = previous; else selection.pos2 = previous;
+                player.sendMessage(fmt.error("That corner would create " + candidate.areaBlocks() + " blocks; the limit is " + selection.limit + "."));
                 return;
             }
-            if (selection.chunks.size() >= selection.limit) {
-                player.sendMessage(fmt.error("You reached the " + selection.limit + "-chunk limit."));
-                return;
-            }
-            if ((selection.isMarketZone() || selection.isStationPlatform()) && !isInClaim(key, districts.getClaim(selection.ownerDistrict().getId()))) {
-                player.sendMessage(fmt.error("Selected chunks must be inside your district claim."));
-                return;
-            }
-            selection.chunks.add(key);
         }
         selection.lastTouched = System.currentTimeMillis();
-        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.5f, remove ? 0.7f : 1.3f);
+        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.5f, player.isSneaking() ? 0.7f : 1.3f);
         updateActionbar(player, selection);
+        refreshSelection(player, selection);
     }
 
     @EventHandler public void onQuit(PlayerQuitEvent event) { cancel(event.getPlayer(), true); }
@@ -371,7 +373,7 @@ public final class DistrictSelectionService implements Listener {
     @EventHandler public void onWorldChange(PlayerChangedWorldEvent event) {
         if (selections.containsKey(event.getPlayer().getUniqueId())) {
             cancel(event.getPlayer(), true);
-            event.getPlayer().sendMessage(fmt.warn("District chunk selection reset after changing worlds."));
+            event.getPlayer().sendMessage(fmt.warn("District block selection reset after changing worlds."));
         }
     }
     @EventHandler public void onDeath(PlayerDeathEvent event) {
@@ -382,28 +384,25 @@ public final class DistrictSelectionService implements Listener {
     @EventHandler public void onJoin(PlayerJoinEvent event) { removeWands(event.getPlayer()); }
 
     private void giveWand(Player player) {
-        giveWand(player, plugin.getConfigManager().getConfig().getString("districts.selection.wandMaterial", "GOLDEN_AXE"), "&b&lDistrict Selection Wand");
+        giveWand(player, plugin.getConfigManager().getConfig().getString("districts.selection.wandMaterial", "GOLDEN_AXE"), "&b&lDistrict Block Selection Wand");
     }
 
     private void giveWand(Player player, String materialName, String displayName) {
         removeWands(player);
         Material material;
-        try { material = Material.valueOf(materialName.toUpperCase()); }
-        catch (IllegalArgumentException ignored) { material = Material.GOLDEN_AXE; }
+        try { material = Material.valueOf(materialName.toUpperCase()); } catch (IllegalArgumentException ignored) { material = Material.GOLDEN_AXE; }
         ItemStack wand = new ItemStack(material);
         ItemMeta meta = wand.getItemMeta();
         meta.displayName(fmt.deserialize(displayName));
-        meta.lore(java.util.List.of(fmt.deserialize("&7Click: add chunk"), fmt.deserialize("&7Sneak-click: remove chunk"), fmt.deserialize("&8/district confirm to finish")));
+        meta.lore(java.util.List.of(fmt.deserialize("&7Left-click: set block corner 1"), fmt.deserialize("&7Right-click: set block corner 2"),
+            fmt.deserialize("&7Sneak-click: clear that corner"), fmt.deserialize("&8/district confirm to finish")));
         meta.getPersistentDataContainer().set(wandKey, PersistentDataType.BYTE, (byte) 1);
         wand.setItemMeta(meta);
-        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(wand);
-        leftovers.values().forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
+        player.getInventory().addItem(wand).values().forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
     }
 
     private void removeWands(Player player) {
-        for (int slot = 0; slot < player.getInventory().getSize(); slot++) {
-            if (isWand(player.getInventory().getItem(slot))) player.getInventory().setItem(slot, null);
-        }
+        for (int slot = 0; slot < player.getInventory().getSize(); slot++) if (isWand(player.getInventory().getItem(slot))) player.getInventory().setItem(slot, null);
         if (isWand(player.getInventory().getItemInOffHand())) player.getInventory().setItemInOffHand(null);
     }
 
@@ -411,145 +410,169 @@ public final class DistrictSelectionService implements Listener {
         return item != null && item.hasItemMeta() && item.getItemMeta().getPersistentDataContainer().has(wandKey, PersistentDataType.BYTE);
     }
 
-    private DistrictData.ChunkClaim asRectangle(Selection selection) {
-        if (selection.chunks.isEmpty()) return null;
-        int minX = selection.chunks.stream().mapToInt(ChunkKey::x).min().orElseThrow();
-        int maxX = selection.chunks.stream().mapToInt(ChunkKey::x).max().orElseThrow();
-        int minZ = selection.chunks.stream().mapToInt(ChunkKey::z).min().orElseThrow();
-        int maxZ = selection.chunks.stream().mapToInt(ChunkKey::z).max().orElseThrow();
-        if ((maxX - minX + 1) * (maxZ - minZ + 1) != selection.chunks.size()) return null;
-        return new DistrictData.ChunkClaim(selection.worldName, minX, minZ, maxX, maxZ);
+    private DistrictData.BlockClaim asRectangle(Selection selection) {
+        if (!selection.complete()) return null;
+        return new DistrictData.BlockClaim(selection.worldName, selection.pos1.x, selection.pos1.z, selection.pos2.x, selection.pos2.z);
     }
 
-    private boolean isInClaim(ChunkKey key, DistrictData.ChunkClaim claim) {
-        return key.x >= claim.minChunkX() && key.x <= claim.maxChunkX() && key.z >= claim.minChunkZ() && key.z <= claim.maxChunkZ();
-    }
-
-    private boolean createMarketZone(Player player, DistrictData.District district, DistrictData.ChunkClaim claim) {
-        if (district == null || claim == null || claim.chunkCount() == 0 || !districts.canCreateMerchantNpc(player.getUniqueId(), district)) return false;
+    private boolean createMarketZone(Player player, DistrictData.District district, DistrictData.BlockClaim claim) {
+        if (district == null || claim == null || !districts.canCreateMerchantNpc(player.getUniqueId(), district)) return false;
         try {
             RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
             String regionName = "district_market_" + district.getId();
-            regions.getAllRegions().stream()
-                .filter(region -> region.getName().equalsIgnoreCase(regionName))
+            regions.getAllRegions().stream().filter(region -> region.getName().equalsIgnoreCase(regionName))
                 .map(RegionData.Region::getId).toList().forEach(regions::deleteRegion);
             var world = player.getWorld();
-            var region = regions.createRegion(regionName, RegionData.RegionType.DISTRICT_PUBLIC, claim.worldName(),
-                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight(), claim.maxBlockZ(), 30);
+            var region = regions.createRegion(regionName, RegionData.RegionType.DISTRICT_MARKET, claim.worldName(),
+                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight() - 1, claim.maxBlockZ(), 30);
             if (region == null) return false;
             plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "DISTRICT_MARKET_ZONE_SET", "DISTRICT",
-                String.valueOf(district.getId()), "chunks=" + claim.chunkCount());
+                String.valueOf(district.getId()), "areaBlocks=" + claim.areaBlocks());
             return true;
-        } catch (RuntimeException ex) {
-            player.sendMessage(fmt.error("Region service is unavailable; market zone was not changed."));
-            return false;
-        }
+        } catch (RuntimeException ex) { player.sendMessage(fmt.error("Region service is unavailable; market zone was not changed.")); return false; }
     }
 
-    private boolean setStationPlatform(Player player, int stationId, DistrictData.ChunkClaim claim) {
+    private boolean setStationPlatform(Player player, int stationId, DistrictData.BlockClaim claim) {
         try {
             RailService rail = plugin.getServiceRegistry().get(RailService.class);
-            if (rail instanceof RailServiceImpl implementation) return implementation.setPlatformChunks(stationId, player, claim);
+            if (rail instanceof RailServiceImpl implementation) return implementation.setPlatformBlocks(stationId, player, claim);
         } catch (RuntimeException ignored) { }
         player.sendMessage(fmt.error("Rail service is unavailable; platform was not changed."));
         return false;
     }
 
-    private boolean setSpawnCityClaim(Player player, DistrictData.ChunkClaim claim) {
+    private boolean setRestrictedLand(Player player, DistrictData.District district, String name, DistrictData.BlockClaim claim) {
+        try {
+            DistrictRestrictedLandService service = plugin.getServiceRegistry().get(DistrictRestrictedLandService.class);
+            var result = service.create(player, name, claim);
+            player.sendMessage(result.success() ? fmt.success(result.message()) : fmt.error(result.message()));
+            return result.success();
+        } catch (RuntimeException unavailable) { player.sendMessage(fmt.error("Restricted-land service is unavailable.")); return false; }
+    }
+
+    private boolean setSpawnCityClaim(Player player, DistrictData.BlockClaim claim) {
         if (!player.hasPermission("vaultsurvival.spawncity.admin")) return false;
         try {
             RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
             regions.getAllRegions().stream().filter(region -> region.getName().equalsIgnoreCase("spawn_city_claim"))
                 .map(RegionData.Region::getId).toList().forEach(regions::deleteRegion);
             var world = player.getWorld();
-            var region = regions.createRegion("spawn_city_claim", RegionData.RegionType.SPAWN_PUBLIC, claim.worldName(),
-                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight(), claim.maxBlockZ(), 50);
+            var region = regions.createRegion("spawn_city_claim", RegionData.RegionType.SPAWN_CITY, claim.worldName(),
+                claim.minBlockX(), world.getMinHeight(), claim.minBlockZ(), claim.maxBlockX(), world.getMaxHeight() - 1, claim.maxBlockZ(), 50);
             if (region == null) return false;
-            plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "SPAWN_CITY_CHUNK_CLAIM_SET", "REGION", String.valueOf(region.getId()), "chunks=" + claim.chunkCount());
-            player.sendMessage(fmt.success("Spawn City claim set to &e" + claim.chunkCount() + " chunks&a."));
+            plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "SPAWN_CITY_BLOCK_CLAIM_SET", "REGION",
+                String.valueOf(region.getId()), "areaBlocks=" + claim.areaBlocks());
+            player.sendMessage(fmt.success("Spawn City claim set to &e" + describe(claim) + "&a."));
             return true;
-        } catch (RuntimeException unavailable) {
-            player.sendMessage(fmt.error("Region service is unavailable; Spawn City claim was not changed."));
-            return false;
-        }
+        } catch (RuntimeException unavailable) { player.sendMessage(fmt.error("Region service is unavailable; Spawn City claim was not changed.")); return false; }
     }
 
     private void updateActionbar(Player player, Selection selection) {
-        player.sendActionBar(Component.text("Chunks: " + selection.chunks.size() + "/" + selection.limit
-            + " | " + (asRectangle(selection) == null ? "fill rectangle" : "rectangle ready") + " | confirm"));
+        DistrictData.BlockClaim claim = asRectangle(selection);
+        player.sendActionBar(Component.text("Block corners: " + (selection.pos1 == null ? "1 missing" : "1 set") + " / "
+            + (selection.pos2 == null ? "2 missing" : "2 set") + " | area " + (claim == null ? 0 : claim.areaBlocks()) + "/" + selection.limit + " | confirm"));
     }
 
-    private void drawChunkMarkers(Player player, Selection selection) {
-        int previewLimit = Math.max(1, plugin.getConfigManager().getConfig().getInt("districts.selection.overlay.maxPreviewChunks", 64));
-        int shown = 0;
-        for (ChunkKey key : selection.chunks) {
-            if (shown++ >= previewLimit) break;
-            int x = (key.x << 4) + 8;
-            int z = (key.z << 4) + 8;
-            int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
-            Particle.DustOptions dust = new Particle.DustOptions(Color.AQUA, 1.8f);
-            player.spawnParticle(Particle.DUST, x + .5, y + .5, z + .5, 5, .5, .3, .5, 0, dust);
-            drawVerticalMarker(player, (key.x << 4), (key.z << 4), dust);
-            drawVerticalMarker(player, (key.x << 4) + 15, (key.z << 4) + 15, dust);
+    public boolean updateVisualization(Player player, String mode, Boolean sideGrid, Boolean floorGrid) {
+        if (mode != null) {
+            RegionVisualizationSession.Mode parsed = RegionVisualizationSession.Mode.parse(mode);
+            if (parsed == null || !visualization.setMode(player.getUniqueId(), parsed)) return false;
         }
+        if (sideGrid != null && !visualization.setSideGrid(player.getUniqueId(), sideGrid)) return false;
+        return floorGrid == null || visualization.setFloorGrid(player.getUniqueId(), floorGrid);
     }
 
-    private void drawRectangle(Player player, DistrictData.ChunkClaim claim, Color color, int step) {
-        Particle.DustOptions dust = new Particle.DustOptions(color, 1.8f);
+    public void hideVisualization(Player player) { visualization.hide(player.getUniqueId()); }
+    public void showVisualizationControls(Player player, String status) { openBorderDialog(player, "District Border Controls", status, "district borders"); }
+
+    private void refreshSelection(Player player, Selection selection) {
+        if (!selection.complete()) { visualization.hide(player.getUniqueId()); return; }
+        if(selection.isFarm()){visualization.showBounds(player,new RegionVisualizationSession.Bounds(player.getWorld(),Math.min(selection.pos1.x,selection.pos2.x),Math.min(selection.pos1.y,selection.pos2.y),Math.min(selection.pos1.z,selection.pos2.z),Math.max(selection.pos1.x,selection.pos2.x),Math.max(selection.pos1.y,selection.pos2.y),Math.max(selection.pos1.z,selection.pos2.z)),RegionData.RegionType.FARM_ZONE,selection.name,RegionVisualizationSession.Mode.WHILE_EDITING,false);return;}
+        DistrictData.BlockClaim bounds = asRectangle(selection);
+        if (plugin.getConfigManager().isDistrictSelectionOverlayEnabled())
+            visualizeClaim(player, bounds, selectionType(selection), selection.name, RegionVisualizationSession.Mode.WHILE_EDITING);
+        renderPortalOutline(player, bounds);
+    }
+
+    private RegionData.RegionType selectionType(Selection selection) {
+        if (selection.isSpawnCityClaim()) return RegionData.RegionType.SPAWN_CITY;
+        if (selection.isStationPlatform()) return RegionData.RegionType.STATION_PLATFORM;
+        if (selection.isMarketZone()) return RegionData.RegionType.DISTRICT_MARKET;
+        if (selection.isRestrictedLand()) return RegionData.RegionType.CUSTOM;
+        if (selection.isFarm()) return RegionData.RegionType.FARM_ZONE;
+        return RegionData.RegionType.DISTRICT;
+    }
+
+    private void visualizeClaim(Player player, DistrictData.BlockClaim claim, RegionData.RegionType type, String name, RegionVisualizationSession.Mode mode) {
+        visualization.showBounds(player, new RegionVisualizationSession.Bounds(player.getWorld(), claim.minBlockX(), player.getWorld().getMinHeight(),
+            claim.minBlockZ(), claim.maxBlockX(), player.getWorld().getMaxHeight() - 1, claim.maxBlockZ()), type, name, mode, false);
+    }
+
+    /** Purple portal particles distinguish an editable selection from a confirmed district border. */
+    private void renderPortalOutline(Player player, DistrictData.BlockClaim claim) {
+        if (claim == null || player.getWorld() == null || !player.getWorld().getName().equals(claim.worldName())) return;
+        int y = Math.max(player.getWorld().getMinHeight() + 1, Math.min(player.getLocation().getBlockY() + 1, player.getWorld().getMaxHeight() - 2));
+        long perimeter = Math.max(1L, 2L * claim.widthBlocks() + 2L * claim.depthBlocks());
+        int step = (int) Math.max(1L, (long) Math.ceil(perimeter / 300.0));
         for (int x = claim.minBlockX(); x <= claim.maxBlockX(); x += step) {
-            particleAtSurface(player, x, claim.minBlockZ(), dust);
-            particleAtSurface(player, x, claim.maxBlockZ(), dust);
+            portal(player, x + .5, y, claim.minBlockZ() + .5);
+            portal(player, x + .5, y, claim.maxBlockZ() + .5);
         }
         for (int z = claim.minBlockZ(); z <= claim.maxBlockZ(); z += step) {
-            particleAtSurface(player, claim.minBlockX(), z, dust);
-            particleAtSurface(player, claim.maxBlockX(), z, dust);
+            portal(player, claim.minBlockX() + .5, y, z + .5);
+            portal(player, claim.maxBlockX() + .5, y, z + .5);
         }
-        drawVerticalMarker(player, claim.minBlockX(), claim.minBlockZ(), dust);
-        drawVerticalMarker(player, claim.minBlockX(), claim.maxBlockZ(), dust);
-        drawVerticalMarker(player, claim.maxBlockX(), claim.minBlockZ(), dust);
-        drawVerticalMarker(player, claim.maxBlockX(), claim.maxBlockZ(), dust);
-    }
-
-    private void particleAtSurface(Player player, int x, int z, Particle.DustOptions dust) {
-        int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
-        player.spawnParticle(Particle.DUST, x + .5, y + .5, z + .5, 2, .05, .05, .05, 0, dust);
-    }
-
-    private void drawVerticalMarker(Player player, int x, int z, Particle.DustOptions dust) {
-        int y = player.getWorld().getHighestBlockYAt(x, z) + 1;
-        for (int height = 0; height <= 8; height += 2) {
-            player.spawnParticle(Particle.DUST, x + .5, y + height + .5, z + .5, 2, .08, .08, .08, 0, dust);
+        for (int dy = 0; dy <= 5; dy++) {
+            portal(player, claim.minBlockX() + .5, y + dy, claim.minBlockZ() + .5);
+            portal(player, claim.maxBlockX() + .5, y + dy, claim.maxBlockZ() + .5);
         }
     }
 
-    private record ChunkKey(int x, int z) { }
+    private void portal(Player player, double x, double y, double z) {
+        player.spawnParticle(Particle.PORTAL, x, y, z, 1, 0.03, 0.08, 0.03, 0.01);
+    }
+
+    private String describe(DistrictData.BlockClaim claim) {
+        return claim.widthBlocks() + "x" + claim.depthBlocks() + " blocks (" + claim.areaBlocks() + " area)";
+    }
+
+    private void openBorderDialog(Player player, String title, String body, String reopenCommand) {
+        if (!plugin.getServiceRegistry().has(DialogService.class)) { player.sendMessage(fmt.info(body)); return; }
+        plugin.getServiceRegistry().get(DialogService.class).openResult(player, title, body, java.util.List.of(
+            DialogMenuItem.item("10 seconds", "Keep this border visible for 10 seconds.", "district borders showtime 10", null, Material.CLOCK),
+            DialogMenuItem.item("30 seconds", "Keep this border visible for 30 seconds.", "district borders showtime 30", null, Material.CLOCK),
+            DialogMenuItem.item("Persistent", "Keep this border visible until hidden.", "district borders showtime persistent", null, Material.RECOVERY_COMPASS),
+            DialogMenuItem.item("Side grid ON", "Enable wall grid lines.", "district borders grid on", null, Material.IRON_BARS),
+            DialogMenuItem.item("Floor grid ON", "Enable floor grid lines.", "district borders floorgrid on", null, Material.IRON_TRAPDOOR),
+            DialogMenuItem.item("Hide", "Stop the border visualization.", "district borders hide", null, Material.INK_SAC),
+            DialogMenuItem.item("Refresh", "Render this border again.", reopenCommand, null, Material.ENDER_EYE)));
+    }
+
+    private record BlockPoint(int x, int y, int z) {
+        @Override public String toString() { return x + "," + y + "," + z; }
+    }
+
     private static final class Selection {
         private final String name;
         private final String worldName;
         private final boolean expansion;
-        private final DistrictData.ChunkClaim existing;
-        private final int limit;
+        private final DistrictData.BlockClaim existing;
+        private final long limit;
         private final DistrictData.District marketDistrict;
         private final DistrictData.District stationDistrict;
         private final int stationId;
         private final boolean spawnCityClaim;
-        private final LinkedHashSet<ChunkKey> chunks = new LinkedHashSet<>();
+        private DistrictData.District restrictedDistrict;
+        private UUID foundingPetitionUuid;
+        private DistrictData.District farmDistrict;
+        private DistrictFarmService.FarmType farmType;
+        private int workerFarmId=-1;
+        private String workerSkin;
+        private BlockPoint pos1;
+        private BlockPoint pos2;
         private long lastTouched = System.currentTimeMillis();
 
-        private Selection(String name, String worldName, boolean expansion, DistrictData.ChunkClaim existing, int limit) {
-            this(name, worldName, expansion, existing, limit, null);
-        }
-
-        private Selection(String name, String worldName, boolean expansion, DistrictData.ChunkClaim existing, int limit, DistrictData.District marketDistrict) {
-            this(name, worldName, expansion, existing, limit, marketDistrict, null, -1);
-        }
-
-        private Selection(String name, String worldName, boolean expansion, DistrictData.ChunkClaim existing, int limit,
-                          DistrictData.District marketDistrict, DistrictData.District stationDistrict, int stationId) {
-            this(name, worldName, expansion, existing, limit, marketDistrict, stationDistrict, stationId, false);
-        }
-
-        private Selection(String name, String worldName, boolean expansion, DistrictData.ChunkClaim existing, int limit,
+        private Selection(String name, String worldName, boolean expansion, DistrictData.BlockClaim existing, long limit,
                           DistrictData.District marketDistrict, DistrictData.District stationDistrict, int stationId, boolean spawnCityClaim) {
             this.name = name;
             this.worldName = worldName;
@@ -562,9 +585,14 @@ public final class DistrictSelectionService implements Listener {
             this.spawnCityClaim = spawnCityClaim;
         }
 
+        private boolean complete() { return pos1 != null && pos2 != null; }
         private boolean isMarketZone() { return marketDistrict != null; }
         private boolean isStationPlatform() { return stationDistrict != null; }
         private boolean isSpawnCityClaim() { return spawnCityClaim; }
-        private DistrictData.District ownerDistrict() { return marketDistrict != null ? marketDistrict : stationDistrict; }
+        private boolean isRestrictedLand() { return restrictedDistrict != null; }
+        private boolean isFarm(){return farmDistrict!=null;}
+        private boolean isFarmWorker(){return workerFarmId>=0;}
+        private boolean isFarmZone(){return farmDistrict!=null&&workerFarmId<0;}
+        private DistrictData.District ownerDistrict() { return marketDistrict != null ? marketDistrict : stationDistrict != null ? stationDistrict : restrictedDistrict!=null?restrictedDistrict:farmDistrict; }
     }
 }

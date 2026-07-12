@@ -10,6 +10,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -23,6 +24,10 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -42,12 +47,20 @@ public final class StaffAlertService extends Handler implements Listener {
     private final AtomicInteger serverErrors = new AtomicInteger();
     private final Map<UUID, Deque<Location>> returnLocations = new ConcurrentHashMap<>();
     private final ThreadLocal<Boolean> publishing = ThreadLocal.withInitial(() -> false);
+    private record AlertWrite(String type,String severity,String playerUuid,String playerName,String details,
+                              String world,Double x,Double y,Double z,long createdAt) { }
+    private final ArrayBlockingQueue<AlertWrite> lowPriority = new ArrayBlockingQueue<>(2048);
+    private final Map<String,Long> duplicateCooldowns = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService alertBatcher = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "VS-Alert-Batcher"); thread.setDaemon(false); return thread;
+    });
     private Logger rootLogger;
 
     public StaffAlertService(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
         this.fmt = plugin.getMessageFormatter();
         setLevel(Level.SEVERE);
+        alertBatcher.scheduleWithFixedDelay(this::flushLowPriority, 250, 250, TimeUnit.MILLISECONDS);
     }
 
     public void install() {
@@ -57,20 +70,23 @@ public final class StaffAlertService extends Handler implements Listener {
 
     public void shutdown() {
         if (rootLogger != null) rootLogger.removeHandler(this);
+        alertBatcher.shutdown(); flushLowPriority();
+        try { alertBatcher.awaitTermination(2, TimeUnit.SECONDS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
         returnLocations.clear();
+        duplicateCooldowns.clear();
     }
 
     public void runStartupAudit() {
         startupReport.clear();
         boolean database = plugin.getDatabase().isConnected();
         startupReport.add("Database: " + (database ? "OK" : "FAILED"));
-        startupReport.add("District claim: " + plugin.getConfigManager().getDistrictInitialClaimChunks()
-            + " chunks; Spawn distance: " + plugin.getConfigManager().getDistrictMinDistanceFromSpawn()
+        startupReport.add("District claim area: " + plugin.getConfigManager().getDistrictInitialClaimBlocks()
+            + " blocks; Spawn distance: " + plugin.getConfigManager().getDistrictMinDistanceFromSpawn()
             + "; district distance: " + plugin.getConfigManager().getDistrictMinDistanceBetween());
         startupReport.add("Anti-cheat: " + (plugin.getConfigManager().getConfig().getBoolean("security.anticheat.enabled", true) ? "enabled" : "disabled")
             + "; required Paper anti-xray engine: " + plugin.getConfigManager().getConfig().getInt("security.antiXray.requireEngineMode", 2));
         startupReport.add("Modules: " + plugin.getModuleManager().getModuleNames().size() + " registered");
-        if (!database || plugin.getConfigManager().getDistrictInitialClaimChunks() < 1) {
+        if (!database || plugin.getConfigManager().getDistrictInitialClaimBlocks() < 1) {
             recordAlert("STARTUP_AUDIT", "CRITICAL", null, null, "FAILED: " + String.join(" | ", startupReport), null);
             alertAdmins("Startup audit", "FAILED: " + String.join(" | ", startupReport));
         } else plugin.getLogger().info("[Audit] " + String.join(" | ", startupReport));
@@ -82,29 +98,31 @@ public final class StaffAlertService extends Handler implements Listener {
 
     public int recordAlert(String type, String severity, UUID playerUuid, String playerName, String details, Location location) {
         long now = System.currentTimeMillis();
-        try (Connection connection = plugin.getDatabase().getConnection(); PreparedStatement statement = connection.prepareStatement(
-            "INSERT INTO staff_alerts(alert_type,severity,player_uuid,player_name,details,world,x,y,z,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,'OPEN',?)",
-            Statement.RETURN_GENERATED_KEYS)) {
-            statement.setString(1, normalize(type, "OTHER"));
-            statement.setString(2, normalize(severity, "MEDIUM"));
-            statement.setString(3, playerUuid == null ? null : playerUuid.toString());
-            statement.setString(4, playerName);
-            statement.setString(5, trim(details, 1000));
-            if (location == null || location.getWorld() == null) {
-                statement.setString(6, null); statement.setObject(7, null); statement.setObject(8, null); statement.setObject(9, null);
-            } else {
-                statement.setString(6, location.getWorld().getName()); statement.setDouble(7, location.getX());
-                statement.setDouble(8, location.getY()); statement.setDouble(9, location.getZ());
-            }
-            statement.setLong(10, now); statement.executeUpdate();
-            ResultSet keys = statement.getGeneratedKeys(); int id = keys.next() ? keys.getInt(1) : -1;
-            alertStaff(type + " #" + id, (playerName == null ? "" : playerName + ": ") + trim(details, 180));
-            return id;
-        } catch (Exception error) {
-            if (!Boolean.TRUE.equals(publishing.get())) plugin.getLogger().log(Level.WARNING, "Failed to persist staff alert", error);
-            return -1;
-        }
+        String normalizedType=normalize(type,"OTHER"), normalizedSeverity=normalize(severity,"MEDIUM"), cleanDetails=trim(details,1000);
+        String duplicateKey=normalizedType+":"+(playerUuid==null?"SYSTEM":playerUuid)+":"+cleanDetails;
+        Long previous=duplicateCooldowns.put(duplicateKey,now);if(previous!=null&&now-previous<10_000L)return -1;
+        if(duplicateCooldowns.size()>4096)duplicateCooldowns.entrySet().removeIf(entry->now-entry.getValue()>60_000L);
+        String world=null;Double x=null,y=null,z=null;
+        if(location!=null&&location.getWorld()!=null){world=location.getWorld().getName();x=location.getX();y=location.getY();z=location.getZ();}
+        AlertWrite snapshot=new AlertWrite(normalizedType,normalizedSeverity,playerUuid==null?null:playerUuid.toString(),playerName,cleanDetails,world,x,y,z,now);
+        if(normalizedSeverity.equals("LOW")||normalizedSeverity.equals("MEDIUM")){
+            if(!lowPriority.offer(snapshot))plugin.getLogger().warning("Low-priority staff alert queue is full; alert was rate-limited: "+normalizedType);
+        }else persistAlert(snapshot,true);
+        return -1;
     }
+
+    private void flushLowPriority(){
+        List<AlertWrite> batch=new ArrayList<>();lowPriority.drainTo(batch,128);if(batch.isEmpty())return;
+        plugin.getDatabase().write(connection->{try(PreparedStatement statement=connection.prepareStatement("INSERT INTO staff_alerts(alert_type,severity,player_uuid,player_name,details,world,x,y,z,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,'OPEN',?)")){for(AlertWrite row:batch){bind(statement,row);statement.addBatch();}statement.executeBatch();return batch.size();}})
+            .whenComplete((count,failure)->{if(failure!=null)plugin.getLogger().log(Level.WARNING,"Failed to batch staff alerts",failure);});
+    }
+
+    private void persistAlert(AlertWrite row,boolean notify){
+        plugin.getDatabase().write(connection->{try(PreparedStatement statement=connection.prepareStatement("INSERT INTO staff_alerts(alert_type,severity,player_uuid,player_name,details,world,x,y,z,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,'OPEN',?)",Statement.RETURN_GENERATED_KEYS)){bind(statement,row);statement.executeUpdate();ResultSet keys=statement.getGeneratedKeys();return keys.next()?keys.getInt(1):-1;}})
+            .whenComplete((id,failure)->{if(failure!=null){if(!Boolean.TRUE.equals(publishing.get()))plugin.getLogger().log(Level.WARNING,"Failed to persist staff alert",failure);}else if(notify)alertStaff(row.type()+" #"+id,(row.playerName()==null?"":row.playerName()+": ")+trim(row.details(),180));});
+    }
+
+    private void bind(PreparedStatement statement,AlertWrite row)throws Exception{statement.setString(1,row.type());statement.setString(2,row.severity());statement.setString(3,row.playerUuid());statement.setString(4,row.playerName());statement.setString(5,row.details());statement.setString(6,row.world());statement.setObject(7,row.x());statement.setObject(8,row.y());statement.setObject(9,row.z());statement.setLong(10,row.createdAt());}
 
     public List<Alert> alerts(String type, boolean includeClosed, int limit) {
         List<Alert> rows = new ArrayList<>();
@@ -210,15 +228,13 @@ public final class StaffAlertService extends Handler implements Listener {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if (!player.isOnline() || !isStaff(player)) return;
             double tps = Bukkit.getServer().getTPS()[0];
-            player.sendMessage(fmt.header("Staff Briefing"));
-            player.sendMessage(fmt.info("TPS: &e" + String.format(java.util.Locale.ROOT, "%.2f", tps)
-                + " &7| Online: &e" + Bukkit.getOnlinePlayers().size() + " &7| Server errors: &e" + serverErrors.get()));
-            player.sendMessage(fmt.info("Open alerts: &e" + alerts("ALL", false, 200).size()
-                + " &7| Anti-cheat flags (24h): &e" + countFlagsSince(System.currentTimeMillis() - 86_400_000L)
-                + " &7| Active evidence: &e" + countActiveEvidence()));
-            player.sendMessage(fmt.info("Startup audit: &a" + String.join(" &8| &a", startupReport)));
+            int online=Bukkit.getOnlinePlayers().size(),errors=serverErrors.get();long since=System.currentTimeMillis()-86_400_000L;
+            plugin.getDatabase().read(connection->{int open=count(connection,"SELECT COUNT(*) FROM staff_alerts WHERE status IN ('OPEN','CLAIMED')",null);int flags=count(connection,"SELECT COUNT(*) FROM anticheat_flags WHERE created_at>=?",since);int evidence=count(connection,"SELECT COUNT(*) FROM district_evidence WHERE status IN ('UNHANDLED','ACTIVE')",null);return new int[]{open,flags,evidence};})
+                .whenComplete((counts,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(!player.isOnline())return;player.sendMessage(fmt.header("Staff Briefing"));player.sendMessage(fmt.info("TPS: &e"+String.format(java.util.Locale.ROOT,"%.2f",tps)+" &7| Online: &e"+online+" &7| Server errors: &e"+errors));if(failure==null)player.sendMessage(fmt.info("Open alerts: &e"+counts[0]+" &7| Anti-cheat flags (24h): &e"+counts[1]+" &7| Active evidence: &e"+counts[2]));player.sendMessage(fmt.info("Startup audit: &a"+String.join(" &8| &a",startupReport)));}));
         }, 20L);
     }
+
+    @EventHandler public void onQuit(PlayerQuitEvent event){returnLocations.remove(event.getPlayer().getUniqueId());}
 
     private boolean isStaff(Player player) {
         try { return plugin.getServiceRegistry().get(AccessService.class).isStaff(player.getUniqueId()); }
@@ -232,6 +248,7 @@ public final class StaffAlertService extends Handler implements Listener {
             if (value != null) statement.setLong(1, value); ResultSet result = statement.executeQuery(); return result.next() ? result.getInt(1) : 0;
         } catch (Exception ignored) { return 0; }
     }
+    private int count(Connection connection,String sql,Long value)throws Exception{try(PreparedStatement statement=connection.prepareStatement(sql)){if(value!=null)statement.setLong(1,value);try(ResultSet result=statement.executeQuery()){return result.next()?result.getInt(1):0;}}}
     private Alert read(ResultSet result) throws Exception {
         String uuid = result.getString("player_uuid"); Object x = result.getObject("x"), y = result.getObject("y"), z = result.getObject("z");
         return new Alert(result.getInt("id"), result.getString("alert_type"), result.getString("severity"),

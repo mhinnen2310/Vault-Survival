@@ -12,6 +12,8 @@ public interface RailService {
      * Only MAYOR, CO_MAYOR, or DIPLOMAT can do this.
      */
     RailData.Station requestStation(Player requester, String name);
+    /** Dialog-safe application path; returns the station without command chat output. */
+    RailData.Station requestStationSilently(Player requester, String name);
 
     /**
      * Set the platform region for a pending station.
@@ -27,6 +29,9 @@ public interface RailService {
      * Set ticket price for a station.
      */
     boolean setTicketPrice(int stationId, Player player, long price);
+
+    /** Dialog-safe variant that returns structured status without emitting chat output. */
+    boolean setTicketPriceSilently(int stationId, Player player, long price);
 
     /**
      * Set upkeep cost for a station (staff only).

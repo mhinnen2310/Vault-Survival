@@ -4,6 +4,7 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.npc.NpcData;
 import com.vaultsurvival.plugin.npc.NpcService;
+import com.vaultsurvival.plugin.npc.NpcRemovedEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -12,8 +13,10 @@ import org.bukkit.block.BlockState;
 import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -24,6 +27,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -99,6 +104,30 @@ public final class DistrictNpcPlanningService implements Listener {
         player.sendMessage(fmt.info(created == 0 ? "No planned NPCs are unlocked yet." : "Activated " + created + " district NPC(s)."));
     }
 
+    public void move(Player player, int npcId) {
+        DistrictData.District district = districts.getPlayerDistrict(player.getUniqueId());
+        if (district == null || !districts.canManageDevelopment(player.getUniqueId(), district)) {
+            player.sendMessage(fmt.error("Requires MAYOR, CO_MAYOR, or BUILDER in this NPC's district.")); return;
+        }
+        DistrictData.BlockClaim claim = districts.getClaim(district.getId()); Location location = player.getLocation();
+        if (claim == null || !claim.worldName().equals(location.getWorld().getName()) || !claim.contains(location.getBlockX(), location.getBlockZ())) {
+            player.sendMessage(fmt.error("Stand at the new location inside your district claim.")); return;
+        }
+        try (Connection connection = plugin.getDatabase().getConnection(); PreparedStatement check = connection.prepareStatement(
+                "SELECT id FROM district_npc_plans WHERE district_id=? AND npc_id=? AND status='ACTIVE'")) {
+            check.setInt(1, district.getId()); check.setInt(2, npcId); ResultSet row = check.executeQuery();
+            if (!row.next()) { player.sendMessage(fmt.error("That is not an active NPC owned by your district.")); return; }
+            NpcService npcs = plugin.getServiceRegistry().get(NpcService.class);
+            if (!npcs.moveNpc(npcId, location)) { player.sendMessage(fmt.error("NPC could not be moved.")); return; }
+            plugin.getDatabase().executeUpdate("UPDATE district_npc_plans SET world=?,x=?,y=?,z=?,yaw=?,pitch=?,planned_by=?,planned_at=? WHERE id=?",
+                location.getWorld().getName(), location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch(),
+                player.getUniqueId().toString(), System.currentTimeMillis(), row.getInt(1));
+            plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "DISTRICT_NPC_MOVE", "NPC", String.valueOf(npcId),
+                "district=" + district.getId() + " world=" + location.getWorld().getName() + " x=" + location.getX() + " y=" + location.getY() + " z=" + location.getZ());
+            player.sendMessage(fmt.success("District NPC moved to your current location."));
+        } catch (Exception error) { player.sendMessage(fmt.error("NPC move could not be saved.")); }
+    }
+
     public void cancel(Player player) { cancel(player, true); }
     private void cancel(Player player, boolean message) {
         PlanSession session = sessions.remove(player.getUniqueId());
@@ -107,7 +136,7 @@ public final class DistrictNpcPlanningService implements Listener {
         if (message) player.sendMessage(fmt.info("District NPC planning cancelled; marker blocks were restored."));
     }
 
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
         PlanSession session = sessions.get(event.getPlayer().getUniqueId());
         if (session == null || event.getItemInHand().getItemMeta() == null) return;
@@ -117,11 +146,47 @@ public final class DistrictNpcPlanningService implements Listener {
         try { type = NpcPlanType.valueOf(raw); } catch (IllegalArgumentException ignored) { event.setCancelled(true); return; }
         if (session.markers.containsKey(type)) { event.setCancelled(true); event.getPlayer().sendMessage(fmt.error("That NPC marker is already placed.")); return; }
         if (!event.getBlockPlaced().getWorld().getName().equals(session.district.getWorldName())) { event.setCancelled(true); return; }
+        DistrictData.BlockClaim claim = districts.getClaim(session.district.getId());
+        if (claim == null || !claim.contains(event.getBlockPlaced().getX(), event.getBlockPlaced().getZ())) {
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(fmt.error("District NPC markers must be placed inside the exact district border."));
+            return;
+        }
         float yaw = yawFor(event.getBlockPlaced().getBlockData());
         Location location = event.getBlockPlaced().getLocation().add(.5, 0, .5);
         location.setYaw(yaw);
         session.markers.put(type, new PlacedMarker(location, event.getBlockReplacedState()));
         event.getPlayer().sendMessage(fmt.success(type.displayName + " marker placed. It will face the same direction."));
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBreak(BlockBreakEvent event) {
+        PlanSession session = sessions.get(event.getPlayer().getUniqueId());
+        if (session == null) return;
+        Map.Entry<NpcPlanType, PlacedMarker> match = session.markers.entrySet().stream()
+            .filter(entry -> entry.getValue().location.getWorld() != null
+                && entry.getValue().location.getWorld().equals(event.getBlock().getWorld())
+                && entry.getValue().location.getBlockX() == event.getBlock().getX()
+                && entry.getValue().location.getBlockY() == event.getBlock().getY()
+                && entry.getValue().location.getBlockZ() == event.getBlock().getZ())
+            .findFirst().orElse(null);
+        if (match == null) return;
+        event.setCancelled(true);
+        session.markers.remove(match.getKey());
+        match.getValue().original.update(true, false);
+        giveMarker(event.getPlayer(), match.getKey());
+        event.getPlayer().sendMessage(fmt.info(match.getKey().displayName + " marker removed. Its placement item was returned."));
+    }
+
+    @EventHandler
+    public void onNpcRemoved(NpcRemovedEvent event) {
+        try {
+            plugin.getDatabase().executeUpdateAsync(
+                "UPDATE district_npc_plans SET status='MISSING',npc_id=NULL WHERE npc_id=?",
+                event.getNpc().getId());
+        } catch (Exception error) {
+            plugin.getLogger().warning("Could not mark removed district NPC #" + event.getNpc().getId() + " as replaceable: " + error.getMessage());
+        }
     }
 
     @EventHandler public void onQuit(PlayerQuitEvent event) { cancel(event.getPlayer(), false); }
@@ -152,16 +217,30 @@ public final class DistrictNpcPlanningService implements Listener {
 
     private Set<NpcPlanType> missingUnlockedTypes(DistrictData.District district) throws Exception {
         Set<NpcPlanType> placedTypes = EnumSet.noneOf(NpcPlanType.class);
+        List<Integer> staleActivePlans = new ArrayList<>();
+        NpcService npcService = plugin.getServiceRegistry().get(NpcService.class);
         try (Connection connection = plugin.getDatabase().getConnection();
-             PreparedStatement statement = connection.prepareStatement("SELECT npc_type FROM district_npc_plans WHERE district_id=?")) {
+             PreparedStatement statement = connection.prepareStatement("SELECT id,npc_type,status,npc_id FROM district_npc_plans WHERE district_id=?")) {
             statement.setInt(1, district.getId());
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
                     try {
-                        placedTypes.add(NpcPlanType.valueOf(results.getString("npc_type")));
+                        NpcPlanType type = NpcPlanType.valueOf(results.getString("npc_type"));
+                        String status = results.getString("status");
+                        Object rawNpcId = results.getObject("npc_id");
+                        Integer npcId = rawNpcId instanceof Number number ? number.intValue() : null;
+                        if ("PLANNED".equalsIgnoreCase(status)
+                            || ("ACTIVE".equalsIgnoreCase(status) && npcId != null && npcService.getNpc(npcId) != null)) {
+                            placedTypes.add(type);
+                        } else if ("ACTIVE".equalsIgnoreCase(status)) {
+                            staleActivePlans.add(results.getInt("id"));
+                        }
                     } catch (IllegalArgumentException ignored) { }
                 }
             }
+        }
+        for (int planId : staleActivePlans) {
+            plugin.getDatabase().executeUpdate("UPDATE district_npc_plans SET status='MISSING',npc_id=NULL WHERE id=?", planId);
         }
         int level = developmentLevel(district.getId());
         Set<NpcPlanType> missing = EnumSet.noneOf(NpcPlanType.class);
@@ -181,7 +260,8 @@ public final class DistrictNpcPlanningService implements Listener {
                 NpcPlanType type = NpcPlanType.valueOf(results.getString("npc_type"));
                 var world = Bukkit.getWorld(results.getString("world")); if (world == null) continue;
                 Location location = new Location(world, results.getDouble("x"), results.getDouble("y"), results.getDouble("z"), results.getFloat("yaw"), results.getFloat("pitch"));
-                NpcData.Npc npc = npcs.createNpc(district.getName() + " " + type.displayName, skin, location, type.actionType, type.command);
+                String actionData=type==NpcPlanType.CLERK?"DISTRICT:"+district.getId():type.command;
+                NpcData.Npc npc = npcs.createNpc(district.getName() + " " + type.displayName, skin, location, type.actionType, actionData);
                 if (npc == null) continue;
                 plugin.getDatabase().executeUpdate("UPDATE district_npc_plans SET status='ACTIVE',npc_id=? WHERE id=?", npc.getId(), results.getInt("id"));
                 count++;
@@ -194,7 +274,7 @@ public final class DistrictNpcPlanningService implements Listener {
     private float yawFor(org.bukkit.block.data.BlockData data) { if (!(data instanceof Directional directional)) return 0; return switch(directional.getFacing()){case NORTH->180f;case SOUTH->0f;case EAST->-90f;case WEST->90f;default->0f;}; }
 
     private enum NpcPlanType {
-        CLERK("Town Clerk", Material.LECTERN, 0, NpcData.ActionType.COMMAND, "vsmenu district"),
+        CLERK("Town Clerk", Material.LECTERN, 0, NpcData.ActionType.TOWN_CLERK, ""),
         JOB_BOARD("Job Board", Material.LOOM, 0, NpcData.ActionType.COMMAND, "spawnjobs"),
         MARKET_STEWARD("Market Steward", Material.BARREL, 1, NpcData.ActionType.COMMAND, "merchant order list"),
         CONDUCTOR("Conductor", Material.BLAST_FURNACE, 2, NpcData.ActionType.NONE, "");

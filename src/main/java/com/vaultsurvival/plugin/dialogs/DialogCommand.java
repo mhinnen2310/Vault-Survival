@@ -36,6 +36,34 @@ public class DialogCommand implements CommandExecutor, TabCompleter {
         }
 
         if (command.getName().equalsIgnoreCase("vsmenu")
+            && args.length >= 2
+            && args[0].equalsIgnoreCase("form")) {
+            dialogService.openForm(player, args[1], Arrays.copyOfRange(args, 2, args.length));
+            return true;
+        }
+
+        if (command.getName().equalsIgnoreCase("vsmenu")
+            && args.length >= 2
+            && args[0].equalsIgnoreCase("apply")) {
+            dialogService.applyForm(player, args[1], Arrays.copyOfRange(args, 2, args.length));
+            return true;
+        }
+
+        if (command.getName().equalsIgnoreCase("vsmenu")
+            && args.length >= 3
+            && args[0].equalsIgnoreCase("commit")) {
+            dialogService.commitForm(player, args[1], args[2]);
+            return true;
+        }
+
+        if (command.getName().equalsIgnoreCase("vsmenu")
+            && args.length >= 2
+            && args[0].equalsIgnoreCase("action")) {
+            dialogService.runAction(player, args[1], Arrays.copyOfRange(args, 2, args.length));
+            return true;
+        }
+
+        if (command.getName().equalsIgnoreCase("vsmenu")
             && args.length >= 1
             && args[0].equalsIgnoreCase("locked")) {
             dialogService.showLocked(player, join(args, 1));

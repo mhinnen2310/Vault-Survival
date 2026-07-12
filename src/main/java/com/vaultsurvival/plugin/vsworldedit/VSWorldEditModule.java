@@ -11,6 +11,7 @@ import com.vaultsurvival.plugin.core.Module;
 public class VSWorldEditModule extends Module {
 
     private VSWorldEditServiceImpl service;
+    private VweSchematicServiceImpl schematicService;
     private VSWorldEditListener listener;
 
     public VSWorldEditModule(VaultSurvivalPlugin plugin) {
@@ -31,11 +32,19 @@ public class VSWorldEditModule extends Module {
     public void onLoad() {
         service = new VSWorldEditServiceImpl(plugin);
         plugin.getServiceRegistry().register(VSWorldEditService.class, service);
+        schematicService = new VweSchematicServiceImpl(plugin, service);
+        plugin.getServiceRegistry().register(VweSchematicService.class, schematicService);
         plugin.getLogger().info("VS-WorldEdit service registered");
     }
 
     @Override
     public void onEnable() {
+        PatternParserDiagnostics.Result diagnostics = PatternParserDiagnostics.runDefaults();
+        if (!diagnostics.passed()) {
+            throw new IllegalStateException("VWE pattern parser self-test failed: " + String.join(", ", diagnostics.failures()));
+        }
+        plugin.getLogger().info("VWE pattern parser self-test passed (" + diagnostics.checks() + " checks)");
+
         // Register wand listener
         listener = new VSWorldEditListener(plugin);
         plugin.getServer().getPluginManager().registerEvents(listener, plugin);
@@ -50,6 +59,7 @@ public class VSWorldEditModule extends Module {
 
     @Override
     public void onDisable() {
+        plugin.getServiceRegistry().unregister(VweSchematicService.class);
         plugin.getServiceRegistry().unregister(VSWorldEditService.class);
     }
 

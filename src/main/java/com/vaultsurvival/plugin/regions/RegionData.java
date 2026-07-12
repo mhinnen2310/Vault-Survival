@@ -16,6 +16,21 @@ public class RegionData {
 
     /** Region categories that determine default rule sets. */
     public enum RegionType {
+        SPAWN_CITY,
+        DISTRICT_MARKET,
+        STATION_PLATFORM,
+        STATION_ARRIVAL,
+        TOWN_HALL,
+        JAIL,
+        POLICE_STATION,
+        TREASURY,
+        VAULT_ZONE,
+        REPAIR_ZONE,
+        JOB_BOARD,
+        BLACK_MARKET,
+        PROJECT_REGION,
+        TRAIN_INTERIOR,
+        FARM_ZONE,
         SPAWN_PUBLIC,      // Spawn capital — safe, no PvP, no breach
         AUCTION_HALL,      // Auction Hall interior — market interaction allowed
         MINT,              // Mint building — cash minting allowed
@@ -81,6 +96,28 @@ public class RegionData {
 
         private void applyTypeDefaults(RegionType type) {
             switch (type) {
+                case SPAWN_CITY, TOWN_HALL, JAIL, POLICE_STATION, TREASURY,
+                     VAULT_ZONE, REPAIR_ZONE, JOB_BOARD -> {
+                    flags.put(RuleFlag.PVP_ENABLED, false);
+                    flags.put(RuleFlag.BREACH_ALLOWED, false);
+                    flags.put(RuleFlag.BLOCK_PLACE, false);
+                    flags.put(RuleFlag.BLOCK_BREAK, false);
+                }
+                case DISTRICT_MARKET, BLACK_MARKET -> {
+                    flags.put(RuleFlag.PVP_ENABLED, false);
+                    flags.put(RuleFlag.MARKET_INTERACTION_ALLOWED, true);
+                    flags.put(RuleFlag.BLOCK_PLACE, false);
+                    flags.put(RuleFlag.BLOCK_BREAK, false);
+                }
+                case PROJECT_REGION -> {
+                    flags.put(RuleFlag.PVP_ENABLED, true);
+                    flags.put(RuleFlag.VISITOR_BUILD_ALLOWED, false);
+                }
+                case STATION_PLATFORM, STATION_ARRIVAL, TRAIN_INTERIOR -> {
+                    flags.put(RuleFlag.BLOCK_PLACE, false);
+                    flags.put(RuleFlag.BLOCK_BREAK, false);
+                    flags.put(RuleFlag.STATION_USE_ALLOWED, true);
+                }
                 case SPAWN_PUBLIC -> {
                     flags.put(RuleFlag.PVP_ENABLED, false);
                     flags.put(RuleFlag.CASH_DROP_ENABLED, true);

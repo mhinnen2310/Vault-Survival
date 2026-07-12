@@ -184,7 +184,8 @@ public class CrimeListener implements Listener {
             RegionService regionService = plugin.getServiceRegistry().get(RegionService.class);
             return regionService.getRegionsAt(location).stream()
                 .anyMatch(region -> region.getType() == RegionData.RegionType.AUCTION_HALL
-                    || region.getType() == RegionData.RegionType.DISTRICT_PUBLIC);
+                    || region.getType() == RegionData.RegionType.DISTRICT_PUBLIC
+                    || region.getType() == RegionData.RegionType.DISTRICT_MARKET);
         } catch (RuntimeException ignored) {
             return false;
         }

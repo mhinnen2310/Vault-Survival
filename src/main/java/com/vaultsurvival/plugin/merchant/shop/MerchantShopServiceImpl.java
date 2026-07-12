@@ -7,6 +7,7 @@ import com.vaultsurvival.plugin.core.MessageFormatter;
 import com.vaultsurvival.plugin.currency.CurrencyService;
 import com.vaultsurvival.plugin.districts.DistrictService;
 import com.vaultsurvival.plugin.districts.DistrictData;
+import com.vaultsurvival.plugin.districts.DistrictTreasuryService;
 import com.vaultsurvival.plugin.npc.NpcData;
 import com.vaultsurvival.plugin.npc.NpcService;
 import com.vaultsurvival.plugin.social.PayoutLockerService;
@@ -47,6 +48,7 @@ public class MerchantShopServiceImpl implements MerchantShopService {
     private final MessageFormatter fmt;
     private final Logger logger;
     private final ConcurrentHashMap<Integer, MerchantShopData.Shop> shops = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Long> pendingEditors = new ConcurrentHashMap<>();
 
     public MerchantShopServiceImpl(VaultSurvivalPlugin plugin) {
         this.plugin = plugin;
@@ -88,7 +90,8 @@ public class MerchantShopServiceImpl implements MerchantShopService {
                 RegionService regions = plugin.getServiceRegistry().get(RegionService.class);
                 boolean market = regions.getRegionsAt(merchant.getLocation()).stream().anyMatch(region ->
                     region.getType() == RegionData.RegionType.AUCTION_HALL
-                        || (region.getType() == RegionData.RegionType.DISTRICT_PUBLIC
+                        || ((region.getType() == RegionData.RegionType.DISTRICT_PUBLIC
+                            || region.getType() == RegionData.RegionType.DISTRICT_MARKET)
                             && region.getName().equalsIgnoreCase("district_market_" + district.getId())));
                 if (!market) {
                     merchant.sendMessage(fmt.error("This district requires merchant NPCs to be placed inside a market zone."));
@@ -278,13 +281,21 @@ public class MerchantShopServiceImpl implements MerchantShopService {
 
     @Override
     public boolean setPrice(Player merchant, int shopId, int slot, long price) {
+        return setPriceInternal(merchant, shopId, slot, price, true);
+    }
+
+    @Override public boolean setPriceSilently(Player merchant, int shopId, int slot, long price) {
+        return setPriceInternal(merchant, shopId, slot, price, false);
+    }
+
+    private boolean setPriceInternal(Player merchant, int shopId, int slot, long price, boolean notify) {
         MerchantShopData.Shop shop = shops.get(shopId);
         if (shop == null || !shop.getOwnerUuid().equals(merchant.getUniqueId())) {
-            merchant.sendMessage(fmt.error("Shop not found or not yours."));
+            if (notify) merchant.sendMessage(fmt.error("Shop not found or not yours."));
             return false;
         }
         if (price < 0) {
-            merchant.sendMessage(fmt.error("Price cannot be negative."));
+            if (notify) merchant.sendMessage(fmt.error("Price cannot be negative."));
             return false;
         }
 
@@ -299,7 +310,7 @@ public class MerchantShopServiceImpl implements MerchantShopService {
                 rows = ps.executeUpdate();
             }
             if (rows == 0) {
-                merchant.sendMessage(fmt.error("No item in slot " + slot + ". Add stock first."));
+                if (notify) merchant.sendMessage(fmt.error("No item in slot " + slot + ". Add stock first."));
                 return false;
             }
         } catch (SQLException e) {
@@ -307,7 +318,7 @@ public class MerchantShopServiceImpl implements MerchantShopService {
             return false;
         }
 
-        merchant.sendMessage(fmt.success("Price for slot " + slot + " set to &6" +
+        if (notify) merchant.sendMessage(fmt.success("Price for slot " + slot + " set to &6" +
             fmt.formatMoney(price, plugin.getConfigManager().getCurrencyName(),
                 plugin.getConfigManager().getCurrencyNamePlural())));
         return true;
@@ -339,12 +350,9 @@ public class MerchantShopServiceImpl implements MerchantShopService {
             try {
                 int newStock = shopItem.getStock() - toRemove;
                 if (newStock <= 0) {
-                    plugin.getDatabase().executeUpdate(
-                        "DELETE FROM merchant_shop_items WHERE id = ?", shopItem.getId());
+                    try(PreparedStatement delete=conn.prepareStatement("DELETE FROM merchant_shop_items WHERE id=? AND stock=?")){delete.setInt(1,shopItem.getId());delete.setInt(2,shopItem.getStock());if(delete.executeUpdate()!=1)throw new SQLException("Shop stock changed; refresh and try again");}
                 } else {
-                    plugin.getDatabase().executeUpdate(
-                        "UPDATE merchant_shop_items SET stock = ? WHERE id = ?",
-                        newStock, shopItem.getId());
+                    try(PreparedStatement update=conn.prepareStatement("UPDATE merchant_shop_items SET stock=? WHERE id=? AND stock=?")){update.setInt(1,newStock);update.setInt(2,shopItem.getId());update.setInt(3,shopItem.getStock());if(update.executeUpdate()!=1)throw new SQLException("Shop stock changed; refresh and try again");}
                 }
                 conn.commit();
             } catch (SQLException e) {
@@ -416,17 +424,20 @@ public class MerchantShopServiceImpl implements MerchantShopService {
         }
 
         // Calculate tax
-        DistrictService districtService;
-        try {
-            districtService = plugin.getServiceRegistry().get(DistrictService.class);
-        } catch (Exception e) {
-            districtService = null;
-        }
-
         int taxPercent = plugin.getConfigManager().getConfig()
             .getInt("districtMarket.defaultTaxPercent", 10);
         long taxAmount = Math.max(0, Math.round(totalPrice * (taxPercent / 100.0)));
         long netEarnings = totalPrice - taxAmount;
+
+        DistrictTreasuryService treasury = null;
+        if (taxAmount > 0) {
+            try { treasury = plugin.getServiceRegistry().get(DistrictTreasuryService.class); }
+            catch (RuntimeException ignored) { }
+            if (treasury == null || treasury.getVaults(shop.getDistrictId()).isEmpty()) {
+                buyer.sendMessage(fmt.error("This shop's district has no registered physical treasury vault for tax."));
+                return false;
+            }
+        }
 
         PayoutLockerService payouts;
         try {
@@ -451,51 +462,67 @@ public class MerchantShopServiceImpl implements MerchantShopService {
             conn.setAutoCommit(false);
             try {
                 // Mark withdrawn cash as spent
-                for (ItemStack cashItem : withdrawn) {
-                    UUID cashUuid = currency.getCashUuid(cashItem);
-                    plugin.getDatabase().executeUpdate(
-                        "UPDATE cash_items SET state = 'SPENT', last_seen_at = datetime('now') WHERE cash_uuid = ?",
-                        cashUuid.toString());
+                try (PreparedStatement spend = conn.prepareStatement(
+                        "UPDATE cash_items SET state='SPENT',location_type='MERCHANT_PURCHASE',location_id=?,owner_uuid=NULL,last_seen_at=datetime('now') WHERE cash_uuid=?")) {
+                    for (ItemStack cashItem : withdrawn) {
+                        spend.setString(1, String.valueOf(shopId));
+                        spend.setString(2, currency.getCashUuid(cashItem).toString());
+                        if (spend.executeUpdate() != 1) throw new SQLException("Purchase cash changed concurrently");
+                    }
                 }
 
-                // Deposit tax to district treasury by minting new cash
-                // (tax portion of destroyed cash is re-minted as treasury funds)
-                if (taxAmount > 0 && districtService != null) {
-                    // Use mintCash to properly create treasury cash through CurrencyService
-                    // Then immediately move it to treasury state
-                    ItemStack taxCash = currency.mintCash(taxAmount, buyer.getUniqueId(), null);
-                    UUID taxCashUuid = currency.getCashUuid(taxCash);
-                    plugin.getDatabase().executeUpdate(
-                        "UPDATE cash_items SET state = 'IN_DISTRICT_TREASURY', " +
-                        "location_type = 'TREASURY', location_id = ?, owner_uuid = NULL " +
-                        "WHERE cash_uuid = ?",
-                        String.valueOf(shop.getDistrictId()), taxCashUuid.toString());
+                // Claim stock atomically. The shop view is only a snapshot and two
+                // customers can click it during the same tick.
+                try (PreparedStatement stock = conn.prepareStatement(
+                        "UPDATE merchant_shop_items SET stock=stock-? WHERE id=? AND shop_id=? AND stock>=?")) {
+                    stock.setInt(1, toBuy);
+                    stock.setInt(2, shopItem.getId());
+                    stock.setInt(3, shopId);
+                    stock.setInt(4, toBuy);
+                    if (stock.executeUpdate() != 1) throw new SQLException("Stock changed concurrently");
                 }
-
-                // Update stock
-                int newStock = shopItem.getStock() - toBuy;
-                if (newStock <= 0) {
-                    plugin.getDatabase().executeUpdate(
-                        "DELETE FROM merchant_shop_items WHERE id = ?", shopItem.getId());
-                } else {
-                    plugin.getDatabase().executeUpdate(
-                        "UPDATE merchant_shop_items SET stock = ? WHERE id = ?",
-                        newStock, shopItem.getId());
+                try (PreparedStatement cleanup = conn.prepareStatement(
+                        "DELETE FROM merchant_shop_items WHERE id=? AND stock=0")) {
+                    cleanup.setInt(1, shopItem.getId());
+                    cleanup.executeUpdate();
                 }
 
                 // Record sale
-                plugin.getDatabase().executeUpdate(
-                    "INSERT INTO merchant_shop_sales (shop_id, buyer_uuid, item_data, quantity, price_each, tax_amount, timestamp) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    shopId, buyer.getUniqueId().toString(), shopItem.getItemData(),
-                    toBuy, shopItem.getPrice(), taxAmount, now);
+                try (PreparedStatement sale = conn.prepareStatement(
+                        "INSERT INTO merchant_shop_sales (shop_id,buyer_uuid,item_data,quantity,price_each,tax_amount,timestamp) " +
+                            "VALUES (?,?,?,?,?,?,?)")) {
+                    sale.setInt(1, shopId);
+                    sale.setString(2, buyer.getUniqueId().toString());
+                    sale.setString(3, shopItem.getItemData());
+                    sale.setInt(4, toBuy);
+                    sale.setLong(5, shopItem.getPrice());
+                    sale.setLong(6, taxAmount);
+                    sale.setLong(7, now);
+                    if (sale.executeUpdate() != 1) throw new SQLException("Sale was not recorded");
+                }
+
+                // The merchant payout is part of the same transaction as stock
+                // and payment. A successful sale can therefore never lose its payout.
+                try (PreparedStatement payout = conn.prepareStatement(
+                        "INSERT INTO payout_lockers(player_uuid,amount,source_type,source_id,details,status,created_at) " +
+                            "VALUES(?,?,'MERCHANT_SHOP',?,?, 'PENDING',?)")) {
+                    payout.setString(1, shop.getOwnerUuid().toString());
+                    payout.setLong(2, netEarnings);
+                    payout.setString(3, String.valueOf(shopId));
+                    payout.setString(4, "sold=" + toBuy + "x " + shopItem.getItemDisplay() + " tax=" + taxAmount);
+                    payout.setLong(5, now);
+                    if (payout.executeUpdate() != 1) throw new SQLException("Merchant payout was not stored");
+                }
 
                 conn.commit();
 
-                // Create payout locker entry for merchant
-                payouts.storePayout(shop.getOwnerUuid(), netEarnings,
-                    "MERCHANT_SHOP", String.valueOf(shopId),
-                    "sold=" + toBuy + "x " + shopItem.getItemDisplay() + " tax=" + taxAmount);
+                if (taxAmount > 0) {
+                    var taxCredit = treasury.creditSystem(shop.getDistrictId(), taxAmount,
+                        "MERCHANT_SHOP_TAX", buyer.getUniqueId());
+                    if (!taxCredit.success()) {
+                        logger.severe("Committed shop tax could not be credited: " + taxCredit.message());
+                    }
+                }
 
                 audit.log(buyer.getUniqueId(), buyer.getName(), "MERCHANT_SHOP_BUY",
                     "SHOP", String.valueOf(shopId),
@@ -533,7 +560,7 @@ public class MerchantShopServiceImpl implements MerchantShopService {
                     merchant.sendMessage(fmt.info("Earnings: &6" + fmt.formatMoney(netEarnings,
                         plugin.getConfigManager().getCurrencyName(),
                         plugin.getConfigManager().getCurrencyNamePlural()) +
-                        " &7- Use &e/payouts claim &7to collect."));
+                        " &7- Collect it by interacting with your shop NPC."));
                 }
 
                 return true;
@@ -639,9 +666,40 @@ public class MerchantShopServiceImpl implements MerchantShopService {
             return;
         }
 
+        if (shop.getOwnerUuid().equals(player.getUniqueId())) {
+            Long pendingUntil = pendingEditors.remove(player.getUniqueId());
+            if (pendingUntil != null && pendingUntil >= System.currentTimeMillis()) {
+                openShopEditor(player, shop.getId());
+                return;
+            }
+            try {
+                var dialogs = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.dialogs.DialogService.class);
+                dialogs.openResult(player, shop.getName(), "Choose how you want to use your shop NPC.", List.of(
+                    com.vaultsurvival.plugin.dialogs.DialogMenuItem.item("Open Shop", "Browse the customer inventory.", "merchant shop browse " + shop.getId(), null, Material.CHEST),
+                    com.vaultsurvival.plugin.dialogs.DialogMenuItem.item("Edit Shop", "Move inventory items into shop slots and set prices.", "merchant shop edit " + shop.getId(), null, Material.CRAFTING_TABLE),
+                    com.vaultsurvival.plugin.dialogs.DialogMenuItem.item("Collect Earnings", "Collect pending proceeds as physical cash here.", "merchant shop collect " + shop.getId(), null, Material.GOLD_INGOT)
+                ));
+                return;
+            } catch (RuntimeException ignored) { }
+        }
+
+        openCustomerShop(player, shop.getId());
+    }
+
+    @Override
+    public void openCustomerShop(Player player, int shopId) {
+        MerchantShopData.Shop shop = getShop(shopId);
+        if (shop == null) {
+            player.sendMessage(fmt.error("Shop not found."));
+            return;
+        }
         List<MerchantShopData.ShopItem> items = getShopItems(shop.getId());
         if (items.isEmpty()) {
-            player.sendMessage(fmt.info("This shop has no items in stock."));
+            player.closeInventory();
+            try {
+                plugin.getServiceRegistry().get(com.vaultsurvival.plugin.dialogs.DialogService.class).openResult(player,
+                    shop.getName(), "This shop is currently sold out.", List.of());
+            } catch (RuntimeException fallback) { player.sendMessage(fmt.info("This shop has no items in stock.")); }
             return;
         }
 
@@ -664,7 +722,9 @@ public class MerchantShopServiceImpl implements MerchantShopService {
 
             guiItems.add(new GUIFramework.GUIItem(shopItem.getSlot(), display, (p, e) -> {
                 int buyQty = e.isShiftClick() ? Math.min(64, shopItem.getStock()) : 1;
-                buyItem(p, shop.getId(), shopItem.getSlot(), buyQty);
+                if (buyItem(p, shop.getId(), shopItem.getSlot(), buyQty)) {
+                    Bukkit.getScheduler().runTask(plugin, () -> openCustomerShop(p, shop.getId()));
+                }
             }));
         }
 
@@ -673,6 +733,60 @@ public class MerchantShopServiceImpl implements MerchantShopService {
 
         player.sendMessage(fmt.info("&eShift+click &7to buy a stack (up to 64)."));
     }
+
+    @Override
+    public void beginShopEdit(Player merchant) {
+        if (getMerchantShops(merchant.getUniqueId()).isEmpty()) {
+            merchant.sendMessage(fmt.error("You do not own a merchant shop."));
+            return;
+        }
+        pendingEditors.put(merchant.getUniqueId(), System.currentTimeMillis() + 60_000L);
+        merchant.sendMessage(fmt.info("Right-click the shop NPC you want to edit within 60 seconds."));
+    }
+
+    @Override
+    public void openShopEditor(Player merchant, int shopId) {
+        MerchantShopData.Shop shop = shops.get(shopId);
+        if (shop == null || !shop.getOwnerUuid().equals(merchant.getUniqueId())) {
+            merchant.sendMessage(fmt.error("Shop not found or not yours."));
+            return;
+        }
+        MerchantShopEditor.open(plugin, this, merchant, shop);
+    }
+
+    @Override
+    public boolean depositEditorStack(Player merchant, int shopId, int slot, ItemStack supplied) {
+        MerchantShopData.Shop shop = shops.get(shopId);
+        if (shop == null || !shop.getOwnerUuid().equals(merchant.getUniqueId()) || slot < 0 || slot >= 45
+            || supplied == null || supplied.getType().isAir() || supplied.getAmount() <= 0) return false;
+        ItemStack template = supplied.clone(); template.setAmount(1);
+        MerchantShopData.ShopItem existing = getShopItems(shopId).stream().filter(row -> row.getSlot() == slot).findFirst().orElse(null);
+        if (existing != null && !deserializeItem(existing.getItemData()).isSimilar(template)) {
+            merchant.sendMessage(fmt.error("That shop slot contains a different item."));
+            return false;
+        }
+        try (Connection connection = plugin.getDatabase().getConnection()) {
+            if (existing == null) {
+                try (PreparedStatement insert = connection.prepareStatement(
+                        "INSERT INTO merchant_shop_items(shop_id,slot,item_data,item_display,stock,price) VALUES(?,?,?,?,?,0)")) {
+                    insert.setInt(1, shopId); insert.setInt(2, slot); insert.setString(3, serializeItem(template));
+                    insert.setString(4, getItemDisplay(template)); insert.setInt(5, supplied.getAmount()); insert.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement update = connection.prepareStatement("UPDATE merchant_shop_items SET stock=stock+? WHERE id=?")) {
+                    update.setInt(1, supplied.getAmount()); update.setInt(2, existing.getId()); update.executeUpdate();
+                }
+            }
+        } catch (SQLException error) {
+            logger.log(Level.WARNING, "Failed editor stock deposit", error);
+            return false;
+        }
+        audit.log(merchant.getUniqueId(), merchant.getName(), "MERCHANT_SHOP_EDITOR_STOCK", "SHOP", String.valueOf(shopId),
+            "slot=" + slot + " qty=" + supplied.getAmount() + " item=" + getItemDisplay(template));
+        return true;
+    }
+
+    @Override public ItemStack itemStack(MerchantShopData.ShopItem item) { return deserializeItem(item.getItemData()); }
 
     @Override
     public void loadAll() {

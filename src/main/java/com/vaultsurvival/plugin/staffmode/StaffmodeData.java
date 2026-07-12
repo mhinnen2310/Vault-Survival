@@ -2,6 +2,7 @@ package com.vaultsurvival.plugin.staffmode;
 
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.Location;
+import org.bukkit.permissions.PermissionAttachment;
 
 import java.util.*;
 
@@ -15,6 +16,9 @@ public class StaffmodeData {
     private final UUID playerUuid;
     private boolean staffModeActive;
     private boolean bypassMode; // Owner override - bypasses all restrictions
+    private boolean buildPermissionEnabled;
+    private int breakerSize;
+    private PermissionAttachment buildPermissionAttachment;
     private boolean sandboxTransferPending;
     private ItemStack[] gameplayInventory;
     private ItemStack[] gameplayArmor;
@@ -30,6 +34,12 @@ public class StaffmodeData {
     public void setStaffModeActive(boolean active) { this.staffModeActive = active; }
     public boolean isBypassMode() { return bypassMode; }
     public void setBypassMode(boolean bypass) { this.bypassMode = bypass; }
+    public boolean isBuildPermissionEnabled() { return buildPermissionEnabled; }
+    public void setBuildPermissionEnabled(boolean enabled) { this.buildPermissionEnabled = enabled; }
+    public int getBreakerSize() { return breakerSize; }
+    public void setBreakerSize(int breakerSize) { this.breakerSize = breakerSize; }
+    public PermissionAttachment getBuildPermissionAttachment() { return buildPermissionAttachment; }
+    public void setBuildPermissionAttachment(PermissionAttachment attachment) { this.buildPermissionAttachment = attachment; }
     public boolean isSandboxTransferPending() { return sandboxTransferPending; }
     public void setSandboxTransferPending(boolean pending) { this.sandboxTransferPending = pending; }
 

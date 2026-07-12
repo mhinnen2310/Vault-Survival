@@ -288,7 +288,7 @@ public final class CivicWorkflowCommand implements CommandExecutor, TabCompleter
             }
             case "district", "districts" -> {
                 title = "District Guide";
-                body = "Districts use whole-chunk claims, role-based governance, physical treasury cash, daily law activation, development levels, jobs, diplomacy, stations, and NPC unlocks. Applications and expansion are validated before confirmation.";
+                body = "Districts use exact block-border claims, role-based governance, physical treasury cash, daily law activation, development levels, jobs, diplomacy, stations, and NPC unlocks. Applications and expansion are validated before confirmation.";
                 items = List.of(DialogMenuItem.item("District List", "Browse official districts.", "district list", null, Material.MAP), DialogMenuItem.item("My District", "Open role-specific district tools.", "vsmenu district", null, Material.PLAYER_HEAD), back("guides"));
             }
             case "auction", "auctionhall", "ah" -> {

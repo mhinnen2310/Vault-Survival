@@ -1,10 +1,17 @@
 package com.vaultsurvival.plugin.core;
 
-import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -17,10 +24,16 @@ public class AuditLogger {
 
     private final Logger logger;
     private final DatabaseManager db;
+    private record AuditEvent(String actorUuid,String actorName,String actionType,String targetType,String targetId,String details) { }
+    private final ArrayBlockingQueue<AuditEvent> pending = new ArrayBlockingQueue<>(8192);
+    private final ScheduledExecutorService flusher;
+    private final AtomicBoolean flushing = new AtomicBoolean();
 
     public AuditLogger(Logger logger, DatabaseManager db) {
         this.logger = logger;
         this.db = db;
+        this.flusher = Executors.newSingleThreadScheduledExecutor(r -> { Thread t = new Thread(r, "VS-Audit-Batcher"); t.setDaemon(false); return t; });
+        this.flusher.scheduleWithFixedDelay(this::flush, 100, 100, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -35,21 +48,45 @@ public class AuditLogger {
      */
     public void log(UUID actorUuid, String actorName, String actionType,
                     String targetType, String targetId, String details) {
-        String sql = "INSERT INTO admin_audit_log (actor_uuid, actor_name, action_type, " +
-                     "target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)";
-
-        try (Connection conn = db.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, actorUuid != null ? actorUuid.toString() : null);
-            ps.setString(2, actorName);
-            ps.setString(3, actionType);
-            ps.setString(4, targetType);
-            ps.setString(5, targetId);
-            ps.setString(6, details);
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to write audit log: " + actionType, e);
+        AuditEvent event = new AuditEvent(actorUuid == null ? null : actorUuid.toString(), actorName, actionType, targetType, targetId, details);
+        if (!pending.offer(event)) {
+            logger.severe("Audit queue is full; forcing an immediate database flush for " + actionType);
+            flush();
+            if (!pending.offer(event)) logger.severe("Audit event could not be queued after flush: " + actionType);
         }
+    }
+
+    public void flush() {
+        if (!flushing.compareAndSet(false, true)) return;
+        List<AuditEvent> batch = new ArrayList<>(Math.min(256, pending.size())); pending.drainTo(batch, 256);
+        if (batch.isEmpty()) { flushing.set(false); return; }
+        db.write(connection -> {
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO admin_audit_log(actor_uuid,actor_name,action_type,target_type,target_id,details) VALUES(?,?,?,?,?,?)")) {
+                for (AuditEvent event : batch) {
+                    statement.setString(1,event.actorUuid()); statement.setString(2,event.actorName()); statement.setString(3,event.actionType());
+                    statement.setString(4,event.targetType()); statement.setString(5,event.targetId()); statement.setString(6,event.details()); statement.addBatch();
+                }
+                statement.executeBatch(); return batch.size();
+            }
+        }).whenComplete((ignored, failure) -> {
+            if (failure != null) {
+                logger.log(Level.SEVERE, "Failed to flush " + batch.size() + " audit events", failure);
+                for (AuditEvent event : batch) if (!pending.offer(event)) logger.severe("Audit recovery queue overflow for " + event.actionType());
+            }
+            flushing.set(false); if (!pending.isEmpty()) flush();
+        });
+    }
+
+    public void shutdown() {
+        flusher.shutdown();
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while ((!pending.isEmpty() || flushing.get()) && System.nanoTime() < deadline) {
+            flush();
+            try { Thread.sleep(10); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
+        }
+        try { flusher.awaitTermination(2, TimeUnit.SECONDS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        if (!pending.isEmpty()) logger.severe("Audit shutdown left " + pending.size() + " events pending.");
     }
 
     /**

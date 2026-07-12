@@ -32,6 +32,7 @@ import com.vaultsurvival.plugin.npc.NpcModule;
 import com.vaultsurvival.plugin.regions.RegionModule;
 import com.vaultsurvival.plugin.staffmode.StaffmodeModule;
 import com.vaultsurvival.plugin.staff.StaffInspectCommand;
+import com.vaultsurvival.plugin.staff.StaffUtilityCommand;
 import com.vaultsurvival.plugin.security.AntiCheatListener;
 import com.vaultsurvival.plugin.security.StaffAlertCommand;
 import com.vaultsurvival.plugin.security.StaffAlertService;
@@ -41,6 +42,7 @@ import com.vaultsurvival.plugin.spawnjobs.SpawnJobModule;
 import com.vaultsurvival.plugin.updates.UpdateService;
 import com.vaultsurvival.plugin.vaults.VaultModule;
 import com.vaultsurvival.plugin.vsworldedit.VSWorldEditModule;
+import com.vaultsurvival.plugin.travel.TravelService;
 import com.vaultsurvival.plugin.workflow.CivicWorkflowCommand;
 import com.vaultsurvival.plugin.workflow.CivicWorkflowService;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -120,6 +122,8 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         // Register core services
         serviceRegistry.register(ConfigManager.class, configManager);
         serviceRegistry.register(DatabaseManager.class, databaseManager);
+        serviceRegistry.register(DatabaseExecutor.class, databaseManager.executor());
+        serviceRegistry.register(DatabaseHealthService.class, new DatabaseHealthService(databaseManager.executor()));
         serviceRegistry.register(AuditLogger.class, auditLogger);
         serviceRegistry.register(MessageFormatter.class, messageFormatter);
         serviceRegistry.register(SchedulerHelper.class, schedulerHelper);
@@ -141,6 +145,7 @@ public class VaultSurvivalPlugin extends JavaPlugin {
             moduleManager.disableAll();
         }
         if (databaseManager != null) {
+            if (auditLogger != null) auditLogger.shutdown();
             databaseManager.shutdown();
         }
         if (serviceRegistry != null) {
@@ -256,6 +261,13 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         ChatChannelService chatChannelService = new ChatChannelService(this);
         serviceRegistry.register(ChatChannelService.class, chatChannelService);
 
+        TravelService travelService = new TravelService(this);
+        serviceRegistry.register(TravelService.class, travelService);
+        getServer().getPluginManager().registerEvents(travelService, this);
+        for (String commandName : java.util.List.of("tpa", "tpaccept", "tpdeny", "sethome", "home", "delhome", "homes")) {
+            if (getCommand(commandName) != null) getCommand(commandName).setExecutor(travelService);
+        }
+
         // Register /vs version command
         var vsCmd = new VSVersionCommand(this);
         getCommand("vs").setExecutor(vsCmd);
@@ -279,6 +291,12 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         getCommand("staffinspect").setExecutor(staffInspect);
         getCommand("staffinspect").setTabCompleter(staffInspect);
         getServer().getPluginManager().registerEvents(staffInspect, this);
+        var staffUtility = new StaffUtilityCommand(this, staffmodeModule.getStaffData());
+        for (String commandName : java.util.List.of("vstp", "vstphere", "vsback", "vsfly", "vsheal", "vsgamemode",
+            "vstime", "vsweather", "vsspeed", "vsbreaker", "vsspectate")) {
+            getCommand(commandName).setExecutor(staffUtility);
+            getCommand(commandName).setTabCompleter(staffUtility);
+        }
         staffAlertService = new StaffAlertService(this);
         serviceRegistry.register(StaffAlertService.class, staffAlertService);
         staffAlertService.install();
@@ -333,6 +351,11 @@ public class VaultSurvivalPlugin extends JavaPlugin {
         return staffmodeModule != null
             && staffmodeModule.getStaffData().containsKey(playerUuid)
             && staffmodeModule.getStaffData().get(playerUuid).isStaffModeActive();
+    }
+
+    /** Session-only owner grant used by region/build protection integrations. */
+    public boolean hasStaffBuildPermission(java.util.UUID playerUuid) {
+        return staffmodeModule != null && staffmodeModule.hasBuildPermission(playerUuid);
     }
 
     public SchedulerHelper getScheduler() {

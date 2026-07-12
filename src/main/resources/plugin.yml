@@ -1,5 +1,5 @@
 ﻿name: VaultSurvival
-version: 1.0.28
+version: 1.0.37
 main: com.vaultsurvival.plugin.VaultSurvivalPlugin
 api-version: '1.21'
 description: Vault Survival - Physical economy Minecraft gamemode. Features vaults, districts, crime/police, auctions, NPCs, regions, and social systems.
@@ -29,17 +29,65 @@ commands:
     description: Admin cash management tools
     usage: /cash <inspect|trace|mint|invalidate|scan|stats>
     permission: vs.cash.admin
+  cashsplit:
+    description: Split held physical cash into exact change
+    usage: /cashsplit <amount>
+    aliases: [splitcash]
   vault:
     description: Vault management commands
     usage: /vault <place|remove|info|deposit|withdraw|access|repair|list>
     permission: vs.vault.use
   staffmode:
     description: Toggle staff mode with inventory separation and abuse protection
-    usage: /staffmode [test|return|* [player]]
+    usage: /staffmode [test|return|* [player]|build <player> <on|off>]
   staffinspect:
     description: Staff player search, profiles, and audited actions
     usage: /staffinspect <player|search|online|recent|wanted|frozen|freeze|unfreeze>
     permission: vs.staffinspect
+  vstp:
+    description: Audited staffmode teleport
+    usage: /vstp <player>
+    aliases: [tp]
+  vstphere:
+    description: Audited staffmode summon
+    usage: /vstphere <player>
+    aliases: [tphere]
+  vsback:
+    description: Return from an audited staff teleport
+    usage: /vsback
+    aliases: [back]
+  vsfly:
+    description: Toggle flight in staffmode
+    usage: /vsfly
+    aliases: [fly]
+  vsheal:
+    description: Heal a player in staffmode
+    usage: /vsheal [player]
+    aliases: [heal]
+  vsgamemode:
+    description: Change gamemode in staffmode
+    usage: /vsgamemode <mode> [player]
+    aliases: [gm]
+  vstime:
+    description: Set the current world's time while in staffmode
+    usage: /vstime <day|noon|sunset|night|midnight|sunrise|set|add> [ticks]
+    aliases: [time]
+  vsweather:
+    description: Set bounded weather while in staffmode
+    usage: /vsweather <clear|rain|thunder> [seconds]
+    aliases: [weather]
+  vsspeed:
+    description: Set a safe walk or fly speed while in staffmode
+    usage: /vsspeed <0-10|reset> [walk|fly]
+    aliases: [speed]
+  vsbreaker:
+    description: Toggle the protected staff area breaker
+    usage: /vsbreaker <3x3|4x4|5x5|6x6|7x7|8x8|9x9|off>
+    aliases: [breaker]
+  vsspectate:
+    description: Silently spectate an online player while in staffmode
+    usage: /vsspectate <player|stop>
+    aliases: [spectate]
   staffalerts:
     description: Persistent staff alert queue, security scoring, and staff navigation
     usage: /staffalerts <list|claim|resolve|tp|last|return|antixray|storage|scores|payouts>
@@ -64,11 +112,11 @@ commands:
     permission: vs.npc.admin
   region:
     description: Region management commands
-    usage: /region <wand|create|delete|info|flag|list|here>
+    usage: /region <wand|pos1|pos2|type|create|delete|info|flag|list|here|show|hide|showtime|grid|floorgrid|debug>
     permission: vs.region.admin
   district:
     description: District foundation commands
-    usage: /district <apply|approve|reject|info|invite|kick|role|deposit|withdraw|law|list|disband|applications>
+    usage: /district <apply|approve|reject|info|invite|kick|role|treasury|law|list|disband|applications>
     aliases: [d, districts]
   damage:
     description: Temporary damage management commands
@@ -119,7 +167,7 @@ commands:
     permission: vs.admin
   vwe:
     description: VS-WorldEdit building toolkit
-    usage: /vwe <wand|pos1|pos2|selection|set|replace|walls|outline|floor|ceiling|hollow|cylinder|hcylinder|circle|hcircle|sphere|hsphere|line|undo|confirm|cancel>
+    usage: /vwe <wand|pos1|pos2|selection|visualize|hide|operation|pattern|schematic|set|setgrid|replace|replacegrid|walls|outline|floor|ceiling|hollow|cylinder|hcylinder|circle|hcircle|sphere|hsphere|line|undo|confirm|cancel>
     permission: vaultsurvival.vwe.use
     aliases: [vswe, vedit]
   chatpreview:
@@ -173,8 +221,32 @@ commands:
   quickactions:
     description: Open the Vault Survival quick actions menu
     usage: /quickactions
+  tpa:
+    description: Request to teleport to another player
+    usage: /tpa <player>
+  tpaccept:
+    description: Accept the current teleport request
+  tpdeny:
+    description: Deny the current teleport request
+  sethome:
+    description: Save a personal home
+    usage: /sethome [name]
+  home:
+    description: Teleport to a personal home
+    usage: /home [name]
+  delhome:
+    description: Delete a personal home
+    usage: /delhome [name]
+  homes:
+    description: List personal homes
 
 permissions:
+  vs.home.limit.2:
+    description: Allows two personal homes
+    default: false
+  vs.home.limit.3:
+    description: Allows three personal homes
+    default: false
   vs.admin.rank:
     description: Allows managing player ranks
     default: false
@@ -196,6 +268,9 @@ permissions:
   vs.staffinspect:
     description: Allows opening staff player profiles and searches
     default: false
+  vs.staff.utility:
+    description: Allows audited staff utility commands while staffmode is active
+    default: false
   vs.staffinspect.freeze:
     description: Allows freezing and unfreezing players
     default: false
@@ -204,6 +279,12 @@ permissions:
     default: false
   vs.staffmode.bypass.grant:
     description: Allows granting bypass to other staff members
+    default: false
+  vs.staffmode.build.grant:
+    description: Owner-only grant for persistent build access during another player's staffmode session
+    default: false
+  vs.staffmode.build.active:
+    description: Runtime-only marker applied while owner-approved staff build access is active
     default: false
   vs.breach.use:
     description: Allows breaching vaults
@@ -244,6 +325,9 @@ permissions:
   vs.district.teleport:
     description: Allows teleporting to district centers
     default: false
+  vs.district.law.force:
+    description: Force-activate all pending district laws while in staffmode
+    default: op
   vs.damage.use:
     description: Allows viewing temporary damage info
     default: true
@@ -289,6 +373,9 @@ permissions:
   vaultsurvival.vwe.admin:
     description: Allows VWE admin commands
     default: false
+  vaultsurvival.vwe.schematic:
+    description: Allows audited vanilla structure previews and pastes while staffmode is active
+    default: false
   vs.merchant.use:
     description: Allows creating and managing merchant buy orders
     default: false
@@ -319,6 +406,7 @@ permissions:
     children:
       vaultsurvival.vwe.use: true
       vaultsurvival.vwe.admin: true
+      vaultsurvival.vwe.schematic: true
       vaultsurvival.spawncity.admin: true
       vaultsurvival.spawncity.info: true
       vs.admin.rank: true
@@ -337,8 +425,10 @@ permissions:
       vs.staff.alerts: true
       vs.admin.alerts: true
       vs.staffmode.use: true
+      vs.staff.utility: true
       vs.staffmode.bypass: true
       vs.staffmode.bypass.grant: true
+      vs.staffmode.build.grant: true
       vs.police.use: true
       vs.district.admin.approve: true
       vs.district.admin: true

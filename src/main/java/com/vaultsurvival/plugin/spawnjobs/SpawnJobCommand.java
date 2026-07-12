@@ -7,6 +7,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.Material;
 import com.vaultsurvival.plugin.dialogs.DialogMenuItem;
 import com.vaultsurvival.plugin.dialogs.DialogService;
+import com.vaultsurvival.plugin.npc.NpcService;
 import java.util.ArrayList;
 
 import java.util.Arrays;
@@ -25,18 +26,33 @@ public class SpawnJobCommand implements CommandExecutor, TabCompleter {
 
     @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Only players can use spawn jobs.")); return true; }
+        boolean adminFallback = args.length > 0 && args[0].equalsIgnoreCase("admin") && player.hasPermission("vs.admin");
+        if (!adminFallback && !hasJobBoardSession(player)) {
+            DialogService dialogs = dialogs();
+            if (dialogs != null) {
+                dialogs.openResult(player, "Job Board NPC Required",
+                    "Job boards are physical. Interact with a Job Board NPC to browse or manage jobs.",
+                    List.of(DialogMenuItem.item("Back to Main Menu", "Return without opening a job board.", "vsmenu", null, Material.ARROW)));
+            } else {
+                player.sendMessage(fmt.error("Interact with a Job Board NPC first."));
+            }
+            return true;
+        }
         if (args.length == 0) return board(player);
         if (args[0].equalsIgnoreCase("active")) return active(player);
         if (args[0].equalsIgnoreCase("accept") && args.length >= 2) {
-            player.sendMessage(service.accept(player, parseInt(args[1])) ? fmt.success("Spawn job accepted.") : fmt.error("Cannot accept spawn job."));
+            jobActionResult(player, "Accept Spawn Job", service.accept(player, parseInt(args[1])),
+                "Spawn job accepted.", "This job cannot be accepted.");
             return true;
         }
         if ((args[0].equalsIgnoreCase("turnin") || args[0].equalsIgnoreCase("complete")) && args.length >= 2) {
-            player.sendMessage(service.turnIn(player, parseInt(args[1])) ? fmt.success("Spawn job completed.") : fmt.error("Cannot turn in this job yet."));
+            jobActionResult(player, "Turn In Spawn Job", service.turnIn(player, parseInt(args[1])),
+                "Spawn job completed; its payout has been processed.", "This job cannot be turned in yet.");
             return true;
         }
         if (args[0].equalsIgnoreCase("abandon") && args.length >= 2) {
-            player.sendMessage(service.abandon(player, parseInt(args[1])) ? fmt.success("Spawn job abandoned.") : fmt.error("Cannot abandon job."));
+            jobActionResult(player, "Abandon Spawn Job", service.abandon(player, parseInt(args[1])),
+                "Spawn job abandoned.", "This job cannot be abandoned.");
             return true;
         }
         if (args[0].equalsIgnoreCase("admin")) return admin(player, args);
@@ -49,6 +65,7 @@ public class SpawnJobCommand implements CommandExecutor, TabCompleter {
             List<DialogMenuItem> items = new ArrayList<>();
             for (var job : service.getJobs()) items.add(DialogMenuItem.item("#" + job.getId() + " " + job.getTitle(), job.getType() + " | Reward " + job.getReward(), "spawnjobs accept " + job.getId(), null, job.getType() == SpawnJobData.JobType.TRANSPORT_PACKAGE ? Material.PAPER : Material.CHEST));
             items.add(DialogMenuItem.item("My Active Jobs", "View and turn in active jobs.", "spawnjobs active", null, Material.MAP));
+            items.add(DialogMenuItem.item("District Job Board", "Browse jobs offered by your district.", "district jobs", null, Material.LECTERN));
             dialogs.openResult(player, "Spawn Job Board", "Starter jobs pay physical cash. Transport packages are unique and cannot be stored.", items);
             return true;
         }
@@ -116,4 +133,20 @@ public class SpawnJobCommand implements CommandExecutor, TabCompleter {
     private int parseInt(String raw) { try { return Integer.parseInt(raw); } catch (Exception ignored) { return -1; } }
     private long parseLong(String raw) { try { return Long.parseLong(raw); } catch (Exception ignored) { return -1; } }
     private DialogService dialogs() { try { return plugin.getServiceRegistry().get(DialogService.class); } catch (RuntimeException ignored) { return null; } }
+    private void jobActionResult(Player player, String title, boolean success, String successMessage, String errorMessage) {
+        DialogService dialogs = dialogs();
+        if (dialogs != null) {
+            dialogs.openResult(player, success ? title + " — Success" : title + " — Failed",
+                success ? successMessage : errorMessage,
+                List.of(
+                    DialogMenuItem.item("My Active Jobs", "Refresh active jobs.", "spawnjobs active", null, Material.MAP),
+                    DialogMenuItem.item("Job Board", "Return to the NPC-opened board.", "spawnjobs", null, Material.BELL)));
+        } else {
+            player.sendMessage(success ? fmt.success(successMessage) : fmt.error(errorMessage));
+        }
+    }
+    private boolean hasJobBoardSession(Player player) {
+        try { return plugin.getServiceRegistry().get(NpcService.class).hasJobBoardSession(player.getUniqueId()); }
+        catch (RuntimeException ignored) { return false; }
+    }
 }

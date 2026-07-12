@@ -4,6 +4,8 @@ import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.ConfigManager;
 import com.vaultsurvival.plugin.core.MessageFormatter;
 import org.bukkit.*;
+import org.bukkit.block.Block;
+import org.bukkit.block.Container;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -19,10 +21,13 @@ import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.*;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.permissions.PermissionAttachment;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.util.Vector;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Staff mode event listener.
@@ -44,6 +49,7 @@ public class StaffmodeListener implements Listener {
     private final ConfigManager config;
     private final MessageFormatter fmt;
     private final Map<UUID, StaffmodeData> staffData;
+    private final Set<UUID> activeBreakerExpansions = ConcurrentHashMap.newKeySet();
 
     public StaffmodeListener(VaultSurvivalPlugin plugin, Map<UUID, StaffmodeData> staffData) {
         this.plugin = plugin;
@@ -91,6 +97,7 @@ public class StaffmodeListener implements Listener {
             if (data.isSandboxTransferPending()) event.quitMessage(null);
             // Logout is fail-closed: never preserve staff tools, inventory, or staff location.
             if (config.isStaffModeRevertBlocks() && !data.isBypassMode()) revertBlocks(player, data);
+            setBuildPermission(player, data, false);
             player.getInventory().clear();
             if (data.getGameplayInventory() != null) player.getInventory().setContents(data.getGameplayInventory());
             if (data.getGameplayArmor() != null) player.getInventory().setArmorContents(data.getGameplayArmor());
@@ -98,6 +105,7 @@ public class StaffmodeListener implements Listener {
             player.setGameMode(org.bukkit.GameMode.SURVIVAL);
             data.setStaffModeActive(false);
             data.setBypassMode(false);
+            data.setBreakerSize(0);
             data.setGameplayLocation(null);
             data.clearBlockChanges();
             plugin.getAuditLogger().log(player.getUniqueId(), player.getName(), "STAFFMODE_AUTO_EXIT", "PLAYER", player.getUniqueId().toString(), "logout");
@@ -113,20 +121,28 @@ public class StaffmodeListener implements Listener {
         Player player = event.getPlayer();
         StaffmodeData data = staffData.get(player.getUniqueId());
         if (data == null || !data.isStaffModeActive()) return;
-        if (data.isBypassMode()) return;
 
-        if (!config.isStaffModeRevertBlocks()) return;
-        if (data.getBlockChangeCount() >= config.getStaffModeMaxTrackedBlocks()) {
-            player.sendMessage(fmt.warn("Block tracking limit reached. Some blocks will not revert."));
-            return;
+        boolean temporaryChange = !data.isBypassMode()
+            && !data.isBuildPermissionEnabled()
+            && config.isStaffModeRevertBlocks();
+        if (temporaryChange) {
+            if (data.getBlockChangeCount() >= config.getStaffModeMaxTrackedBlocks()) {
+                player.sendMessage(fmt.warn("Block tracking limit reached. Extra breaker blocks were not changed."));
+                if (activeBreakerExpansions.contains(player.getUniqueId())) event.setCancelled(true);
+                return;
+            }
+
+            data.addBlockChange(new BlockChange(
+                event.getBlock().getLocation(),
+                event.getBlock().getType(),
+                Material.AIR,
+                true
+            ));
         }
 
-        data.addBlockChange(new BlockChange(
-            event.getBlock().getLocation(),
-            event.getBlock().getType(),
-            Material.AIR,
-            true
-        ));
+        if (data.getBreakerSize() > 0 && !activeBreakerExpansions.contains(player.getUniqueId())) {
+            expandBreaker(player, event.getBlock(), data.getBreakerSize());
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -134,7 +150,7 @@ public class StaffmodeListener implements Listener {
         Player player = event.getPlayer();
         StaffmodeData data = staffData.get(player.getUniqueId());
         if (data == null || !data.isStaffModeActive()) return;
-        if (data.isBypassMode()) return;
+        if (data.isBypassMode() || data.isBuildPermissionEnabled()) return;
 
         if (!config.isStaffModeRevertBlocks()) return;
         if (data.getBlockChangeCount() >= config.getStaffModeMaxTrackedBlocks()) {
@@ -148,6 +164,119 @@ public class StaffmodeListener implements Listener {
             event.getBlock().getType(),
             false
         ));
+    }
+
+    /**
+     * Expands one accepted staff block break into a bounded square plane. Every
+     * additional block receives its own BlockBreakEvent so existing protection
+     * plugins and Vault Survival listeners can still veto it.
+     */
+    private void expandBreaker(Player player, Block origin, int size) {
+        UUID playerUuid = player.getUniqueId();
+        if (!activeBreakerExpansions.add(playerUuid)) return;
+
+        int changed = 0;
+        int skipped = 0;
+        Material originType = origin.getType();
+        int firstOffset = -(size / 2);
+        int lastOffset = firstOffset + size - 1;
+        Vector direction = player.getEyeLocation().getDirection();
+        double absX = Math.abs(direction.getX());
+        double absY = Math.abs(direction.getY());
+        double absZ = Math.abs(direction.getZ());
+
+        try {
+            for (int first = firstOffset; first <= lastOffset; first++) {
+                for (int second = firstOffset; second <= lastOffset; second++) {
+                    int x = origin.getX();
+                    int y = origin.getY();
+                    int z = origin.getZ();
+                    if (absY >= absX && absY >= absZ) {
+                        x += first;
+                        z += second;
+                    } else if (absX >= absZ) {
+                        y += first;
+                        z += second;
+                    } else {
+                        x += first;
+                        y += second;
+                    }
+
+                    if (x == origin.getX() && y == origin.getY() && z == origin.getZ()) continue;
+                    if (y < origin.getWorld().getMinHeight() || y >= origin.getWorld().getMaxHeight()) {
+                        skipped++;
+                        continue;
+                    }
+
+                    Block candidate = origin.getWorld().getBlockAt(x, y, z);
+                    Material material = candidate.getType();
+                    if (material.isAir()
+                        || config.getStaffBreakerProtectedMaterials().contains(material)
+                        || (config.isStaffBreakerSameMaterialOnly() && material != originType)
+                        || (config.isStaffBreakerSkipContainers() && candidate.getState() instanceof Container)) {
+                        skipped++;
+                        continue;
+                    }
+
+                    BlockBreakEvent synthetic = new BlockBreakEvent(candidate, player);
+                    synthetic.setDropItems(false);
+                    synthetic.setExpToDrop(0);
+                    Bukkit.getPluginManager().callEvent(synthetic);
+                    if (synthetic.isCancelled()) {
+                        skipped++;
+                        continue;
+                    }
+
+                    candidate.setType(Material.AIR, config.isStaffBreakerApplyPhysics());
+                    changed++;
+                }
+            }
+        } finally {
+            activeBreakerExpansions.remove(playerUuid);
+        }
+
+        String targetId = origin.getWorld().getName() + ":" + origin.getX() + "," + origin.getY() + "," + origin.getZ();
+        plugin.getAuditLogger().log(playerUuid, player.getName(), "STAFF_BREAKER_USE", "BLOCK", targetId,
+            "size=" + size + " changedExtra=" + changed + " skipped=" + skipped + " origin=" + originType.name()
+                + " persistent=" + isPersistentStaffBuild(playerUuid));
+        player.sendActionBar(fmt.deserialize("&e" + size + "x" + size + " breaker: &a" + changed
+            + " extra blocks &7(&8" + skipped + " skipped&7)"));
+    }
+
+    public boolean isPersistentStaffBuild(UUID playerUuid) {
+        StaffmodeData data = staffData.get(playerUuid);
+        return data != null && data.isStaffModeActive()
+            && (data.isBuildPermissionEnabled() || data.isBypassMode());
+    }
+
+    /** Applies/removes only the temporary permission attachment for this staffmode session. */
+    public void setBuildPermission(Player player, StaffmodeData data, boolean enabled) {
+        PermissionAttachment previous = data.getBuildPermissionAttachment();
+        if (previous != null) {
+            try {
+                player.removeAttachment(previous);
+            } catch (IllegalArgumentException ignored) {
+                // Attachment was already removed by Bukkit during disconnect/disable.
+            }
+            data.setBuildPermissionAttachment(null);
+        }
+
+        data.setBuildPermissionEnabled(enabled);
+        if (enabled) {
+            PermissionAttachment attachment = player.addAttachment(plugin);
+            attachment.setPermission("vs.staffmode.build.active", true);
+            for (String configuredNode : config.getStaffModeBuildPermissionNodes()) {
+                if (configuredNode.contains("%world%")) {
+                    for (World world : Bukkit.getWorlds()) {
+                        attachment.setPermission(configuredNode.replace("%world%", world.getName()), true);
+                    }
+                } else {
+                    attachment.setPermission(configuredNode, true);
+                }
+            }
+            data.setBuildPermissionAttachment(attachment);
+        }
+        player.recalculatePermissions();
     }
 
     // ========================================================================

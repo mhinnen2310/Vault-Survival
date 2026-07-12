@@ -27,7 +27,11 @@ public class NpcData {
         /** Do nothing — just for decoration. */
         NONE,
         /** Open a merchant-owned shop GUI (integrated with VS-Merchant Shops). */
-        MERCHANT_SHOP
+        MERCHANT_SHOP,
+        /** Call the fixed Town Clerk service; action data is a typed context, never a command. */
+        TOWN_CLERK,
+        /** Open the rail ticket dialog; action data is the numeric station id. */
+        RAIL_TICKET
     }
 
     /**

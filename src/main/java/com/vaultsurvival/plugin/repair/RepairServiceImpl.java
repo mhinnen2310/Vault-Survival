@@ -6,6 +6,7 @@ import com.vaultsurvival.plugin.damage.DamageService;
 import com.vaultsurvival.plugin.damage.DamageData;
 import com.vaultsurvival.plugin.districts.DistrictData;
 import com.vaultsurvival.plugin.districts.DistrictService;
+import com.vaultsurvival.plugin.districts.DistrictTreasuryService;
 import com.vaultsurvival.plugin.npc.NpcService;
 import com.vaultsurvival.plugin.npc.NpcData;
 import org.bukkit.Bukkit;
@@ -106,68 +107,19 @@ public class RepairServiceImpl implements RepairService {
         DistrictData.District district = districts.getDistrict(districtId);
         if (district == null || district.getStatus() != DistrictData.DistrictStatus.ACTIVE) return false;
 
-        long treasury = getTreasuryBalance(districtId);
-        if (treasury < amount) return false;
-
-        // Spend treasury cash for wage (mark as SPENT)
-        try (Connection conn = plugin.getDatabase().getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                long remaining = amount;
-                String sql = "SELECT cash_uuid, amount FROM cash_items " +
-                             "WHERE state = 'IN_DISTRICT_TREASURY' AND location_id = ? ORDER BY amount ASC";
-                try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                    ps.setString(1, String.valueOf(districtId));
-                    ResultSet rs = ps.executeQuery();
-                    while (rs.next() && remaining > 0) {
-                        UUID cashUuid = UUID.fromString(rs.getString("cash_uuid"));
-                        long cashAmt = rs.getLong("amount");
-                        if (cashAmt <= remaining) {
-                            try (PreparedStatement up = conn.prepareStatement(
-                                    "UPDATE cash_items SET state = 'SPENT' WHERE cash_uuid = ?")) {
-                                up.setString(1, cashUuid.toString());
-                                up.executeUpdate();
-                            }
-                            remaining -= cashAmt;
-                        } else {
-                            try (PreparedStatement up = conn.prepareStatement(
-                                    "UPDATE cash_items SET amount = ? WHERE cash_uuid = ?")) {
-                                up.setLong(1, cashAmt - remaining);
-                                up.setString(2, cashUuid.toString());
-                                up.executeUpdate();
-                            }
-                            remaining = 0;
-                        }
-                    }
-                }
-                conn.commit();
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(true);
-            }
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to pay wage for district #" + districtId, e);
-            return false;
-        }
+        DistrictTreasuryService treasury;
+        try { treasury = plugin.getServiceRegistry().get(DistrictTreasuryService.class); }
+        catch (RuntimeException unavailable) { return false; }
+        var debit = treasury.debitSystem(districtId, amount, "DAILY_REPAIR_WAGE", null);
+        if (!debit.success()) return false;
 
         logger.info("Paid daily wage of " + amount + " for district #" + districtId);
         return true;
     }
 
     private long getTreasuryBalance(int districtId) {
-        String sql = "SELECT IFNULL(SUM(amount), 0) FROM cash_items " +
-                     "WHERE state = 'IN_DISTRICT_TREASURY' AND location_id = ?";
-        try (Connection conn = plugin.getDatabase().getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, String.valueOf(districtId));
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) return rs.getLong(1);
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to get treasury balance", e);
-        }
-        return 0;
+        try { return plugin.getServiceRegistry().get(DistrictTreasuryService.class).getDistrictBalance(districtId); }
+        catch (RuntimeException unavailable) { return 0; }
     }
 
     @Override

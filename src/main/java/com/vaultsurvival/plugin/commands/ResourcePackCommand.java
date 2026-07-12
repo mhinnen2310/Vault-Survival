@@ -7,7 +7,7 @@ import org.bukkit.entity.Player;
 import net.kyori.adventure.text.Component;
 import java.util.*;
 
-public class ResourcePackCommand implements CommandExecutor {
+public class ResourcePackCommand implements CommandExecutor, TabCompleter {
     private final VaultSurvivalPlugin plugin;
     private final MessageFormatter fmt;
 
@@ -78,5 +78,13 @@ public class ResourcePackCommand implements CommandExecutor {
                                  + Character.digit(hex.charAt(i+1), 16));
         }
         return data;
+    }
+
+    @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length != 1 || !sender.hasPermission("vs.admin")) return List.of();
+        String typed = args[0].toLowerCase(Locale.ROOT);
+        List<String> options = new ArrayList<>(); options.add("reload");
+        plugin.getServer().getOnlinePlayers().forEach(player -> options.add(player.getName()));
+        return options.stream().filter(value -> value.toLowerCase(Locale.ROOT).startsWith(typed)).sorted().toList();
     }
 }

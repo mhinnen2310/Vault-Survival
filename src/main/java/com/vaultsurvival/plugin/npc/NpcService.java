@@ -101,4 +101,10 @@ public interface NpcService {
 
     /** Respawn a persisted NPC after a temporary lifecycle event. */
     void respawnNpc(int npcId);
+
+    /** Grants a short-lived, job-board-only session after a real NPC interaction. */
+    void grantJobBoardSession(UUID playerUuid);
+
+    /** True only while the player has a recent physical job-board NPC interaction. */
+    boolean hasJobBoardSession(UUID playerUuid);
 }

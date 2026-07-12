@@ -2,6 +2,8 @@ package com.vaultsurvival.plugin.monitor;
 
 import com.vaultsurvival.plugin.VaultSurvivalPlugin;
 import com.vaultsurvival.plugin.core.MessageFormatter;
+import com.vaultsurvival.plugin.districts.DistrictService;
+import com.vaultsurvival.plugin.districts.DistrictTreasuryService;
 import org.bukkit.Bukkit;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
@@ -36,6 +38,19 @@ public class AdminCommand implements CommandExecutor, TabCompleter {
             } catch (Exception e) { sender.sendMessage(fmt.error("Optimization failed: " + e.getMessage())); }
             return true;
         }
+        if (args[0].equalsIgnoreCase("treasury") && args.length >= 3 && args[1].equalsIgnoreCase("migrate-district")) {
+            if (!(sender instanceof Player player)) { sender.sendMessage(fmt.error("Stand at the destination physical vault in-game.")); return true; }
+            DistrictService districts = plugin.getServiceRegistry().get(DistrictService.class);
+            var district = districts.getAllDistricts().stream().filter(d -> String.valueOf(d.getId()).equals(args[2]) || d.getName().equalsIgnoreCase(args[2])).findFirst().orElse(null);
+            if (district == null) { sender.sendMessage(fmt.error("District not found.")); return true; }
+            DistrictTreasuryService treasury = plugin.getServiceRegistry().get(DistrictTreasuryService.class);
+            var target = player.getTargetBlockExact(6);
+            var vault = target == null ? null : treasury.getVault(target);
+            if (vault == null || vault.districtId() != district.getId()) { sender.sendMessage(fmt.error("Look at a registered physical vault belonging to that district.")); return true; }
+            var result = treasury.migrateLegacy(player, district.getId(), vault.vaultUuid());
+            sender.sendMessage(result.success() ? fmt.success(result.message()) : fmt.error(result.message()));
+            return true;
+        }
         return true;
     }
 
@@ -64,7 +79,9 @@ public class AdminCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender s, Command c, String a, String[] args) {
-        if (args.length == 1) return Arrays.asList("dashboard", "reload", "modules", "optimize");
+        if (args.length == 1) return Arrays.asList("dashboard", "reload", "modules", "optimize", "treasury");
+        if (args.length == 2 && args[0].equalsIgnoreCase("treasury")) return List.of("migrate-district");
+        if (args.length == 3 && args[0].equalsIgnoreCase("treasury")) return plugin.getServiceRegistry().get(DistrictService.class).getAllDistricts().stream().map(d -> String.valueOf(d.getId())).toList();
         return List.of();
     }
 }

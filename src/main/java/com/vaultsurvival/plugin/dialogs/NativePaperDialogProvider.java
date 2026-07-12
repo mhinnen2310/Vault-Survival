@@ -6,6 +6,8 @@ import io.papermc.paper.registry.data.dialog.DialogBase;
 import io.papermc.paper.registry.data.dialog.action.DialogAction;
 import io.papermc.paper.registry.data.dialog.body.DialogBody;
 import io.papermc.paper.registry.data.dialog.input.DialogInput;
+import io.papermc.paper.registry.data.dialog.input.SingleOptionDialogInput;
+import io.papermc.paper.registry.data.dialog.input.TextDialogInput;
 import io.papermc.paper.registry.data.dialog.type.DialogType;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -91,7 +93,7 @@ public class NativePaperDialogProvider implements DialogProvider {
     }
 
     private ActionButton button(DialogMenuItem item) {
-        String label = item.locked() ? "[Locked] " + item.label() : item.label();
+        String label = item.locked() && !item.status() ? "[Locked] " + item.label() : item.label();
         String tooltip = item.locked() ? item.lockedExplanation() : item.description();
         return ActionButton.builder(Component.text(label))
             .tooltip(Component.text(tooltip == null ? "" : tooltip))
@@ -146,6 +148,119 @@ public class NativePaperDialogProvider implements DialogProvider {
 
         player.showDialog(dialog);
         return true;
+    }
+
+    @Override
+    public boolean openVweOperation(Player player, String status, int blockCount) {
+        if (!available) return false;
+        var operationEntries = List.of(
+            SingleOptionDialogInput.OptionEntry.create("SET", Component.text("Set selection"), true),
+            SingleOptionDialogInput.OptionEntry.create("REPLACE", Component.text("Replace matching blocks"), false));
+        var modeEntries = List.of(
+            SingleOptionDialogInput.OptionEntry.create("SINGLE", Component.text("Single material"), true),
+            SingleOptionDialogInput.OptionEntry.create("RANDOM", Component.text("Equal random"), false),
+            SingleOptionDialogInput.OptionEntry.create("WEIGHTED_RANDOM", Component.text("Weighted random"), false),
+            SingleOptionDialogInput.OptionEntry.create("GRID", Component.text("Deterministic grid"), false));
+        List<DialogInput> inputs = List.of(
+            DialogInput.singleOption("operation", Component.text("Operation Type"), operationEntries).width(300).build(),
+            DialogInput.singleOption("mode", Component.text("Pattern Mode"), modeEntries).width(300).build(),
+            DialogInput.text("pattern", Component.text("Material / Pattern")).width(300).maxLength(256).build());
+
+        ActionButton preview = ActionButton.builder(Component.text("Preview Parsed Pattern"))
+            .tooltip(Component.text("Validate without changing blocks"))
+            .width(200)
+            .action(DialogAction.commandTemplate("vwe operation-preview $(operation) $(mode) $(pattern)"))
+            .build();
+        ActionButton confirm = ActionButton.builder(Component.text("Confirm"))
+            .tooltip(Component.text("Validate and start; dangerous operations open confirmation"))
+            .width(200)
+            .action(DialogAction.commandTemplate("vwe operation-submit $(operation) $(mode) $(pattern)"))
+            .build();
+        ActionButton cancel = ActionButton.builder(Component.text("Cancel"))
+            .tooltip(Component.text("Cancel pending or active VWE work"))
+            .width(200)
+            .action(DialogAction.staticAction(ClickEvent.runCommand("/vwe cancel")))
+            .build();
+
+        Dialog dialog = Dialog.create(builder -> builder.empty()
+            .base(DialogBase.builder(Component.text("VS-WorldEdit Operation"))
+                .body(List.of(DialogBody.plainMessage(Component.text(status + "\nBlock Count: " + blockCount), 300)))
+                .inputs(inputs)
+                .canCloseWithEscape(true)
+                .pause(false)
+                .afterAction(DialogBase.DialogAfterAction.NONE)
+                .build())
+            .type(DialogType.multiAction(List.of(preview, confirm), cancel, 2)));
+        player.showDialog(dialog);
+        return true;
+    }
+
+    @Override
+    public boolean openForm(Player player, DialogFormDefinition form) {
+        if (!available) return false;
+
+        List<DialogInput> inputs = new ArrayList<>();
+        for (DialogFormField field : form.fields()) {
+            inputs.add(toNativeInput(field));
+        }
+
+        ActionButton submit = ActionButton.builder(Component.text(form.submitLabel()))
+            .tooltip(Component.text("Validate and save these values"))
+            .width(200)
+            .action(DialogAction.commandTemplate(form.commandTemplate()))
+            .build();
+        ActionButton cancel = ActionButton.builder(Component.text("Cancel"))
+            .tooltip(Component.text("Discard changes"))
+            .width(200)
+            .action(DialogAction.staticAction(ClickEvent.runCommand("/" + form.cancelCommand())))
+            .build();
+
+        Dialog dialog = Dialog.create(builder -> builder.empty()
+            .base(DialogBase.builder(Component.text(form.title()))
+                .body(List.of(DialogBody.plainMessage(Component.text(form.body()), 360)))
+                .inputs(inputs)
+                .canCloseWithEscape(true)
+                .pause(false)
+                .afterAction(DialogBase.DialogAfterAction.CLOSE)
+                .build())
+            .type(DialogType.confirmation(submit, cancel)));
+        player.showDialog(dialog);
+        return true;
+    }
+
+    private DialogInput toNativeInput(DialogFormField field) {
+        Component label = Component.text(field.label());
+        return switch (field.type()) {
+            case TOGGLE -> DialogInput.bool(field.key(), label)
+                .initial(Boolean.parseBoolean(field.initial()))
+                .onTrue("true")
+                .onFalse("false")
+                .build();
+            case DROPDOWN -> DialogInput.singleOption(field.key(), label,
+                    field.options().stream()
+                        .map(option -> SingleOptionDialogInput.OptionEntry.create(
+                            option.value(), Component.text(option.label()), option.value().equalsIgnoreCase(field.initial())))
+                        .toList())
+                .width(300)
+                .build();
+            case SLIDER -> DialogInput.numberRange(field.key(), label, field.minimum(), field.maximum())
+                .width(300)
+                .initial(Float.parseFloat(field.initial()))
+                .step(field.step())
+                .labelFormat("options.generic_value")
+                .build();
+            case NUMBER, TEXT -> DialogInput.text(field.key(), label)
+                .width(300)
+                .initial(field.initial())
+                .maxLength(field.maxLength())
+                .build();
+            case MULTILINE -> DialogInput.text(field.key(), label)
+                .width(300)
+                .initial(field.initial())
+                .maxLength(field.maxLength())
+                .multiline(TextDialogInput.MultilineOptions.create(8, 120))
+                .build();
+        };
     }
 
     private boolean hasClass(String name) {

@@ -20,17 +20,17 @@ public interface DistrictService {
      */
     DistrictData.District apply(Player founder, String name);
 
-    /** Submit an application using a validated whole-chunk claim. */
-    DistrictData.District apply(Player founder, String name, DistrictData.ChunkClaim claim);
+    /** Submit an application using a validated exact-block claim. */
+    DistrictData.District apply(Player founder, String name, DistrictData.BlockClaim claim);
 
-    /** Return the persisted chunk claim for a district, or null for legacy districts. */
-    DistrictData.ChunkClaim getClaim(int districtId);
+    /** Return the persisted exact-block claim for a district, or null for unmigrated legacy districts. */
+    DistrictData.BlockClaim getClaim(int districtId);
 
     /** Update an active district claim after a level-gated expansion. */
-    boolean updateClaim(DistrictData.District district, UUID actorUuid, DistrictData.ChunkClaim claim);
+    boolean updateClaim(DistrictData.District district, UUID actorUuid, DistrictData.BlockClaim claim);
 
-    /** The configured chunk cap for the district's current development level. */
-    int getClaimChunkLimit(DistrictData.District district);
+    /** The configured block-area cap for the district's current development level. */
+    long getClaimBlockLimit(DistrictData.District district);
 
     /**
      * Admin approves a district application. Auto-creates a DISTRICT region.
@@ -95,6 +95,8 @@ public interface DistrictService {
     /** MAYOR-only district chat style. */
     boolean setDistrictChatPrefix(DistrictData.District district, UUID actorUuid, String prefix);
     String getDistrictChatPrefix(DistrictData.District district);
+    boolean setDistrictChatPrefixColor(DistrictData.District district, UUID actorUuid, String color);
+    String getDistrictChatPrefixColor(DistrictData.District district);
     boolean setDistrictRoleColor(DistrictData.District district, UUID actorUuid, DistrictData.DistrictRole role, String color);
     String getDistrictRoleColor(DistrictData.District district, DistrictData.DistrictRole role);
 

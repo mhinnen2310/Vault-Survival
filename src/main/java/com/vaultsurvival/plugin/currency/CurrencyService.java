@@ -5,6 +5,8 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Service interface for the physical currency system.
@@ -22,6 +24,11 @@ public interface CurrencyService {
      * @return The physical ItemStack representing the cash.
      */
     ItemStack mintCash(long amount, UUID creator, UUID recipient);
+
+    /** Rebuild the physical item for an existing authoritative cash record. */
+    ItemStack materializeCash(UUID cashUuid);
+    /** Build an item from an already committed plan without performing SQL. */
+    ItemStack materializePlannedCash(UUID cashUuid,long amount);
 
     /**
      * Split a cash item into two. The original is invalidated and two new items are created.
@@ -50,6 +57,9 @@ public interface CurrencyService {
      * @return true if the item represents valid, active cash.
      */
     boolean validateCash(ItemStack item);
+    CashSnapshot snapshot(ItemStack item);
+    CompletableFuture<Map<UUID,CashRecord>> validateCashSnapshots(List<CashSnapshot> snapshots);
+    CompletableFuture<Void> updateCashLocations(List<UUID> cashUuids, String locationType, String locationId);
 
     /**
      * Invalidate a cash item. Marks it as SPENT or INVALIDATED in the DB.

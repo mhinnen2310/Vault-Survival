@@ -21,6 +21,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -38,6 +39,7 @@ public class DamageServiceImpl implements DamageService {
     private final SchedulerHelper scheduler;
     private final Logger logger;
     private final Map<Integer, DamageData.DamageRecord> pendingDamage = new ConcurrentHashMap<>();
+    private final AtomicInteger temporaryIds = new AtomicInteger(-1);
     private BukkitTask restoreTask = null;
     private RepairService repairService = null;
 
@@ -119,36 +121,7 @@ public class DamageServiceImpl implements DamageService {
         long now = System.currentTimeMillis();
         long restoreTime = now + getRestoreDelayMs(districtId);
 
-        String sql = "INSERT INTO temporary_damage (district_id, world, x, y, z, original_block, original_block_data, " +
-                     "damage_type, actor_uuid, timestamp, scheduled_restore) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, 'BREAK', ?, ?, ?)";
-        try (Connection conn = plugin.getDatabase().getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, districtId);
-            ps.setString(2, block.getWorld().getName());
-            ps.setInt(3, block.getX());
-            ps.setInt(4, block.getY());
-            ps.setInt(5, block.getZ());
-            ps.setString(6, original.name());
-            ps.setString(7, blockDataStr);
-            ps.setString(8, actorUuid.toString());
-            ps.setLong(9, now);
-            ps.setLong(10, restoreTime);
-            ps.executeUpdate();
-
-            ResultSet keys = ps.getGeneratedKeys();
-            if (keys.next()) {
-                int id = keys.getInt(1);
-                var record = new DamageData.DamageRecord(id, districtId, block.getWorld().getName(),
-                    block.getX(), block.getY(), block.getZ(), original, blockDataStr,
-                    DamageData.DamageType.BREAK, actorUuid, now, restoreTime);
-                pendingDamage.put(id, record);
-                return record;
-            }
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to record block break", e);
-        }
-        return null;
+        return queueDamage(districtId,block.getWorld().getName(),block.getX(),block.getY(),block.getZ(),original,blockDataStr,DamageData.DamageType.BREAK,actorUuid,now,restoreTime);
     }
 
     @Override
@@ -173,34 +146,13 @@ public class DamageServiceImpl implements DamageService {
         long now = System.currentTimeMillis();
         long restoreTime = now + getRestoreDelayMs(districtId);
 
-        String sql = "INSERT INTO temporary_damage (district_id, world, x, y, z, original_block, original_block_data, " +
-                     "damage_type, actor_uuid, timestamp, scheduled_restore) " +
-                     "VALUES (?, ?, ?, ?, ?, 'AIR', '', 'PLACE', ?, ?, ?)";
-        try (Connection conn = plugin.getDatabase().getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, districtId);
-            ps.setString(2, block.getWorld().getName());
-            ps.setInt(3, block.getX());
-            ps.setInt(4, block.getY());
-            ps.setInt(5, block.getZ());
-            ps.setString(6, actorUuid.toString());
-            ps.setLong(7, now);
-            ps.setLong(8, restoreTime);
-            ps.executeUpdate();
+        return queueDamage(districtId,block.getWorld().getName(),block.getX(),block.getY(),block.getZ(),Material.AIR,"",DamageData.DamageType.PLACE,actorUuid,now,restoreTime);
+    }
 
-            ResultSet keys = ps.getGeneratedKeys();
-            if (keys.next()) {
-                int id = keys.getInt(1);
-                var record = new DamageData.DamageRecord(id, districtId, block.getWorld().getName(),
-                    block.getX(), block.getY(), block.getZ(), Material.AIR, "",
-                    DamageData.DamageType.PLACE, actorUuid, now, restoreTime);
-                pendingDamage.put(id, record);
-                return record;
-            }
-        } catch (SQLException e) {
-            logger.log(Level.WARNING, "Failed to record block place", e);
-        }
-        return null;
+    private DamageData.DamageRecord queueDamage(int districtId,String world,int x,int y,int z,Material original,String blockData,DamageData.DamageType type,UUID actor,long timestamp,long restoreAt){
+        int temporaryId=temporaryIds.getAndDecrement();var pending=new DamageData.DamageRecord(temporaryId,districtId,world,x,y,z,original,blockData,type,actor,timestamp,restoreAt);pendingDamage.put(temporaryId,pending);
+        plugin.getDatabase().write(connection->{try(PreparedStatement statement=connection.prepareStatement("INSERT INTO temporary_damage(district_id,world,x,y,z,original_block,original_block_data,damage_type,actor_uuid,timestamp,scheduled_restore) VALUES(?,?,?,?,?,?,?,?,?,?,?)",java.sql.Statement.RETURN_GENERATED_KEYS)){statement.setInt(1,districtId);statement.setString(2,world);statement.setInt(3,x);statement.setInt(4,y);statement.setInt(5,z);statement.setString(6,original.name());statement.setString(7,blockData);statement.setString(8,type.name());statement.setString(9,actor.toString());statement.setLong(10,timestamp);statement.setLong(11,restoreAt);statement.executeUpdate();try(ResultSet keys=statement.getGeneratedKeys()){if(!keys.next())throw new SQLException("Damage insert returned no id");return keys.getInt(1);}}}).whenComplete((id,failure)->{pendingDamage.remove(temporaryId);if(failure!=null)logger.log(Level.WARNING,"Failed to persist temporary damage",failure);else pendingDamage.put(id,new DamageData.DamageRecord(id,districtId,world,x,y,z,original,blockData,type,actor,timestamp,restoreAt));});
+        return pending;
     }
 
     @Override
