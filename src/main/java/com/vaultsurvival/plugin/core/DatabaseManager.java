@@ -24,7 +24,7 @@ public class DatabaseManager {
     private String dbUrl;
     private DatabaseExecutor executor;
     private int busyTimeoutMillis = 5000;
-    private static final long LATEST_MIGRATION = 2026071204L;
+    private static final long LATEST_MIGRATION = 2026071205L;
 
     public DatabaseManager(Logger logger, File dataFolder) {
         this.logger = logger;
@@ -969,10 +969,12 @@ public class DatabaseManager {
             statement.execute("CREATE TABLE IF NOT EXISTS district_facility_levels(district_id INTEGER NOT NULL,facility_type TEXT NOT NULL,level INTEGER NOT NULL DEFAULT 0,updated_at INTEGER NOT NULL,updated_by TEXT,last_transaction_uuid TEXT,PRIMARY KEY(district_id,facility_type))");
             statement.execute("CREATE TABLE IF NOT EXISTS district_farms(id INTEGER PRIMARY KEY AUTOINCREMENT,district_id INTEGER NOT NULL,name TEXT NOT NULL,farm_type TEXT NOT NULL,world TEXT NOT NULL,min_x INTEGER NOT NULL,min_y INTEGER NOT NULL,min_z INTEGER NOT NULL,max_x INTEGER NOT NULL,max_y INTEGER NOT NULL,max_z INTEGER NOT NULL,level INTEGER NOT NULL DEFAULT 1,output_world TEXT,output_x INTEGER,output_y INTEGER,output_z INTEGER,created_by TEXT NOT NULL,created_at INTEGER NOT NULL,UNIQUE(district_id,name))");
             statement.execute("CREATE TABLE IF NOT EXISTS district_farm_workers(id INTEGER PRIMARY KEY AUTOINCREMENT,farm_id INTEGER NOT NULL,npc_id INTEGER NOT NULL,placed_by TEXT NOT NULL,placed_at INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'ACTIVE',total_output INTEGER NOT NULL DEFAULT 0,last_run_at INTEGER,UNIQUE(npc_id))");
+            ensureColumn(connection,"district_farms","input_world","TEXT");ensureColumn(connection,"district_farms","input_x","INTEGER");ensureColumn(connection,"district_farms","input_y","INTEGER");ensureColumn(connection,"district_farms","input_z","INTEGER");
+            ensureColumn(connection,"district_farm_workers","work_world","TEXT");ensureColumn(connection,"district_farm_workers","min_x","INTEGER");ensureColumn(connection,"district_farm_workers","min_y","INTEGER");ensureColumn(connection,"district_farm_workers","min_z","INTEGER");ensureColumn(connection,"district_farm_workers","max_x","INTEGER");ensureColumn(connection,"district_farm_workers","max_y","INTEGER");ensureColumn(connection,"district_farm_workers","max_z","INTEGER");
             statement.execute("CREATE INDEX IF NOT EXISTS idx_district_farms_district ON district_farms(district_id,farm_type)");
             statement.execute("UPDATE npcs SET action_type='TOWN_CLERK',action_data='DISTRICT:'||(SELECT district_id FROM district_npc_plans WHERE npc_id=npcs.id) WHERE id IN (SELECT npc_id FROM district_npc_plans WHERE npc_type='CLERK' AND npc_id IS NOT NULL)");
             try (PreparedStatement insert = connection.prepareStatement("INSERT INTO schema_migrations(version,name,applied_at) VALUES(?,?,?)")) {
-                insert.setLong(1, LATEST_MIGRATION); insert.setString(2, "district_founding_facilities_and_farms"); insert.setLong(3, System.currentTimeMillis()); insert.executeUpdate();
+                insert.setLong(1, LATEST_MIGRATION); insert.setString(2, "district_farm_inputs_workers_and_station_clerks"); insert.setLong(3, System.currentTimeMillis()); insert.executeUpdate();
             }
             connection.commit();
         } catch (SQLException failure) {

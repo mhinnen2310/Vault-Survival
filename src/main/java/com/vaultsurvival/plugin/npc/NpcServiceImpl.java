@@ -604,6 +604,15 @@ public class NpcServiceImpl implements NpcService {
                 try { plugin.getServiceRegistry().get(com.vaultsurvival.plugin.districts.TownClerkNpcHandler.class).handle(player,npc.getActionData()); }
                 catch (RuntimeException invalid) { player.sendMessage(fmt.error("This Town Clerk is not configured safely.")); plugin.getLogger().warning("Rejected Town Clerk NPC #"+npc.getId()+": "+invalid.getMessage()); }
             }
+            case RAIL_TICKET -> {
+                try {
+                    int stationId = Integer.parseInt(npc.getActionData());
+                    var station = plugin.getServiceRegistry().get(com.vaultsurvival.plugin.rail.RailService.class).getStation(stationId);
+                    if (station == null || station.getStatus() != com.vaultsurvival.plugin.rail.RailData.StationStatus.ACTIVE) {
+                        player.sendMessage(fmt.error("This station is not open for ticket sales."));
+                    } else player.performCommand("vsmenu rail.ticket");
+                } catch (RuntimeException invalid) { player.sendMessage(fmt.error("This ticket clerk is not configured safely.")); }
+            }
             case NONE -> {
                 // Do nothing — decoration NPC
             }

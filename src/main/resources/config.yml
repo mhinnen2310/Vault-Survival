@@ -2,7 +2,7 @@
 # Vault Survival configuration
 # =============================================================================
 # Configuration version used by future migrations. Do not change manually.
-configVersion: 8
+configVersion: 9
 
 # Reload-safe settings can be applied with /vs reload. World, database, command,
 # schematic, and module lifecycle changes should be followed by a full restart.
@@ -333,6 +333,8 @@ districtFacilities:
     upgradeCosts: [5000, 12500, 30000, 70000, 150000]
   auction_house:
     upgradeCosts: [25000, 60000, 125000, 250000, 500000]
+  farm:
+    upgradeCosts: [5000, 15000, 40000, 90000, 180000]
 
 # Farmer role automation. All world/entity/inventory work runs on the Paper
 # main thread. Workers never load chunks; farms pause while their chunks or
@@ -360,9 +362,15 @@ districtFarms:
     # The selected chest/barrel must be this close to the farm cuboid.
     # Full output containers safely pause harvesting/slaughter; items are not discarded.
     maxDistanceBlocks: 16
+  inputChest:
+    # Supply chest used for animal breeding feed and future farm consumables.
+    maxDistanceBlocks: 16
   animals:
     # Workers never kill babies and preserve this many adults per species.
     minimumAdultsPerSpecies: 4
+    # Animal workers consume this item from the input chest per breeding action.
+    breedingItem: WHEAT
+    breedingItemPerPair: 2
 
 districtLaws:
   # Maximum simultaneous pending changes per district. Existing pending values can still be edited.
@@ -456,6 +464,9 @@ market:
 
 rail:
   enabled: true
+  stationNpc:
+    # Skin username used for mayor-placed station ticket clerks.
+    skin: Conductor
   defaultTicketPrice: 100
   # Upper bound used by the native station ticket-price form.
   maxTicketPrice: 1000000

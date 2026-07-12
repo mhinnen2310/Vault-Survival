@@ -35,7 +35,7 @@ public final class TownClerkService {
             items.add(DialogMenuItem.item("Laws & Settings","Edit readable laws and district settings.","vsmenu district.laws",null,Material.LECTERN));
             items.add(DialogMenuItem.item("Set District Home","Set the shared district teleport point.","district sethome",null,Material.RESPAWN_ANCHOR));
             items.add(DialogMenuItem.item("Restricted Land","Create and manage role/player access areas.","district restricted list",null,Material.IRON_DOOR));
-            items.add(DialogMenuItem.item("Farms & Workers","Create crop/animal zones, output chests and level-limited worker NPCs.","vsmenu action district_farms",null,Material.WHEAT));
+            items.add(DialogMenuItem.item("Farms & Workers","Mayor defines farm zones; farmers configure worker areas and supply/output chests.","vsmenu action district_farms",null,Material.WHEAT));
             items.add(DialogMenuItem.item("Treasury","Manage the physical upgrade treasury.","vsmenu district.treasury",null,Material.GOLD_BLOCK));
         }
         items.add(DialogMenuItem.item("Close","Close the clerk.","vsmenu close",null,Material.BARRIER));

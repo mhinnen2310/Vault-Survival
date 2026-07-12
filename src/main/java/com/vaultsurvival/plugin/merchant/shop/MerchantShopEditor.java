@@ -56,6 +56,7 @@ public final class MerchantShopEditor implements Listener {
     public void click(InventoryClickEvent event) {
         if (!(event.getInventory().getHolder() instanceof EditorHolder holder) || !(event.getWhoClicked() instanceof Player player)) return;
         if (!holder.owner.equals(player.getUniqueId())) { event.setCancelled(true); return; }
+        if(holder.processing){event.setCancelled(true);return;}
         int raw = event.getRawSlot();
         if (raw >= 45 && raw < 54) {
             event.setCancelled(true);
@@ -69,11 +70,12 @@ public final class MerchantShopEditor implements Listener {
             event.setCancelled(true);
             ItemStack cursor = event.getCursor();
             if (cursor != null && !cursor.getType().isAir()) {
+                holder.processing=true;
                 ItemStack deposit = cursor.clone();
                 if (service.depositEditorStack(player, holder.shopId, raw, deposit)) {
                     event.setCursor(null);
                     Bukkit.getScheduler().runTask(plugin, () -> service.openShopEditor(player, holder.shopId));
-                }
+                } else holder.processing=false;
                 return;
             }
             MerchantShopData.ShopItem row = service.getShopItems(holder.shopId).stream()
@@ -81,6 +83,7 @@ public final class MerchantShopEditor implements Listener {
             if (row == null) return;
             player.closeInventory();
             if (event.isRightClick()) {
+                holder.processing=true;
                 service.removeStock(player, holder.shopId, raw, row.getStock());
                 Bukkit.getScheduler().runTask(plugin, () -> service.openShopEditor(player, holder.shopId));
             } else {
@@ -95,10 +98,11 @@ public final class MerchantShopEditor implements Listener {
             int slot = firstSlot(holder.shopId, clicked);
             if (slot < 0) { player.sendMessage(plugin.getMessageFormatter().error("The shop editor is full.")); return; }
             ItemStack deposit = clicked.clone();
+            holder.processing=true;
             if (service.depositEditorStack(player, holder.shopId, slot, deposit)) {
                 event.setCurrentItem(null);
                 Bukkit.getScheduler().runTask(plugin, () -> service.openShopEditor(player, holder.shopId));
-            }
+            } else holder.processing=false;
         }
     }
 
@@ -130,7 +134,7 @@ public final class MerchantShopEditor implements Listener {
     }
 
     private static final class EditorHolder implements InventoryHolder {
-        private final int shopId; private final java.util.UUID owner; private Inventory inventory;
+        private final int shopId; private final java.util.UUID owner; private Inventory inventory; private boolean processing;
         private EditorHolder(int shopId, java.util.UUID owner) { this.shopId = shopId; this.owner = owner; }
         @Override public Inventory getInventory() { return inventory; }
     }

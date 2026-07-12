@@ -350,12 +350,9 @@ public class MerchantShopServiceImpl implements MerchantShopService {
             try {
                 int newStock = shopItem.getStock() - toRemove;
                 if (newStock <= 0) {
-                    plugin.getDatabase().executeUpdate(
-                        "DELETE FROM merchant_shop_items WHERE id = ?", shopItem.getId());
+                    try(PreparedStatement delete=conn.prepareStatement("DELETE FROM merchant_shop_items WHERE id=? AND stock=?")){delete.setInt(1,shopItem.getId());delete.setInt(2,shopItem.getStock());if(delete.executeUpdate()!=1)throw new SQLException("Shop stock changed; refresh and try again");}
                 } else {
-                    plugin.getDatabase().executeUpdate(
-                        "UPDATE merchant_shop_items SET stock = ? WHERE id = ?",
-                        newStock, shopItem.getId());
+                    try(PreparedStatement update=conn.prepareStatement("UPDATE merchant_shop_items SET stock=? WHERE id=? AND stock=?")){update.setInt(1,newStock);update.setInt(2,shopItem.getId());update.setInt(3,shopItem.getStock());if(update.executeUpdate()!=1)throw new SQLException("Shop stock changed; refresh and try again");}
                 }
                 conn.commit();
             } catch (SQLException e) {

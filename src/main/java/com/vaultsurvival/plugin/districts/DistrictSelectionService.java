@@ -135,8 +135,10 @@ public final class DistrictSelectionService implements Listener {
     }
 
     public void startFarm(Player player,String farmName,DistrictFarmService.FarmType farmType){
-        DistrictData.District district=districts.getPlayerDistrict(player.getUniqueId());DistrictData.BlockClaim claim=district==null?null:districts.getClaim(district.getId());if(district==null||claim==null||!(district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.FARMER)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.MAYOR)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.CO_MAYOR))){player.sendMessage(fmt.error("Requires FARMER, MAYOR, or CO_MAYOR in a claimed district."));return;}long limit=Math.max(1,(long)Math.floor(claim.areaBlocks()*plugin.getConfigManager().getConfig().getDouble("districtFarms.maxPercentOfDistrict",0.25)));Selection selection=new Selection(farmName,claim.worldName(),false,null,limit,null,null,-1,false);selection.farmDistrict=district;selection.farmType=farmType;startOwnedSelection(player,selection,"Exact "+farmType.name().toLowerCase()+" farm cuboid selection started","/district farm confirm");
+        DistrictData.District district=districts.getPlayerDistrict(player.getUniqueId());DistrictData.BlockClaim claim=district==null?null:districts.getClaim(district.getId());if(district==null||claim==null||!(district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.MAYOR)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.CO_MAYOR))){player.sendMessage(fmt.error("Only MAYOR or CO_MAYOR can designate district farm zones at the Town Clerk."));return;}long limit=Math.max(1,(long)Math.floor(claim.areaBlocks()*plugin.getConfigManager().getConfig().getDouble("districtFarms.maxPercentOfDistrict",0.25)));Selection selection=new Selection(farmName,claim.worldName(),false,null,limit,null,null,-1,false);selection.farmDistrict=district;selection.farmType=farmType;startOwnedSelection(player,selection,"Exact "+farmType.name().toLowerCase()+" district farm-zone selection started","/district farm confirm");
     }
+
+    public void startFarmWorker(Player player,int farmId,String skin){DistrictData.District district=districts.getPlayerDistrict(player.getUniqueId());DistrictFarmService.Farm farm=plugin.getServiceRegistry().get(DistrictFarmService.class).get(farmId);if(district==null||farm==null||farm.districtId!=district.getId()||!(district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.FARMER)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.MAYOR)||district.hasRole(player.getUniqueId(),DistrictData.DistrictRole.CO_MAYOR))){player.sendMessage(fmt.error("Requires FARMER, MAYOR, or CO_MAYOR and a farm zone in your district."));return;}Selection selection=new Selection(farm.name,farm.zone.world(),false,null,DistrictFarmRules.footprint(farm.zone),null,null,-1,false);selection.farmDistrict=district;selection.workerFarmId=farmId;selection.workerSkin=skin;startOwnedSelection(player,selection,"Select the exact surface this worker must maintain","/district farm confirm");}
 
     public void startSpawnCityClaim(Player player) {
         if (!player.hasPermission("vaultsurvival.spawncity.admin")) { player.sendMessage(fmt.permissionDenied()); return; }
@@ -214,7 +216,11 @@ public final class DistrictSelectionService implements Listener {
         if(selection.foundingPetitionUuid!=null){
             plugin.getServiceRegistry().get(DistrictFoundingService.class).attachClaim(player,selection.foundingPetitionUuid,claim).whenComplete((petition,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(failure!=null){player.sendMessage(fmt.error(failure.getMessage()==null?"The founding claim could not be saved.":failure.getMessage()));return;}selections.remove(player.getUniqueId());removeWands(player);visualization.hide(player.getUniqueId());if(plugin.getServiceRegistry().has(DialogService.class))plugin.getServiceRegistry().get(TownClerkService.class).open(player,TownClerkContext.SPAWN_CITY,null);}));return;
         }
-        if(selection.isFarm()){
+        if(selection.isFarmWorker()){
+            var zone=new DistrictFarmService.FarmZone(selection.worldName,Math.min(selection.pos1.x,selection.pos2.x),Math.min(selection.pos1.y,selection.pos2.y),Math.min(selection.pos1.z,selection.pos2.z),Math.max(selection.pos1.x,selection.pos2.x),Math.max(selection.pos1.y,selection.pos2.y),Math.max(selection.pos1.z,selection.pos2.z));
+            plugin.getServiceRegistry().get(DistrictFarmService.class).placeWorker(player,selection.workerFarmId,zone,player.getLocation(),selection.workerSkin).whenComplete((npc,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(failure!=null){player.sendMessage(fmt.error(failure.getMessage()==null?"Worker could not be placed.":failure.getMessage()));return;}selections.remove(player.getUniqueId());removeWands(player);visualization.hide(player.getUniqueId());player.sendMessage(fmt.success("Worker NPC #"+npc+" placed for the selected surface. Link input and output chests in the farm menu."));}));return;
+        }
+        if(selection.isFarmZone()){
             var zone=new DistrictFarmService.FarmZone(selection.worldName,Math.min(selection.pos1.x,selection.pos2.x),Math.min(selection.pos1.y,selection.pos2.y),Math.min(selection.pos1.z,selection.pos2.z),Math.max(selection.pos1.x,selection.pos2.x),Math.max(selection.pos1.y,selection.pos2.y),Math.max(selection.pos1.z,selection.pos2.z));
             plugin.getServiceRegistry().get(DistrictFarmService.class).create(player,selection.name,selection.farmType,zone).whenComplete((farm,failure)->Bukkit.getScheduler().runTask(plugin,()->{if(failure!=null){player.sendMessage(fmt.error(failure.getMessage()==null?"Farm could not be saved.":failure.getMessage()));return;}selections.remove(player.getUniqueId());removeWands(player);visualization.hide(player.getUniqueId());player.sendMessage(fmt.success("Farm #"+farm.id+" created. Select its output container next."));}));return;
         }
@@ -560,6 +566,8 @@ public final class DistrictSelectionService implements Listener {
         private UUID foundingPetitionUuid;
         private DistrictData.District farmDistrict;
         private DistrictFarmService.FarmType farmType;
+        private int workerFarmId=-1;
+        private String workerSkin;
         private BlockPoint pos1;
         private BlockPoint pos2;
         private long lastTouched = System.currentTimeMillis();
@@ -583,6 +591,8 @@ public final class DistrictSelectionService implements Listener {
         private boolean isSpawnCityClaim() { return spawnCityClaim; }
         private boolean isRestrictedLand() { return restrictedDistrict != null; }
         private boolean isFarm(){return farmDistrict!=null;}
+        private boolean isFarmWorker(){return workerFarmId>=0;}
+        private boolean isFarmZone(){return farmDistrict!=null&&workerFarmId<0;}
         private DistrictData.District ownerDistrict() { return marketDistrict != null ? marketDistrict : stationDistrict != null ? stationDistrict : restrictedDistrict!=null?restrictedDistrict:farmDistrict; }
     }
 }
